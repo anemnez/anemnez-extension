@@ -4,7 +4,7 @@ The open contract an Anemnez extension is written against.
 
 An extension offers three things:
 
-- **Calls**: its own gRPC proto, with the options in `proto/anemnez/extension/v1/options.proto` on
+- **Calls**: its own gRPC proto, with the options in `crates/anemnez-extension/proto/anemnez/extension/v1/options.proto` on
   each method (what it does, who may call it, whether it writes, how its results come back).
 - **Events**: one resumable stream, `Events(after, kinds?)`.
 - **Health**: `Health/Get`, state with parts, and the events cursor it is true as of.

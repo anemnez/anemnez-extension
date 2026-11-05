@@ -9,7 +9,7 @@
 >
 > Moved verbatim from anemnez-service `PRODUCT.md` §6 (D, 2026-11-05, for substrate UNIFIED_PROTOCOL
 > B9; agreed with B, C, E, H, I), with its proto package renamed once: `anemnez.fabric.product.v1`
-> → `anemnez.extension.v1`. The protos are in `proto/anemnez/extension/v1/`; the crate's plain Rust
+> → `anemnez.extension.v1`. The protos are in `crates/anemnez-extension/proto/anemnez/extension/v1/`; the crate's plain Rust
 > types are held to them name for name.
 
 Claims are marked `<!-- claim: … -->`. A claim is owed until a named test speaks for it
@@ -33,7 +33,7 @@ served by the product itself: `anemnez.extension.v1.Describe/Get` on the instanc
 outside a caller's range is refused at connect with both versions named, never called. Discovery's
 `Instances` record carries the descriptor's SHA-256, so a caller re-fetches only when it changes.
 
-**The options layer** (`anemnez.extension.v1`, `proto/anemnez/extension/v1/options.proto`), per method:
+**The options layer** (`anemnez.extension.v1`, `crates/anemnez-extension/proto/anemnez/extension/v1/options.proto`), per method:
 
 | Option | Values | Means |
 |---|---|---|
