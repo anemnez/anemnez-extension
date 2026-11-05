@@ -1,0 +1,26 @@
+// An extension's events: one stream, one cursor space, resumable, filtered by kind
+// (docs/specs/CONTRACT.md, #a-product-pushes-events-as-a-stream-it-serves).
+syntax = "proto3";
+
+package anemnez.extension.v1;
+
+service Events {
+  // Ends with a retryable `expired` at the caller's principal token's expiry, and refuses an
+  // instance-scoped cursor issued elsewhere with `cursor-not-mine`.
+  rpc Events(EventsRequest) returns (stream Event);
+}
+
+message EventsRequest {
+  // The last cursor the caller saw; empty for the head.
+  string after = 1;
+  // The kinds wanted; empty for every kind.
+  repeated string kinds = 2;
+}
+
+message Event {
+  string cursor = 1;
+  // A kind the extension declares in its proto ("health" is one).
+  string kind = 2;
+  // The event, encoded as the declared kind's message. Never a secret's value.
+  bytes payload = 3;
+}

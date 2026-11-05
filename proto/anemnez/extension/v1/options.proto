@@ -1,0 +1,129 @@
+// The options an extension writes on its own proto's methods and services, so its descriptor says
+// what each method is for, who may call it and how its results come back (docs/specs/CONTRACT.md,
+// #a-product-describes-itself-from-its-idl). Moved from anemnez-service PRODUCT.md §6, where it was
+// `anemnez.fabric.product.v1.options`.
+syntax = "proto3";
+
+package anemnez.extension.v1;
+
+import "google/protobuf/descriptor.proto";
+
+// Written on every method an extension offers.
+message MethodOptions {
+  // What the method does, written for the agent that calls it.
+  string description = 1;
+  Result result = 2;
+  Effect effect = 3;
+  Route route = 4;
+  // The act is a person's: the caller's grant must be Ask-gated.
+  bool person_act = 5;
+  Presence presence = 6;
+  // Required: every method states one. A person_act method may not say ALLOW.
+  Permission permission = 7;
+  // Required: nothing gets an agent face by omission.
+  Callers callers = 8;
+  Session session = 9;
+}
+
+// How a method's result comes back. A collection is a cursor or capped; never unbounded.
+message Result {
+  oneof shape {
+    Cursor cursor = 1;
+    uint32 bound = 2;
+    One one = 3;
+  }
+  message Cursor {}
+  message One {}
+}
+
+enum Effect {
+  EFFECT_UNSPECIFIED = 0;
+  READ = 1;
+  WRITE = 2;
+}
+
+// Where a call goes. Default local-first.
+message Route {
+  oneof to {
+    // The instance leading this election group.
+    string leader = 1;
+    LocalFirst local_first = 2;
+    Any any = 3;
+  }
+  message LocalFirst {}
+  message Any {}
+}
+
+// How prominently a caller's tool surface lists the method.
+enum Presence {
+  PRESENCE_UNSPECIFIED = 0;
+  FULL = 1;
+  MINIMAL = 2;
+  INDEX = 3;
+  HIDDEN = 4;
+}
+
+// The extension's suggested permission, read by an agent with no grant of its own for the method.
+enum Permission {
+  PERMISSION_UNSPECIFIED = 0;
+  ALLOW = 1;
+  ASK = 2;
+  DENY = 3;
+}
+
+// Who may call the method. Only AGENT methods get an agent face (Lua, MCP).
+enum Callers {
+  CALLERS_UNSPECIFIED = 0;
+  AGENT = 1;
+  PRODUCT = 2;
+  OWNER = 3;
+}
+
+// For state that outlives one call: OPENS answers a session id, WITHIN and CLOSES take it.
+enum Session {
+  SESSION_UNSPECIFIED = 0;
+  OPENS = 1;
+  WITHIN = 2;
+  CLOSES = 3;
+}
+
+// Written on the extension's service.
+message ServiceOptions {
+  // The contract this service offers, and its version (semver): the namespace agents see.
+  string contract = 1;
+  string version = 2;
+  CursorScope cursor_scope = 3;
+  // How deep health parts nest.
+  uint32 parts_depth = 4;
+}
+
+enum CursorScope {
+  CURSOR_SCOPE_UNSPECIFIED = 0;
+  // The events are replicated: a cursor resumes at any instance.
+  SWARM = 1;
+  // A cursor carries its issuing instance and is refused elsewhere, cursor-not-mine.
+  INSTANCE = 2;
+}
+
+// Field numbers in the range proto reserves for extensions.
+extend google.protobuf.MethodOptions {
+  MethodOptions anemnez_method = 51701;
+}
+
+extend google.protobuf.ServiceOptions {
+  ServiceOptions anemnez_service = 51702;
+}
+
+// The descriptor, served by the extension itself.
+service Describe {
+  rpc Get(DescribeRequest) returns (DescribeReply);
+}
+
+message DescribeRequest {}
+
+message DescribeReply {
+  // The extension's FileDescriptorSet, encoded.
+  bytes file_descriptor_set = 1;
+  // Its SHA-256, so a caller re-fetches only when it changes.
+  string digest = 2;
+}
