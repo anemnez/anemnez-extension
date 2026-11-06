@@ -55,7 +55,11 @@ proto like a method, and no payload ever carries a secret's value (Ladon's redac
 descriptor declares `cursor_scope`: `swarm` (the events are replicated, so a cursor resumes at any
 instance) or `instance` (a cursor carries its issuing instance and is refused elsewhere by name,
 `cursor-not-mine`; the subscriber starts fresh at the new instance and surfaces the gap to its owner,
-never papers over it) (I, B). A stream's principal is checked when it opens, and the product ends it at
+never papers over it) (I, B). An instance-scoped cursor also names the instance's boot (K's Typhon:
+`<inst8>.<boot>:<seq>`), so a cursor from before a restart, whose sequence the restart reset, is
+`cursor-not-mine` too, never silently resumed. Two more refusals end a stream, each surfaced, never
+silent: `out-of-range`, a cursor older than what is kept (start fresh at the head), and `data-loss`, a
+subscriber fallen behind the live stream (resubscribe from the last cursor seen). A stream's principal is checked when it opens, and the product ends it at
 that token's expiry with a retryable `expired`; the subscriber re-mints and resumes from its cursor. A
 caller subscribes to the products it is granted; across hosts the stream rides Fabric's stream brokering
 (fabric SWARM.md `#fabric-brokers-streams-not-protocols`).

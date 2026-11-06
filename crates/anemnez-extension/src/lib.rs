@@ -55,6 +55,12 @@ pub mod refusal {
     pub const CURSOR_NOT_MINE: &str = "cursor-not-mine";
     /// The stream's principal token ran out: re-mint, and resume from the last cursor.
     pub const EXPIRED: &str = "expired";
+    /// The cursor is older than what the extension still keeps: start fresh at the head, and
+    /// surface the gap to the subscriber's owner, never paper over it.
+    pub const OUT_OF_RANGE: &str = "out-of-range";
+    /// The subscriber fell behind the live stream and events were dropped: the stream ends with this,
+    /// never silently; resubscribe from the last cursor seen and surface the gap.
+    pub const DATA_LOSS: &str = "data-loss";
 }
 
 /// Where a call's principal token rides (CONTRACT.md `#every-call-carries-its-callers-principal`).
