@@ -69,6 +69,23 @@ pub mod principal {
     pub const GRPC_METADATA_KEY: &str = "anemnez-principal";
     /// The MCP `_meta` path: `_meta.anemnez.principal`.
     pub const MCP_META_PATH: [&str; 2] = ["anemnez", "principal"];
+
+    /// The clock skew every party allows, at both ends of a window: one swarm-wide value
+    /// (CONTRACT.md `#one-skew-for-the-swarm`; substrate `docs/specs/PRINCIPAL_TOKEN.md`).
+    pub const SKEW_MS: u64 = 30_000;
+
+    /// The longest a principal token may live: `expires - issued` never exceeds it.
+    pub const MAX_TTL_MS: u64 = 300_000;
+
+    #[cfg(test)]
+    mod tests {
+        /// The values PRINCIPAL_TOKEN.md names, and the skew a small part of the life it guards.
+        #[test]
+        fn the_token_windows_are_the_specs() {
+            assert_eq!((super::SKEW_MS, super::MAX_TTL_MS), (30_000, 300_000));
+            const { assert!(super::SKEW_MS * 4 < super::MAX_TTL_MS) };
+        }
+    }
 }
 
 #[cfg(test)]

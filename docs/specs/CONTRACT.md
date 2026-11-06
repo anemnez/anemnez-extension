@@ -84,3 +84,12 @@ own data. On gRPC it rides the metadata key `anemnez-principal`; over MCP, `_met
 address, the Substrate id, the expiry and the token's digest.
 
 First adopter: Herald (E), whose descriptor's acts and queue reads route `leader(herald)`.
+
+<!-- claim: one-skew-for-the-swarm -->
+**One skew for the swarm, and one token life** (B, J, 2026-11-06). The crate exports
+`principal::SKEW_MS = 30_000` and `principal::MAX_TTL_MS = 300_000`, the two constants substrate's
+`docs/specs/PRINCIPAL_TOKEN.md` derives every window from: a token is not yet valid past
+`issued + SKEW`, expired past `expires + SKEW` or when `expires - issued > MAX_TTL`, and a nonce is
+held for `MAX_TTL + SKEW`. Anything else in the swarm that compares one host's clock with another's
+(lanes' claim expiry, the consent engine's `skew_ms`) reads the same `SKEW_MS` rather than a literal
+of its own, so one value is reasoned about everywhere. Changing either is a contract change.
