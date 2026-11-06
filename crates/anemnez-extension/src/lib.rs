@@ -10,6 +10,7 @@
 
 pub mod health;
 pub mod options;
+pub mod signed;
 
 /// The proto files, for a build that compiles them (`prost`, `tonic`) or a tool that reads them.
 pub mod protos {
