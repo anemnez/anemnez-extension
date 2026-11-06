@@ -91,3 +91,20 @@ fn the_protos_are_the_extension_package() {
         );
     }
 }
+
+#[test]
+fn every_proto_is_written_where_its_import_names_it() {
+    let root =
+        std::env::temp_dir().join(format!("anemnez-extension-protos-{}", std::process::id()));
+    drop(std::fs::remove_dir_all(&root));
+    protos::write_all(&root).expect("written");
+    for (path, text) in protos::FILES {
+        assert_eq!(
+            std::fs::read_to_string(root.join(path)).expect("read"),
+            text,
+            "{path}"
+        );
+    }
+    protos::write_all(&root).expect("idempotent");
+    drop(std::fs::remove_dir_all(&root));
+}

@@ -16,6 +16,37 @@ pub mod protos {
     pub const OPTIONS: &str = include_str!("../proto/anemnez/extension/v1/options.proto");
     pub const EVENTS: &str = include_str!("../proto/anemnez/extension/v1/events.proto");
     pub const HEALTH: &str = include_str!("../proto/anemnez/extension/v1/health.proto");
+
+    /// Where each proto sits under an include root, as `import` names it.
+    pub const FILES: [(&str, &str); 3] = [
+        ("anemnez/extension/v1/options.proto", OPTIONS),
+        ("anemnez/extension/v1/events.proto", EVENTS),
+        ("anemnez/extension/v1/health.proto", HEALTH),
+    ];
+
+    /// Write every proto under `root` (`root/anemnez/extension/v1/…`), for a build script that
+    /// compiles an extension's own proto: add `root` as an include path, and the version of this
+    /// crate you depend on IS the contract you compile against, with no copy in your repository.
+    ///
+    /// ```no_run
+    /// // build.rs
+    /// let root = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("proto");
+    /// anemnez_extension::protos::write_all(&root).unwrap();
+    /// // then: tonic_build / prost_build with `root` among the include paths
+    /// ```
+    pub fn write_all(root: &std::path::Path) -> std::io::Result<()> {
+        for (path, text) in FILES {
+            let file = root.join(path);
+            if let Some(dir) = file.parent() {
+                std::fs::create_dir_all(dir)?;
+            }
+            // Written only when different, so a build script does not re-trigger a rebuild.
+            if std::fs::read_to_string(&file).ok().as_deref() != Some(text) {
+                std::fs::write(&file, text)?;
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Named refusals a caller acts on (CONTRACT.md `#a-product-pushes-events-as-a-stream-it-serves`).
