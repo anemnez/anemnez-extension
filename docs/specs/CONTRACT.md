@@ -126,7 +126,9 @@ The kernel crate is pure: types, the protos and the signed framing, with no runt
 lives in a crate of its own, `anemnez-extension-serve`, never a feature of the kernel, because Cargo
 unifies features and one consumer's `serve` would put tokio into every other's kernel build (B). It
 offers a product the contract's three services: a `Journal` behind `Events`, a health `Board` behind
-`Health`, and `Describe` over the product's own `FileDescriptorSet`. A product takes them; it does
+`Health` (it publishes only on a change, removes a part with `remove_part`, and `sync_parts` makes
+the parts exactly a recomputed set in one event, so a product that recomputes its health on a period
+fills the journal with changes, not the period: K), and `Describe` over the product's own `FileDescriptorSet`. A product takes them; it does
 not reimplement them, so every product keeps these rules alike:
 
 <!-- claim: async-stream-never-awaits-a-subscriber -->
