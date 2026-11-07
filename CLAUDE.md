@@ -6,7 +6,8 @@ a public repo). Read `docs/specs/CONTRACT.md` first.
 - **No platform in it.** Nothing here may depend on Fabric, the swarm or launchd; the hosting side is
   anemnez-service's. A test refuses `fabric` in the protos' code.
 - **Two crates, two layers** (substrate `docs/plans/ASYNCIFICATION.md`). `anemnez-extension` is the
-  kernel: pure types, serde and ed25519 only, no runtime, no clock, no private crate.
+  kernel: pure types (serde, ed25519, and prost-types for descriptor checks), no runtime, no clock, no
+  private crate.
   `anemnez-extension-serve` is the async serving face (Events, Health, Describe over tonic); it takes
   an injected `anemnez-clock` `Clock`, private and on Artichoke, which is allowed because both ship
   to Artichoke only (DECISION crates-io-publishing, User 2026-11-07). Never a `serve` feature on the

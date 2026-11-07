@@ -40,12 +40,24 @@ outside a caller's range is refused at connect with both versions named, never c
 | `description` | text | what the method does, written for the agent that calls it; its quality is a proof in the product's gate |
 | `result` | `cursor` \| `bound(n)` \| `one` | a collection is a resumable cursor or capped at n; a descriptor with an unbounded collection is refused at connect |
 | `effect` | `read` \| `write` | whether it changes anything |
-| `route` | `leader(group)` \| `local-first` \| `any` | where a call goes: the instance leading `group` (its election, fabric SWARM.md), this host's instance first, or any instance. Default `local-first` |
+| `route` | `leader(group)` \| `leader(group, key)` \| `local-first` \| `any` | where a call goes: the instance leading `group` (its election, fabric SWARM.md), the instance holding the call's `key` in `group` (one leader per key, resolved through Fabric's lock on every call), this host's instance first, or any instance. Default `local-first` |
 | `person_act` | bool | the act is a person's: the caller's grant must be Ask-gated, and the product refuses it from an agent principal without one |
 | `presence` | `full` \| `minimal` \| `index` \| `hidden` | how prominently a caller's tool surface lists it (Substrate's four tiers, TOOL_GUIDE) |
 | `permission` | `allow` \| `ask` \| `deny`, **required** | the product's suggested permission, which an agent with no grant of its own for this method reads (Substrate's sparse rule; a role reads it closed). No default: every method states one. A `person_act` method may not say `allow`; the descriptor is refused at connect by name if it does |
 | `callers` | `agent` \| `product` \| `owner`, **required** | who may call it, one to one with Ladon's `Caller` (and never confused with a principal token's `audience`, which names the instance that may accept it): only an `agent` method gets an agent face (Substrate's Lua, Agora's MCP); a `product` method is for another product's process (Ladon's value-bearing calls); an `owner` method is a person's CLI. No default, so nothing gets an agent face by omission (G, fabric CONVERGENCE.md §4). The method still checks its caller itself; the face is never the only gate |
 | `session` | `opens` \| `within` \| `closes` | for state that outlives one call (Archetect's prompt sessions, Prova's held topologies): `opens` answers a session id, `within` and `closes` take it. A session belongs to the principal that opened it, and the product ends it when that principal's grant goes (E) |
+
+<!-- claim: a-keyed-route-names-a-string-field -->
+**A keyed route names one string field of the call** (B, D, H, 2026-11-07). `leader(group, key)`
+(`Route.keyed`, beside the unchanged group-only `leader`) routes each call to the instance holding
+that call's key in `group`, so a product like Herald has one leader per repo rather than one for
+everything (`leader("herald-repo", key = "repo")`). At connect, `key` must name a top-level,
+non-repeated string field of the method's input message, or the descriptor is refused by name.
+proto3 has no `required` and nested paths are not supported yet. `options::check_route_key` is that
+one check, pure, for every bridge alike; it answers the field's number too, so a bridge reading wire
+bytes finds the key without decoding the whole call (B). At call time an empty key is refused with
+`no-key` before the call leaves. The bridge resolves the key's holder through Fabric's lock on every
+call and never caches it past one read, so a handoff routes the next call to the new holder (D).
 
 <!-- claim: a-product-pushes-events-as-a-stream-it-serves -->
 **A product's events are one more method it serves**, never a push through Fabric: a server stream

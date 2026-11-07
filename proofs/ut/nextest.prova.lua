@@ -78,3 +78,4 @@ spoken_for("a-stream-ends-at-its-tokens-expiry-on-the-injected-clock", "serve_te
 spoken_for("async-cancelled-only-by-its-owner", "serve_tests::a_dropped_subscriber_cancels_nothing")
 spoken_for("health-is-state-with-parts", "serve_tests::a_watcher_reads_health_then_sees_only_later_changes")
 spoken_for("a-product-pushes-events-as-a-stream-it-serves", "serve_tests::a_foreign_cursor_is_not_mine_and_an_old_one_is_out_of_range")
+spoken_for("a-keyed-route-names-a-string-field", "options::tests::a_keyed_route_names_a_top_level_string_field")

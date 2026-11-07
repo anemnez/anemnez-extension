@@ -49,9 +49,19 @@ message Route {
     string leader = 1;
     LocalFirst local_first = 2;
     Any any = 3;
+    // The instance holding this call's key in the group: one leader per key (Herald's
+    // leader("herald-repo", key = "repo")). The bridge reads the key's value from the call and
+    // resolves its holder through Fabric's lock on every call, never cached past one read.
+    Leader keyed = 4;
   }
   message LocalFirst {}
   message Any {}
+  message Leader {
+    string group = 1;
+    // A top-level string field of the method's input message; checked at connect
+    // (options::check_route_key), and an empty value is refused per call with `no-key`.
+    string key = 2;
+  }
 }
 
 // How prominently a caller's tool surface lists the method.

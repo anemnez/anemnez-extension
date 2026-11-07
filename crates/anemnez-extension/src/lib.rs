@@ -62,6 +62,9 @@ pub mod refusal {
     /// The subscriber fell behind the live stream and events were dropped: the stream ends with this,
     /// never silently; resubscribe from the last cursor seen and surface the gap.
     pub const DATA_LOSS: &str = "data-loss";
+    /// A keyed-route call carried an empty key: refused by the bridge before the call leaves, since
+    /// no holder can be resolved for it.
+    pub const NO_KEY: &str = "no-key";
 }
 
 /// Where a call's principal token rides (CONTRACT.md `#every-call-carries-its-callers-principal`).

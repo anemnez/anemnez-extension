@@ -10,6 +10,8 @@ publish.workspace = true
 [dependencies]
 serde.workspace = true
 ed25519-dalek.workspace = true
+# Descriptor types only (no runtime): the keyed-route check reads a method's input message.
+prost-types.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
