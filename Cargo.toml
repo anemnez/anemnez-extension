@@ -15,6 +15,7 @@ publish = ["artichoke"]
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
 ed25519-dalek = "2"
+base64 = "0.22"
 serde_json = "1"
 
 # The serving face (crates/anemnez-extension-serve): the gRPC stack matches Substrate's and
