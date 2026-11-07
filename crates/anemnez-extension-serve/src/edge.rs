@@ -5,7 +5,7 @@
 //! A disk write is not a quick call, so it never runs on an async worker. ONE writer thread owns the
 //! file, fed by a channel, and each caller awaits a oneshot: one thread regardless of load, in arrival
 //! order (the graph edge's shape, ASYNCIFICATION A1b). The thread group-commits: it takes every record
-//! already queued, appends them, makes them durable with one `sync_data`, and only then answers each.
+//! already queued, appends them, makes them durable with one [`full_sync`], and only then answers each.
 //! A burst of calls costs one fsync, and no call is answered before its nonce is on disk.
 
 use std::collections::HashMap;
@@ -83,7 +83,7 @@ pub(crate) struct Store {
     held: HashMap<(String, [u8; 16]), i64>,
     /// Lines in the file, live or dead: compaction runs when they outnumber the live entries enough.
     lines: usize,
-    /// How many `sync_data` calls it has made, for the group-commit proof.
+    /// How many [`full_sync`] calls it has made, for the group-commit proof.
     pub(crate) syncs: u64,
 }
 
@@ -136,7 +136,7 @@ impl Store {
             let written = self
                 .file
                 .write_all(out.as_bytes())
-                .and_then(|()| self.file.sync_data());
+                .and_then(|()| full_sync(&self.file));
             self.syncs += 1;
             self.lines += out.lines().count();
             if written.is_err() {
@@ -169,15 +169,41 @@ impl Store {
             .map(|(key, until)| line(key, *until))
             .collect();
         out.write_all(body.as_bytes())?;
-        out.sync_data()?;
+        full_sync(&out)?;
         std::fs::rename(&tmp, &self.path)?;
         if let Some(dir) = self.path.parent() {
-            File::open(dir)?.sync_all()?;
+            full_sync(&File::open(dir)?)?;
         }
         self.file = OpenOptions::new().append(true).open(&self.path)?;
         self.lines = self.held.len();
         Ok(())
     }
+}
+
+/// Make a file's writes durable on the DRIVE, not just handed to it (D, 2026-11-07). On macOS
+/// `fsync` (what `sync_data` does) leaves the data in the drive's own write cache, so an answered
+/// nonce could be lost on power loss and its token replayed after a reboot. `F_FULLFSYNC` asks the
+/// drive to flush, as J's raft WAL does; a filesystem that does not support it answers ENOTSUP or
+/// EINVAL, and then `sync_data` is the best there is. With group commit this is one full flush per
+/// batch. A process-abort test cannot see the difference (the page cache survives an abort); this
+/// comment is the reason the call is what it is.
+pub fn full_sync(file: &File) -> io::Result<()> {
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    {
+        use std::os::fd::AsRawFd;
+        // SAFETY: fcntl with F_FULLFSYNC takes only the descriptor, which `file` owns and keeps open
+        // for the duration of the call; it reads and writes no memory of ours.
+        let done = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_FULLFSYNC) };
+        if done != -1 {
+            return Ok(());
+        }
+        let error = io::Error::last_os_error();
+        match error.raw_os_error() {
+            Some(libc::ENOTSUP | libc::EINVAL) => {}
+            _ => return Err(error),
+        }
+    }
+    file.sync_data()
 }
 
 /// One entry: `<issuer hex> <nonce hex> <until_ms>`. The issuer is hex so no character in it can

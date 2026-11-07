@@ -35,6 +35,8 @@ http-body-util = "0.1"
 bytes = "1"
 tower-layer = "0.3"
 tower-service = "0.3"
+# F_FULLFSYNC for the nonce store on macOS (edge::full_sync).
+libc = "0.2"
 tempfile = "3"
 tokio-stream = { version = "0.1", features = ["net"] }
 hyper-util = { version = "0.1", features = ["tokio"] }

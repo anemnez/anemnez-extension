@@ -43,6 +43,7 @@ dependencies = [
  "http",
  "http-body-util",
  "hyper-util",
+ "libc",
  "prost",
  "prost-types",
  "sha2",

@@ -193,3 +193,16 @@ fn an_acknowledged_nonce_survives_an_abort_and_a_reopen() {
         "the acknowledged nonce survived the crash"
     );
 }
+
+/// full_sync flushes a file and a directory on this platform (F_FULLFSYNC on macOS), falling back
+/// only where the filesystem has no full flush.
+#[test]
+fn full_sync_flushes_a_file_and_a_directory() {
+    use std::io::Write;
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let mut file = std::fs::File::create(dir.path().join("x")).expect("creates");
+    file.write_all(b"durable").expect("writes");
+    crate::edge::full_sync(&file).expect("the file flushes");
+    crate::edge::full_sync(&std::fs::File::open(dir.path()).expect("opens the dir"))
+        .expect("the dir flushes");
+}
