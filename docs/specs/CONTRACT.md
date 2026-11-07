@@ -144,6 +144,47 @@ deadline on that clock, read once when it opens (C), so a `ManualClock` test dri
 **A dropped subscriber cancels nothing.** A stream only reads the journal; the product's own work
 never runs inside a handler's future, so a client that disconnects ends its stream and nothing else.
 
+<!-- claim: the-serving-face-runs-the-whole-principal-ladder -->
+**The serving face runs the whole principal ladder** (B, 2026-11-07), so no product skips a step.
+A `Verifier` runs substrate `PRINCIPAL_TOKEN.md` §4 in order: the kernel's stateless steps (1 to 4
+and 7), and the two that need state through what the product hands it, never one without the
+other: `Keys` (steps 5 and 6: the issuer's `fabric.principals` record, its attestation checked
+against a pinned host node) and `Nonces` (step 8,
+the durable set of accepted nonces, held `MAX_TTL + SKEW` past issue). `Events` opens a stream only
+through it, and ends it at the token's expiry as a `Mono` on the injected clock. A gRPC call's body
+digest is SHA-256 of the request message's bytes exactly as received, taken below tonic's codec by
+`DigestLayer` on the token-checked methods, never a re-encoding (D): prost drops unknown fields on
+decode, so a re-encoding would refuse every newer caller the day a message gained a field. A
+compressed frame, or a method served without the layer, is refused `malformed`. Token refusals keep their names as the status message:
+`not-for-you`, `unknown-key`, `expired` and `not-yet-valid`, which a caller may retry with a fresh
+token, are UNAUTHENTICATED; `call-mismatch`, `bad-signature`, `unattested` and `replay`, which are
+never retried, are PERMISSION_DENIED; `malformed` is INVALID_ARGUMENT.
+
+<!-- claim: the-verifier-applies-retired-versus-revoked -->
+**The verifier, not the product, picks the key** (B, D, 2026-11-07; PRINCIPAL_TOKEN §2). `Keys`
+answers the issuer's whole record and `KeyRecord::key_for` applies the rule the same for every
+product. A REVOKED key refuses every token, a backdated one included, since `issued` is signed by
+the key a thief holds. A RETIRED key verifies only a token issued before its `retired_at_secs`. Either
+refusal is `unknown-key`. The record's times are Unix seconds like `issued` (B), named with the unit
+(`made_at_secs`, `retired_at_secs`, `revoked_at_secs`), and a time outside 2020 to 2100 is a unit slip,
+refused `unattested` rather than compared off by a thousand (D).
+
+<!-- claim: a-token-binds-the-bytes-as-received -->
+**A token binds the request bytes as received**, so a request carrying a field the product's build
+does not know still verifies, and a request whose bytes changed in flight is refused `call-mismatch`.
+
+<!-- claim: a-nonce-is-durable-before-the-method-runs -->
+**A nonce is durable before the method runs.** `Verifier::verify` answers only after
+`Nonces::record` has, so a method never runs on a token whose nonce a restart could forget. A product
+supplies a durable store that group-commits (one fsync per batch of a few milliseconds);
+`MemoryNonces` is for tests only.
+
+**The rollout rule** (PRINCIPAL_TOKEN §3, B and D, for every product). A call carrying no token is
+admitted only while `Keys::admit_absent` says so, which holds while some Substrate instance in the
+swarm has no `fabric.principals` record yet. The default is `false`. Each such call is counted by
+method (`Verifier::absent_calls`), for Health and a product's doctor to name. A token that is
+present is always checked in full.
+
 **The refusals reach a caller by name.** A refusal's name is the gRPC status message, under the
 nearest code: `cursor-not-mine` FAILED_PRECONDITION, `out-of-range` OUT_OF_RANGE, `data-loss`
 DATA_LOSS, `expired` UNAUTHENTICATED (retryable: re-mint and resume from the last cursor).

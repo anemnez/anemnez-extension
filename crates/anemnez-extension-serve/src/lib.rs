@@ -16,12 +16,18 @@
 //! [`Clock`]: anemnez_clock::Clock
 
 pub mod describe;
+pub mod digest;
 pub mod health;
 pub mod journal;
+pub mod principal;
 
 pub use describe::Describe;
+pub use digest::{DigestLayer, RequestDigest};
 pub use health::Board;
-pub use journal::{Journal, Refusal, Subscription};
+pub use journal::{EventsService, Journal, Refusal, Subscription};
+pub use principal::{
+    Absent, Admitted, KeyRecord, Keys, MemoryNonces, Nonces, PublishedKey, Verifier,
+};
 
 /// The contract's gRPC types and services, compiled from the kernel crate's protos.
 #[allow(clippy::all, missing_docs)]
@@ -29,5 +35,7 @@ pub mod pb {
     tonic::include_proto!("anemnez.extension.v1");
 }
 
+#[cfg(test)]
+mod principal_tests;
 #[cfg(test)]
 mod serve_tests;

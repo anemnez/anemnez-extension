@@ -227,36 +227,107 @@ async fn describe_answers_the_descriptor_and_its_sha256() {
 /// The refusals reach a gRPC caller by name, over a real socket: the status message IS the
 /// refusal's name, and a stream with a token carries events.
 #[tokio::test(flavor = "multi_thread")]
-#[allow(clippy::result_large_err)] // the expiry hook answers tonic's `Status`
 async fn the_refusals_reach_a_grpc_caller_by_name() {
     use pb::events_client::EventsClient;
-    use pb::events_server::EventsServer;
 
     let (journal, manual) = journal(8);
-    let deadline = far(&manual);
     let service = crate::journal::EventsService::new(
         journal.clone(),
-        move |meta: &tonic::metadata::MetadataMap| {
-            if meta
-                .get(anemnez_extension::principal::GRPC_METADATA_KEY)
-                .is_some()
-            {
-                Ok(deadline)
-            } else {
-                Err(tonic::Status::unauthenticated("no principal"))
-            }
-        },
+        crate::principal_tests::verifier(&manual, false),
     );
+    let (channel, _dir) = events_channel(service, true).await;
+    let mut client = EventsClient::new(channel);
+    // Each request carries its own token, minted over that request's own encoding.
+    let mut nonce = 0u8;
+    let mut request = |after: &str, life: u64| {
+        let message = pb::EventsRequest {
+            after: after.to_owned(),
+            kinds: Vec::new(),
+        };
+        let body = anemnez_extension::principal::grpc_body(&message.encode_to_vec());
+        nonce += 1;
+        let token =
+            crate::principal_tests::mint(&manual, crate::journal::EVENTS_METHOD, body, life, nonce);
+        let mut r = tonic::Request::new(message);
+        r.metadata_mut().insert(
+            anemnez_extension::principal::GRPC_METADATA_KEY,
+            token.parse().expect("ascii"),
+        );
+        r
+    };
+    let refused = client
+        .events(request("e5f6a7b8.boot1:1", 60))
+        .await
+        .expect_err("refused");
+    assert_eq!(
+        (refused.code(), refused.message()),
+        (tonic::Code::FailedPrecondition, "cursor-not-mine")
+    );
+
+    let unsigned = client
+        .events(pb::EventsRequest::default())
+        .await
+        .expect_err("refused");
+    assert_eq!(
+        (unsigned.code(), unsigned.message()),
+        (tonic::Code::InvalidArgument, "malformed")
+    );
+
+    // A token lifted onto another request (a different cursor) is call-mismatch.
+    let mut lifted = request("", 60);
+    *lifted.get_mut() = pb::EventsRequest {
+        after: journal.head(),
+        kinds: Vec::new(),
+    };
+    let mismatch = client.events(lifted).await.expect_err("refused");
+    assert_eq!(
+        (mismatch.code(), mismatch.message()),
+        (tonic::Code::PermissionDenied, "call-mismatch")
+    );
+
+    let mut stream = client
+        .events(request("", 60))
+        .await
+        .expect("opens")
+        .into_inner();
+    let cursor = journal.publish("tick", vec![7]);
+    let event = stream.message().await.expect("reads").expect("an event");
+    assert_eq!((event.cursor, event.payload), (cursor, vec![7]));
+
+    // The stream ends at the token's expiry, a deadline on the injected clock.
+    assert!(
+        manual.until_waiting(1, PARK).await,
+        "the stream parks on its expiry"
+    );
+    manual.advance(Duration::from_secs(60)).await;
+    let ended = stream.message().await.expect_err("ended");
+    assert_eq!(
+        (ended.code(), ended.message()),
+        (tonic::Code::Unauthenticated, "expired")
+    );
+}
+
+/// Serve `service` on a socket in a temp dir, with the request-digest layer or without it, and
+/// answer a channel to it.
+async fn events_channel(
+    service: crate::journal::EventsService,
+    layered: bool,
+) -> (tonic::transport::Channel, tempfile::TempDir) {
+    use pb::events_server::EventsServer;
     let dir = tempfile::tempdir().expect("a temp dir");
     let socket = dir.path().join("events.sock");
     let listener = tokio::net::UnixListener::bind(&socket).expect("binds");
     let incoming = tokio_stream::wrappers::UnixListenerStream::new(listener);
-    tokio::spawn(
-        tonic::transport::Server::builder()
-            .add_service(EventsServer::new(service))
-            .serve_with_incoming(incoming),
-    );
-
+    if layered {
+        let layer = crate::DigestLayer::for_paths([crate::journal::EVENTS_METHOD]);
+        let server = tonic::transport::Server::builder()
+            .layer(layer)
+            .add_service(EventsServer::new(service));
+        tokio::spawn(server.serve_with_incoming(incoming));
+    } else {
+        let server = tonic::transport::Server::builder().add_service(EventsServer::new(service));
+        tokio::spawn(server.serve_with_incoming(incoming));
+    }
     let path = socket.clone();
     let channel = tonic::transport::Endpoint::from_static("http://[::]:50051")
         .connect_with_connector(tower::service_fn(move |_: tonic::transport::Uri| {
@@ -269,40 +340,109 @@ async fn the_refusals_reach_a_grpc_caller_by_name() {
         }))
         .await
         .expect("connects");
-    let mut client = EventsClient::new(channel);
-    let request = |after: &str| {
-        let mut r = tonic::Request::new(pb::EventsRequest {
-            after: after.to_owned(),
-            kinds: Vec::new(),
-        });
-        r.metadata_mut().insert(
-            anemnez_extension::principal::GRPC_METADATA_KEY,
-            "token".parse().expect("ascii"),
-        );
-        r
-    };
+    (channel, dir)
+}
 
-    let refused = client
-        .events(request("e5f6a7b8.boot1:1"))
+/// A newer caller's `EventsRequest`: one field this build does not know.
+#[derive(Clone, PartialEq, prost::Message)]
+struct NewerEventsRequest {
+    #[prost(string, tag = "1")]
+    after: String,
+    #[prost(string, repeated, tag = "2")]
+    kinds: Vec<String>,
+    #[prost(string, tag = "99")]
+    priority: String,
+}
+
+/// The body digest is over the bytes as received (D): a request carrying a field this build does not
+/// know still verifies, so a newer caller works against an older product during a rollout.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_request_with_a_field_this_build_does_not_know_still_verifies() {
+    let (journal, manual) = journal(8);
+    let service = crate::journal::EventsService::new(
+        journal.clone(),
+        crate::principal_tests::verifier(&manual, false),
+    );
+    let (channel, _dir) = events_channel(service, true).await;
+
+    let message = NewerEventsRequest {
+        after: String::new(),
+        kinds: Vec::new(),
+        priority: "high".into(),
+    };
+    let body = anemnez_extension::principal::grpc_body(&message.encode_to_vec());
+    let token = crate::principal_tests::mint(&manual, crate::journal::EVENTS_METHOD, body, 60, 1);
+    let mut request = tonic::Request::new(message);
+    request.metadata_mut().insert(
+        anemnez_extension::principal::GRPC_METADATA_KEY,
+        token.parse().expect("ascii"),
+    );
+
+    let mut grpc = tonic::client::Grpc::new(channel);
+    grpc.ready().await.expect("ready");
+    let codec = tonic::codec::ProstCodec::<NewerEventsRequest, pb::Event>::default();
+    let path = http::uri::PathAndQuery::from_static(crate::journal::EVENTS_METHOD);
+    let mut stream = grpc
+        .server_streaming(request, path, codec)
+        .await
+        .expect("admitted")
+        .into_inner();
+    let cursor = journal.publish("tick", vec![1]);
+    let event = stream.message().await.expect("reads").expect("an event");
+    assert_eq!(event.cursor, cursor);
+}
+
+/// Without the digest layer there is nothing to bind a token to, so the call is refused by name,
+/// never verified against a re-encoding.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_token_checked_method_served_without_the_layer_is_refused() {
+    let (journal, manual) = journal(8);
+    let service = crate::journal::EventsService::new(
+        journal.clone(),
+        crate::principal_tests::verifier(&manual, false),
+    );
+    let (channel, _dir) = events_channel(service, false).await;
+    let message = pb::EventsRequest::default();
+    let body = anemnez_extension::principal::grpc_body(&message.encode_to_vec());
+    let token = crate::principal_tests::mint(&manual, crate::journal::EVENTS_METHOD, body, 60, 1);
+    let mut request = tonic::Request::new(message);
+    request.metadata_mut().insert(
+        anemnez_extension::principal::GRPC_METADATA_KEY,
+        token.parse().expect("ascii"),
+    );
+    let refused = pb::events_client::EventsClient::new(channel)
+        .events(request)
         .await
         .expect_err("refused");
     assert_eq!(
         (refused.code(), refused.message()),
-        (tonic::Code::FailedPrecondition, "cursor-not-mine")
+        (tonic::Code::InvalidArgument, "malformed")
     );
+}
 
-    let unsigned = client
-        .events(pb::EventsRequest::default())
-        .await
-        .expect_err("refused");
-    assert_eq!(unsigned.code(), tonic::Code::Unauthenticated);
-
-    let mut stream = client
-        .events(request(""))
-        .await
-        .expect("opens")
-        .into_inner();
-    let cursor = journal.publish("tick", vec![7]);
-    let event = stream.message().await.expect("reads").expect("an event");
-    assert_eq!((event.cursor, event.payload), (cursor, vec![7]));
+/// One uncompressed frame is digested over its message bytes; anything else is not.
+#[test]
+fn only_one_uncompressed_frame_is_digested() {
+    use sha2::Digest as _;
+    let frame = |flag: u8, message: &[u8]| {
+        let mut out = vec![flag];
+        out.extend_from_slice(&u32::try_from(message.len()).expect("small").to_be_bytes());
+        out.extend_from_slice(message);
+        out
+    };
+    let want: [u8; 32] = sha2::Sha256::digest(b"hello").into();
+    assert_eq!(
+        crate::digest::digest_frame(&frame(0, b"hello")),
+        Some(crate::RequestDigest(want))
+    );
+    assert_eq!(
+        crate::digest::digest_frame(&frame(1, b"hello")),
+        None,
+        "compressed"
+    );
+    let mut two = frame(0, b"a");
+    two.extend(frame(0, b"b"));
+    assert_eq!(crate::digest::digest_frame(&two), None, "two frames");
+    assert_eq!(crate::digest::digest_frame(&[0, 0, 0]), None, "short");
+    assert_eq!(crate::digest::digest_frame(&[]), None, "empty");
 }

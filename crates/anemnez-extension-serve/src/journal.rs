@@ -20,6 +20,7 @@ use futures_util::Stream;
 use tokio::sync::Notify;
 
 use crate::pb;
+use crate::principal::Verifier;
 
 /// Why a subscription is refused, or why its stream ended. Each is a named refusal a caller acts
 /// on; [`Refusal::status`] puts the name in the gRPC status's message.
@@ -253,6 +254,16 @@ impl Subscription {
         })
     }
 
+    /// The subscription as a gRPC response stream: each refusal as its [`Refusal::status`].
+    pub fn into_grpc_stream(
+        self,
+    ) -> impl Stream<Item = Result<pb::Event, tonic::Status>> + Send + 'static {
+        futures_util::stream::unfold(self, |mut sub| async move {
+            let item = sub.next().await?;
+            Some((item.map_err(|r| r.status()), sub))
+        })
+    }
+
     fn read(&mut self) -> Read {
         let ring = self.journal.ring();
         if self.next < ring.first {
@@ -279,21 +290,21 @@ impl Subscription {
     }
 }
 
-/// The contract's `Events` service over a [`Journal`]. `expiry` reads the caller's principal
-/// token from the request's metadata (verifying it is the extension's own job) and answers its
-/// expiry as a deadline on the journal's clock, or the status that refuses the call.
-pub struct EventsService<A> {
+/// The contract's `Events` service over a [`Journal`], each stream opened by a verified principal
+/// token and ended at that token's expiry.
+pub struct EventsService {
     journal: Journal,
-    expiry: A,
+    verifier: Verifier,
 }
 
-impl<A> EventsService<A>
-where
-    A: Fn(&tonic::metadata::MetadataMap) -> Result<Mono, tonic::Status> + Send + Sync + 'static,
-{
-    /// The service, ready for `pb::events_server::EventsServer::new`.
-    pub fn new(journal: Journal, expiry: A) -> EventsService<A> {
-        EventsService { journal, expiry }
+/// The method an `Events` token names: the gRPC path the product receives.
+pub const EVENTS_METHOD: &str = "/anemnez.extension.v1.Events/Events";
+
+impl EventsService {
+    /// The service, ready for `pb::events_server::EventsServer::new`. The verifier and the journal
+    /// should read the same clock, so a stream's expiry is a deadline on the journal's.
+    pub fn new(journal: Journal, verifier: Verifier) -> EventsService {
+        EventsService { journal, verifier }
     }
 }
 
@@ -301,26 +312,29 @@ type EventStream =
     std::pin::Pin<Box<dyn Stream<Item = Result<pb::Event, tonic::Status>> + Send + 'static>>;
 
 #[tonic::async_trait]
-impl<A> pb::events_server::Events for EventsService<A>
-where
-    A: Fn(&tonic::metadata::MetadataMap) -> Result<Mono, tonic::Status> + Send + Sync + 'static,
-{
+impl pb::events_server::Events for EventsService {
     type EventsStream = EventStream;
 
-    // tonic's own signatures answer a `Status`; its size is tonic's to choose.
-    #[allow(clippy::result_large_err)]
     async fn events(
         &self,
         request: tonic::Request<pb::EventsRequest>,
     ) -> Result<tonic::Response<Self::EventsStream>, tonic::Status> {
-        let expires = (self.expiry)(request.metadata())?;
+        // A stream admitted without a token (the rollout rule) still ends within a token's life, so
+        // it re-opens, and is checked again, at least that often.
+        let checked = self.verifier.check_grpc(EVENTS_METHOD, &request).await;
+        let expires = match checked.map_err(|r| crate::principal::status(&r))? {
+            Some(admitted) => admitted.expires,
+            None => {
+                let life =
+                    std::time::Duration::from_millis(anemnez_extension::principal::MAX_TTL_MS);
+                self.journal.clock().now_mono() + life
+            }
+        };
         let pb::EventsRequest { after, kinds } = request.into_inner();
         let sub = self
             .journal
             .subscribe(&after, kinds, expires)
             .map_err(|r| r.status())?;
-        let stream =
-            futures_util::StreamExt::map(sub.into_stream(), |item| item.map_err(|r| r.status()));
-        Ok(tonic::Response::new(Box::pin(stream)))
+        Ok(tonic::Response::new(Box::pin(sub.into_grpc_stream())))
     }
 }

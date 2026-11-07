@@ -29,6 +29,12 @@ prost-types = "0.13"
 tokio = { version = "1", features = ["sync", "macros"] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 sha2 = "0.10"
+# The request-digest layer below tonic's codec: the traits tonic 0.12's Server::layer takes.
+http = "1"
+http-body-util = "0.1"
+bytes = "1"
+tower-layer = "0.3"
+tower-service = "0.3"
 tempfile = "3"
 tokio-stream = { version = "0.1", features = ["net"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
