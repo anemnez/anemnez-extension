@@ -32,8 +32,10 @@ pub struct Method {
     pub server_streaming: bool,
 }
 
-/// Why a descriptor is refused at connect. Each names the method's path.
+/// Why a descriptor is refused at connect. Each names the method's path. `#[non_exhaustive]`, so a
+/// new refusal is a minor release: a bridge reports one by [`DescriptorRefusal::name`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum DescriptorRefusal {
     /// The bytes are not a `FileDescriptorSet`.
     Malformed(String),
@@ -227,6 +229,9 @@ fn check_method(
                     permission,
                     callers,
                     session,
+                    blocks: raw.blocks,
+                    runs_to_completion: raw.runs_to_completion,
+                    examples: raw.examples,
                 },
                 route_key,
             ))
@@ -396,6 +401,12 @@ mod wire {
         pub callers: i32,
         #[prost(int32, tag = "9")]
         pub session: i32,
+        #[prost(bool, tag = "10")]
+        pub blocks: bool,
+        #[prost(bool, tag = "11")]
+        pub runs_to_completion: bool,
+        #[prost(string, repeated, tag = "12")]
+        pub examples: Vec<String>,
     }
 
     #[derive(Clone, PartialEq, prost::Message)]
@@ -553,6 +564,9 @@ mod tests {
             permission: 2,
             callers: 1,
             session: 0,
+            blocks: false,
+            runs_to_completion: false,
+            examples: Vec::new(),
         }
     }
 
@@ -561,6 +575,8 @@ mod tests {
     #[test]
     fn a_good_descriptor_answers_every_offered_method() {
         let mut land = good();
+        land.blocks = true;
+        land.examples = vec!["herald.land{repo = 'agora'}".into()];
         land.route = Some(wire::Route {
             to: Some(wire::To::Keyed(wire::Leader {
                 group: "herald-repo".into(),
@@ -616,6 +632,8 @@ mod tests {
                 key: "repo".into()
             }
         );
+        assert!(methods[0].options.blocks && !methods[0].options.runs_to_completion);
+        assert_eq!(methods[0].options.examples, ["herald.land{repo = 'agora'}"]);
         assert_eq!(methods[1].options.result, ResultShape::Cursor);
         assert_eq!(methods[1].options.route, Route::Any);
     }

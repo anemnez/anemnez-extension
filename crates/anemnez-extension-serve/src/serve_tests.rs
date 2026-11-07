@@ -472,6 +472,9 @@ fn the_descriptor_check_reads_the_protos_own_encoding() {
         permission: pb::Permission::Ask as i32,
         callers: pb::Callers::Product as i32,
         session: pb::Session::Opens as i32,
+        blocks: true,
+        runs_to_completion: true,
+        examples: vec!["herald.land{train = 'train/h-x'}".into()],
     };
     let mut method = prost_types::MethodDescriptorProto {
         name: Some("Land".into()),
@@ -502,18 +505,19 @@ fn the_descriptor_check_reads_the_protos_own_encoding() {
     use anemnez_extension::options::*;
     assert_eq!(methods.len(), 1);
     assert_eq!(methods[0].path, "/h.v1.H/Land");
-    assert_eq!(
-        methods[0].options,
-        MethodOptions {
-            description: "Land a train.".into(),
-            result: ResultShape::Bound(50),
-            effect: Effect::Write,
-            route: Route::Leader("herald".into()),
-            person_act: true,
-            presence: Presence::Minimal,
-            permission: Permission::Ask,
-            callers: Callers::Product,
-            session: Some(Session::Opens),
-        }
+    let mut want = MethodOptions::new(
+        "Land a train.",
+        ResultShape::Bound(50),
+        Effect::Write,
+        Presence::Minimal,
+        Permission::Ask,
+        Callers::Product,
     );
+    want.route = Route::Leader("herald".into());
+    want.person_act = true;
+    want.session = Some(Session::Opens);
+    want.blocks = true;
+    want.runs_to_completion = true;
+    want.examples = vec!["herald.land{train = 'train/h-x'}".into()];
+    assert_eq!(methods[0].options, want);
 }

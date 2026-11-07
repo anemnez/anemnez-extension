@@ -23,6 +23,15 @@ message MethodOptions {
   // Required: nothing gets an agent face by omission.
   Callers callers = 8;
   Session session = 9;
+  // A call that does not finish at once parks the calling mind's execute (Substrate RUNTIME S2c)
+  // rather than answering Pending. Default false.
+  bool blocks = 10;
+  // Bounded only by its own end, like process.run: the caller's deadline is not charged for it. A
+  // method whose request carries a wait-budget field (timeout_ms and its kin) owns its budget
+  // without this; Substrate derives that, so it is never stated twice (C). Independent of blocks.
+  bool runs_to_completion = 11;
+  // Worked calls, for a caller's help.
+  repeated string examples = 12;
 }
 
 // How a method's result comes back. A collection is a cursor or capped; never unbounded.

@@ -93,6 +93,7 @@ pub enum Route {
 /// The field a keyed route reads its key from, as [`check_route_key`] found it: the name, and the
 /// field number, so a bridge reading wire bytes finds the key without decoding the whole call.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct RouteKey {
     pub name: String,
     pub number: i32,
@@ -164,8 +165,11 @@ pub fn check_route_key(
     })
 }
 
-/// Everything written on one method.
+/// Everything written on one method. `#[non_exhaustive]`, so a new option is a minor release
+/// rather than a break for every bridge (D): build one with [`MethodOptions::new`], then set the
+/// optional fields.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct MethodOptions {
     pub description: String,
     pub result: ResultShape,
@@ -181,6 +185,44 @@ pub struct MethodOptions {
     pub callers: Callers,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session: Option<Session>,
+    /// A call that does not finish at once parks the calling mind's execute.
+    #[serde(default)]
+    pub blocks: bool,
+    /// Bounded only by its own end, like `process.run`: the caller's deadline is not charged for it.
+    /// (A request carrying `timeout_ms` owns its budget without this; the bridge derives that: C.)
+    #[serde(default)]
+    pub runs_to_completion: bool,
+    /// Worked calls, for a caller's help.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub examples: Vec<String>,
+}
+
+impl MethodOptions {
+    /// A method's options from the six every method states; the rest take their defaults (route
+    /// local-first, not a person's act, no session, neither flag, no examples).
+    pub fn new(
+        description: impl Into<String>,
+        result: ResultShape,
+        effect: Effect,
+        presence: Presence,
+        permission: Permission,
+        callers: Callers,
+    ) -> MethodOptions {
+        MethodOptions {
+            description: description.into(),
+            result,
+            effect,
+            route: Route::default(),
+            person_act: false,
+            presence,
+            permission,
+            callers,
+            session: None,
+            blocks: false,
+            runs_to_completion: false,
+            examples: Vec::new(),
+        }
+    }
 }
 
 #[cfg(test)]
