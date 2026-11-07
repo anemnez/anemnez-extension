@@ -65,7 +65,8 @@ call and never caches it past one read, so a handoff routes the next call to the
 <!-- claim: every-bridge-refuses-a-descriptor-alike -->
 **Every bridge refuses a descriptor alike** (B, D, H, 2026-11-07). `descriptor::check_descriptor`
 takes the encoded `FileDescriptorSet` that `Describe/Get` serves and answers either every offered
-method (path, parsed `MethodOptions`, a keyed route's field) or EVERY refusal, each named with its
+method (path, parsed `MethodOptions`, a keyed route's field, and the request's top-level fields with
+name, number, kind and repeated, from which a bridge builds the op's parameters: B, C) or EVERY refusal, each named with its
 method: `callers-missing`, `permission-missing`, `person-act-allowed`, `result-missing`,
 `unbounded-collection` (an output with a repeated field declared `one`), `effect-missing`,
 `presence-missing`, `description-missing`, `route-key`, `input-unknown`, `options-malformed`. A

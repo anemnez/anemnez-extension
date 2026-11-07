@@ -30,6 +30,85 @@ pub struct Method {
     pub route_key: Option<RouteKey>,
     pub client_streaming: bool,
     pub server_streaming: bool,
+    /// The request message's top-level fields, in declaration order: what a bridge builds the op's
+    /// parameters from (C's LuaTypeInfo, B's MethodSpec), so no bridge re-parses the descriptor.
+    pub input: Vec<Field>,
+    /// The request message's full name (`.pkg.Message`).
+    pub input_type: String,
+    /// The reply message's full name.
+    pub output_type: String,
+}
+
+/// One top-level field of a request message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Field {
+    pub name: String,
+    pub number: i32,
+    pub kind: FieldKind,
+    /// `repeated`: a list of `kind`.
+    pub repeated: bool,
+    /// A proto3 `optional` field, whose presence is tracked.
+    pub optional: bool,
+}
+
+/// A field's type: a scalar, or the full name of an enum or message (`.pkg.Name`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum FieldKind {
+    Double,
+    Float,
+    Int64,
+    Uint64,
+    Int32,
+    Uint32,
+    Sint32,
+    Sint64,
+    Fixed32,
+    Fixed64,
+    Sfixed32,
+    Sfixed64,
+    Bool,
+    String,
+    Bytes,
+    Enum(String),
+    Message(String),
+}
+
+fn fields_of(message: Option<&DescriptorProto>) -> Vec<Field> {
+    use prost_types::field_descriptor_proto::{Label, Type};
+    let Some(message) = message else {
+        return Vec::new();
+    };
+    message
+        .field
+        .iter()
+        .map(|f| Field {
+            name: f.name().to_owned(),
+            number: f.number(),
+            kind: match f.r#type() {
+                Type::Double => FieldKind::Double,
+                Type::Float => FieldKind::Float,
+                Type::Int64 => FieldKind::Int64,
+                Type::Uint64 => FieldKind::Uint64,
+                Type::Int32 => FieldKind::Int32,
+                Type::Uint32 => FieldKind::Uint32,
+                Type::Sint32 => FieldKind::Sint32,
+                Type::Sint64 => FieldKind::Sint64,
+                Type::Fixed32 => FieldKind::Fixed32,
+                Type::Fixed64 => FieldKind::Fixed64,
+                Type::Sfixed32 => FieldKind::Sfixed32,
+                Type::Sfixed64 => FieldKind::Sfixed64,
+                Type::Bool => FieldKind::Bool,
+                Type::String => FieldKind::String,
+                Type::Bytes => FieldKind::Bytes,
+                Type::Enum => FieldKind::Enum(f.type_name().to_owned()),
+                Type::Message | Type::Group => FieldKind::Message(f.type_name().to_owned()),
+            },
+            repeated: f.label() == Label::Repeated,
+            optional: f.proto3_optional(),
+        })
+        .collect()
 }
 
 /// Why a descriptor is refused at connect. Each names the method's path. `#[non_exhaustive]`, so a
@@ -139,6 +218,9 @@ pub fn check_descriptor(file_descriptor_set: &[u8]) -> Result<Vec<Method>, Vec<D
                         route_key,
                         client_streaming: method.client_streaming(),
                         server_streaming: method.server_streaming(),
+                        input: fields_of(input),
+                        input_type: method.input_type().to_owned(),
+                        output_type: method.output_type().to_owned(),
                     }),
                     Err(mut found) => refused.append(&mut found),
                 }
@@ -618,6 +700,20 @@ mod tests {
             ["/herald.v2.Herald/Land", "/herald.v2.Herald/Queue"],
             "Internal has no face"
         );
+        let input: Vec<_> = methods[0]
+            .input
+            .iter()
+            .map(|f| (f.name.as_str(), f.number, f.kind.clone(), f.repeated))
+            .collect();
+        assert_eq!(
+            input,
+            [
+                ("train", 1, FieldKind::String, false),
+                ("repo", 3, FieldKind::String, false)
+            ],
+            "the request's fields come back, so no bridge re-parses the descriptor"
+        );
+        assert_eq!(methods[0].input_type, ".herald.v2.LandRequest");
         assert_eq!(
             methods[0].route_key,
             Some(RouteKey {
