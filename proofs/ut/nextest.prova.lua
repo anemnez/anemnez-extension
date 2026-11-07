@@ -93,3 +93,6 @@ spoken_for("every-bridge-refuses-a-descriptor-alike (parity)", "serve_tests::the
 spoken_for("every-bridge-mounts-the-same-fixture", "fixture_tests::the_good_fixture_answers_over_its_socket")
 spoken_for("every-bridge-mounts-the-same-fixture (variants)", "fixture_tests::each_variant_is_refused_where_its_rule_lives")
 spoken_for("every-bridge-refuses-a-descriptor-alike (examples)", "descriptor::tests::an_example_that_is_not_the_requests_fields_is_refused")
+spoken_for("every-bridge-encodes-a-call-alike", "client_tests::a_call_goes_from_json_to_the_product_and_back")
+spoken_for("every-bridge-encodes-a-call-alike (strict)", "client_tests::arguments_that_are_not_the_request_are_refused_by_name")
+spoken_for("every-bridge-encodes-a-call-alike (bytes)", "client_tests::the_encoded_bytes_are_the_requests_own_encoding")

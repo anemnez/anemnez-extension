@@ -235,3 +235,16 @@ Events. Describe serves the variant's real protoc `FileDescriptorSet`. The refus
 the bridge's. Every unary reply echoes the caller's principal token's digest as
 `anemnez-principal-digest`, so a call path can be proven to carry the token end to end; tokens are
 not verified by the fixture yet.
+
+## 4. Calling an extension: `anemnez-extension-client`
+
+<!-- claim: every-bridge-encodes-a-call-alike -->
+**Every bridge encodes a call alike** (B, D, H, 2026-11-07). `Calls::new(file_descriptor_set)` reads
+the descriptor a product serves. `encode(path, args_json)` turns JSON arguments (proto3 JSON mapping)
+into the request's bytes, strictly: a key the request has no field for, a value of the wrong type, or
+anything but one JSON object is refused `args-mismatch` by name, never dropped, since an agent's typo
+must not become a different act (D). The bytes it answers are the bytes a prost client would send,
+and the caller hands those same bytes to the principal token's body digest and to `unary`, never
+re-encoding. `unary` calls the exact method path over a raw-bytes codec, and `decode` turns the reply
+back into JSON with the proto's own field names and every field present. Substrate's Lua mount and
+Agora's MCP face both call it.

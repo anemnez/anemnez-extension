@@ -87,20 +87,6 @@ fn each_variant_is_refused_where_its_rule_lives() {
     assert_eq!(methods, ["GetURL", "GetUrl"]);
 }
 
-async fn channel(socket: std::path::PathBuf) -> tonic::transport::Channel {
-    tonic::transport::Endpoint::from_static("http://[::]:50051")
-        .connect_with_connector(tower::service_fn(move |_: tonic::transport::Uri| {
-            let socket = socket.clone();
-            async move {
-                Ok::<_, std::io::Error>(hyper_util::rt::TokioIo::new(
-                    tokio::net::UnixStream::connect(socket).await?,
-                ))
-            }
-        }))
-        .await
-        .expect("connects")
-}
-
 fn with_token<T>(message: T, token: &str) -> tonic::Request<T> {
     let mut request = tonic::Request::new(message);
     request.metadata_mut().insert(
@@ -119,7 +105,7 @@ async fn the_good_fixture_answers_over_its_socket() {
     let running = serve(dir.path(), manual.clock(), Variant::Good)
         .await
         .expect("serves");
-    let channel = channel(running.socket.clone()).await;
+    let channel = running.channel().await.expect("connects");
     let mut fixture = pb::fixture_client::FixtureClient::new(channel.clone());
 
     // Items pages to the end.
@@ -217,7 +203,7 @@ async fn the_fixture_serves_the_contracts_own_services() {
     let running = serve(dir.path(), manual.clock(), Variant::Good)
         .await
         .expect("serves");
-    let channel = channel(running.socket.clone()).await;
+    let channel = running.channel().await.expect("connects");
     let mut fixture = pb::fixture_client::FixtureClient::new(channel.clone());
     // The contract's own services.
     use anemnez_extension_serve::pb as contract;

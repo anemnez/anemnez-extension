@@ -15,6 +15,9 @@ tonic.workspace = true
 prost.workspace = true
 tokio = { workspace = true, features = ["net", "rt"] }
 tokio-stream.workspace = true
+# Running::channel, a test's way in over the fixture's socket.
+hyper-util.workspace = true
+tower.workspace = true
 
 [build-dependencies]
 anemnez-extension.workspace = true
@@ -23,6 +26,4 @@ tonic-build.workspace = true
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 tempfile.workspace = true
-hyper-util.workspace = true
-tower.workspace = true
 http.workspace = true

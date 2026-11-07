@@ -5,6 +5,8 @@ a public repo). Read `docs/specs/CONTRACT.md` first.
 
 - **No platform in it.** Nothing here may depend on Fabric, the swarm or launchd; the hosting side is
   anemnez-service's. A test refuses `fabric` in the protos' code.
+- **`anemnez-extension-client`** calls an extension from its descriptor, one way for every bridge
+  (CONTRACT.md §4): strict JSON → the request's exact bytes, a raw-bytes call, the reply → JSON.
 - **`anemnez-extension-fixture`** is the fixture product every bridge's mount test and the
   conformance proof run against (CONTRACT.md §3); a test-support library, published like the rest.
 - **Two crates, two layers** (substrate `docs/plans/ASYNCIFICATION.md`). `anemnez-extension` is the

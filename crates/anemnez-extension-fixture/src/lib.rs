@@ -116,6 +116,26 @@ pub struct Running {
     server: tokio::task::JoinHandle<()>,
 }
 
+impl Running {
+    /// A gRPC channel to the fixture's socket: what a bridge's test calls it through.
+    ///
+    /// # Errors
+    /// The socket does not answer.
+    pub async fn channel(&self) -> Result<tonic::transport::Channel, tonic::transport::Error> {
+        let socket = self.socket.clone();
+        tonic::transport::Endpoint::from_static("http://[::]:50051")
+            .connect_with_connector(tower::service_fn(move |_: tonic::transport::Uri| {
+                let socket = socket.clone();
+                async move {
+                    Ok::<_, std::io::Error>(hyper_util::rt::TokioIo::new(
+                        tokio::net::UnixStream::connect(socket).await?,
+                    ))
+                }
+            }))
+            .await
+    }
+}
+
 impl Drop for Running {
     fn drop(&mut self) {
         self.server.abort();
