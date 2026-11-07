@@ -98,7 +98,11 @@ impl Journal {
                 origin: origin.into(),
                 kept: kept.max(1),
                 clock,
-                ring: Mutex::new(Ring { first: 1, next: 1, events: VecDeque::new() }),
+                ring: Mutex::new(Ring {
+                    first: 1,
+                    next: 1,
+                    events: VecDeque::new(),
+                }),
                 published: Notify::new(),
             }),
         }
@@ -121,7 +125,11 @@ impl Journal {
             let mut ring = self.ring();
             let seq = ring.next;
             let cursor = self.cursor(seq);
-            ring.events.push_back(Arc::new(pb::Event { cursor: cursor.clone(), kind: kind.into(), payload }));
+            ring.events.push_back(Arc::new(pb::Event {
+                cursor: cursor.clone(),
+                kind: kind.into(),
+                payload,
+            }));
             ring.next += 1;
             if ring.events.len() > self.inner.kept {
                 ring.events.pop_front();
@@ -141,7 +149,12 @@ impl Journal {
     /// Subscribe to the events after `after` (empty for the head), of `kinds` (empty for every
     /// kind), until `expires` on the journal's clock: the caller's principal token's expiry, read
     /// once when the stream opens.
-    pub fn subscribe(&self, after: &str, kinds: Vec<String>, expires: Mono) -> Result<Subscription, Refusal> {
+    pub fn subscribe(
+        &self,
+        after: &str,
+        kinds: Vec<String>,
+        expires: Mono,
+    ) -> Result<Subscription, Refusal> {
         let ring = self.ring();
         let next = if after.is_empty() {
             ring.next
@@ -157,7 +170,13 @@ impl Journal {
             seq + 1
         };
         drop(ring);
-        Ok(Subscription { journal: self.clone(), next, kinds, expires, ended: false })
+        Ok(Subscription {
+            journal: self.clone(),
+            next,
+            kinds,
+            expires,
+            ended: false,
+        })
     }
 
     fn cursor(&self, seq: u64) -> String {
@@ -175,7 +194,10 @@ impl Journal {
     fn ring(&self) -> MutexGuard<'_, Ring> {
         // A panic while the lock was held leaves the ring whole (every change is a push or pop),
         // so a poisoned lock is still a true journal.
-        self.inner.ring.lock().unwrap_or_else(PoisonError::into_inner)
+        self.inner
+            .ring
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
     }
 }
 
@@ -226,7 +248,9 @@ impl Subscription {
 
     /// The subscription as a stream of events, for a gRPC response.
     pub fn into_stream(self) -> impl Stream<Item = Result<pb::Event, Refusal>> + Send + 'static {
-        futures_util::stream::unfold(self, |mut sub| async move { sub.next().await.map(|item| (item, sub)) })
+        futures_util::stream::unfold(self, |mut sub| async move {
+            sub.next().await.map(|item| (item, sub))
+        })
     }
 
     fn read(&mut self) -> Read {
@@ -273,7 +297,8 @@ where
     }
 }
 
-type EventStream = std::pin::Pin<Box<dyn Stream<Item = Result<pb::Event, tonic::Status>> + Send + 'static>>;
+type EventStream =
+    std::pin::Pin<Box<dyn Stream<Item = Result<pb::Event, tonic::Status>> + Send + 'static>>;
 
 #[tonic::async_trait]
 impl<A> pb::events_server::Events for EventsService<A>
@@ -290,8 +315,12 @@ where
     ) -> Result<tonic::Response<Self::EventsStream>, tonic::Status> {
         let expires = (self.expiry)(request.metadata())?;
         let pb::EventsRequest { after, kinds } = request.into_inner();
-        let sub = self.journal.subscribe(&after, kinds, expires).map_err(|r| r.status())?;
-        let stream = futures_util::StreamExt::map(sub.into_stream(), |item| item.map_err(|r| r.status()));
+        let sub = self
+            .journal
+            .subscribe(&after, kinds, expires)
+            .map_err(|r| r.status())?;
+        let stream =
+            futures_util::StreamExt::map(sub.into_stream(), |item| item.map_err(|r| r.status()));
         Ok(tonic::Response::new(Box::pin(stream)))
     }
 }

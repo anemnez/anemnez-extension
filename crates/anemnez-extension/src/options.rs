@@ -84,7 +84,10 @@ pub enum Route {
     /// top-level string field of the method's input ([`check_route_key`] at connect); the bridge
     /// resolves its value's holder on every call, and refuses an empty value with
     /// [`crate::refusal::NO_KEY`].
-    Keyed { group: String, key: String },
+    Keyed {
+        group: String,
+        key: String,
+    },
 }
 
 /// The field a keyed route reads its key from, as [`check_route_key`] found it: the name, and the
@@ -113,8 +116,12 @@ impl std::fmt::Display for RouteKeyRefusal {
             RouteKeyRefusal::NoSuchField { message, key } => {
                 write!(f, "route key '{key}' is not a top-level field of {message}")
             }
-            RouteKeyRefusal::NotAString { message, key } => write!(f, "route key '{key}' of {message} is not a string"),
-            RouteKeyRefusal::Repeated { message, key } => write!(f, "route key '{key}' of {message} is repeated"),
+            RouteKeyRefusal::NotAString { message, key } => {
+                write!(f, "route key '{key}' of {message} is not a string")
+            }
+            RouteKeyRefusal::Repeated { message, key } => {
+                write!(f, "route key '{key}' of {message} is repeated")
+            }
         }
     }
 }
@@ -125,21 +132,36 @@ impl std::error::Error for RouteKeyRefusal {}
 /// must be a top-level, non-repeated string field of the method's `input` message. proto3 has no
 /// `required`, so a present-but-empty key is the bridge's refusal per call, not this one's. One pure
 /// function, so every bridge refuses a descriptor alike.
-pub fn check_route_key(input: &prost_types::DescriptorProto, key: &str) -> Result<RouteKey, RouteKeyRefusal> {
+pub fn check_route_key(
+    input: &prost_types::DescriptorProto,
+    key: &str,
+) -> Result<RouteKey, RouteKeyRefusal> {
     use prost_types::field_descriptor_proto::{Label, Type};
     let message = input.name().to_owned();
     let field = input
         .field
         .iter()
         .find(|f| f.name() == key)
-        .ok_or_else(|| RouteKeyRefusal::NoSuchField { message: message.clone(), key: key.to_owned() })?;
+        .ok_or_else(|| RouteKeyRefusal::NoSuchField {
+            message: message.clone(),
+            key: key.to_owned(),
+        })?;
     if field.r#type() != Type::String {
-        return Err(RouteKeyRefusal::NotAString { message, key: key.to_owned() });
+        return Err(RouteKeyRefusal::NotAString {
+            message,
+            key: key.to_owned(),
+        });
     }
     if field.label() == Label::Repeated {
-        return Err(RouteKeyRefusal::Repeated { message, key: key.to_owned() });
+        return Err(RouteKeyRefusal::Repeated {
+            message,
+            key: key.to_owned(),
+        });
     }
-    Ok(RouteKey { name: key.to_owned(), number: field.number() })
+    Ok(RouteKey {
+        name: key.to_owned(),
+        number: field.number(),
+    })
 }
 
 /// Everything written on one method.
@@ -194,18 +216,39 @@ mod tests {
             ("depth", 4, Type::Uint32, Label::Optional),
             ("tags", 5, Type::String, Label::Repeated),
         ]);
-        assert_eq!(check_route_key(&land, "repo"), Ok(RouteKey { name: "repo".into(), number: 3 }));
+        assert_eq!(
+            check_route_key(&land, "repo"),
+            Ok(RouteKey {
+                name: "repo".into(),
+                number: 3
+            })
+        );
         let refused = |key: &str| check_route_key(&land, key).expect_err("refused");
-        assert!(matches!(refused("missing"), RouteKeyRefusal::NoSuchField { .. }));
-        assert!(matches!(refused("repo.name"), RouteKeyRefusal::NoSuchField { .. }), "no nested paths yet");
-        assert!(matches!(refused("depth"), RouteKeyRefusal::NotAString { .. }));
+        assert!(matches!(
+            refused("missing"),
+            RouteKeyRefusal::NoSuchField { .. }
+        ));
+        assert!(
+            matches!(refused("repo.name"), RouteKeyRefusal::NoSuchField { .. }),
+            "no nested paths yet"
+        );
+        assert!(matches!(
+            refused("depth"),
+            RouteKeyRefusal::NotAString { .. }
+        ));
         assert!(matches!(refused("tags"), RouteKeyRefusal::Repeated { .. }));
-        assert_eq!(refused("depth").to_string(), "route key 'depth' of LandRequest is not a string");
+        assert_eq!(
+            refused("depth").to_string(),
+            "route key 'depth' of LandRequest is not a string"
+        );
     }
 
     #[test]
     fn a_keyed_route_reads_and_writes_by_name() {
-        let route = Route::Keyed { group: "herald-repo".into(), key: "repo".into() };
+        let route = Route::Keyed {
+            group: "herald-repo".into(),
+            key: "repo".into(),
+        };
         let text = serde_json::to_string(&route).expect("writes");
         assert_eq!(text, r#"{"keyed":{"group":"herald-repo","key":"repo"}}"#);
         assert_eq!(serde_json::from_str::<Route>(&text).expect("reads"), route);

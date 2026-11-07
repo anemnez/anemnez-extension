@@ -33,7 +33,9 @@ fn kinds(list: &[&str]) -> Vec<String> {
 #[tokio::test]
 async fn a_publisher_never_waits_on_a_subscriber_that_never_reads() {
     let (journal, manual) = journal(4);
-    let mut idle = journal.subscribe("", Vec::new(), far(&manual)).expect("subscribes");
+    let mut idle = journal
+        .subscribe("", Vec::new(), far(&manual))
+        .expect("subscribes");
     for i in 0..100u8 {
         journal.publish("tick", vec![i]);
     }
@@ -41,7 +43,9 @@ async fn a_publisher_never_waits_on_a_subscriber_that_never_reads() {
     assert_eq!(idle.next().await, None, "the stream ends after data-loss");
 
     // A subscriber that keeps up loses nothing.
-    let mut live = journal.subscribe(&journal.head(), Vec::new(), far(&manual)).expect("subscribes");
+    let mut live = journal
+        .subscribe(&journal.head(), Vec::new(), far(&manual))
+        .expect("subscribes");
     let cursor = journal.publish("tick", vec![100]);
     let event = live.next().await.expect("an event").expect("not refused");
     assert_eq!((event.cursor, event.payload), (cursor, vec![100]));
@@ -53,19 +57,29 @@ async fn a_publisher_never_waits_on_a_subscriber_that_never_reads() {
 async fn a_stream_ends_with_expired_at_its_tokens_expiry_on_the_injected_clock() {
     let (journal, manual) = journal(8);
     let expires = manual.now() + Duration::from_secs(60);
-    let mut sub = journal.subscribe("", Vec::new(), expires).expect("subscribes");
+    let mut sub = journal
+        .subscribe("", Vec::new(), expires)
+        .expect("subscribes");
     let reader = tokio::spawn(async move { sub.next().await });
-    assert!(manual.until_waiting(1, PARK).await, "the reader parks on its expiry");
+    assert!(
+        manual.until_waiting(1, PARK).await,
+        "the reader parks on its expiry"
+    );
 
     manual.advance(Duration::from_secs(59)).await;
     manual.settle().await;
-    assert!(!reader.is_finished(), "a second before its expiry the stream is open");
+    assert!(
+        !reader.is_finished(),
+        "a second before its expiry the stream is open"
+    );
 
     manual.advance(Duration::from_secs(1)).await;
     assert_eq!(reader.await.expect("joins"), Some(Err(Refusal::Expired)));
 
     // A stream opened past its expiry ends at once.
-    let mut late = journal.subscribe("", Vec::new(), manual.now()).expect("subscribes");
+    let mut late = journal
+        .subscribe("", Vec::new(), manual.now())
+        .expect("subscribes");
     assert_eq!(late.next().await, Some(Err(Refusal::Expired)));
 }
 
@@ -75,8 +89,12 @@ async fn a_stream_ends_with_expired_at_its_tokens_expiry_on_the_injected_clock()
 #[tokio::test]
 async fn a_dropped_subscriber_cancels_nothing() {
     let (journal, manual) = journal(8);
-    let mut kept = journal.subscribe("", Vec::new(), far(&manual)).expect("subscribes");
-    let mut gone = journal.subscribe("", Vec::new(), far(&manual)).expect("subscribes");
+    let mut kept = journal
+        .subscribe("", Vec::new(), far(&manual))
+        .expect("subscribes");
+    let mut gone = journal
+        .subscribe("", Vec::new(), far(&manual))
+        .expect("subscribes");
     let staying = tokio::spawn(async move { kept.next().await });
     let leaving = tokio::spawn(async move { gone.next().await });
     assert!(manual.until_waiting(2, PARK).await, "both readers park");
@@ -85,7 +103,11 @@ async fn a_dropped_subscriber_cancels_nothing() {
     assert!(leaving.await.expect_err("aborted").is_cancelled());
 
     let cursor = journal.publish("tick", vec![1]);
-    let event = staying.await.expect("joins").expect("an event").expect("not refused");
+    let event = staying
+        .await
+        .expect("joins")
+        .expect("an event")
+        .expect("not refused");
     assert_eq!(event.cursor, cursor);
     assert_eq!(journal.head(), cursor);
 }
@@ -99,11 +121,18 @@ async fn a_cursor_resumes_after_itself_filtered_by_kind() {
     let third = journal.publish("health", vec![3]);
     journal.publish("tick", vec![4]);
 
-    let mut sub = journal.subscribe(&first, kinds(&["health"]), far(&manual)).expect("subscribes");
+    let mut sub = journal
+        .subscribe(&first, kinds(&["health"]), far(&manual))
+        .expect("subscribes");
     let event = sub.next().await.expect("an event").expect("not refused");
-    assert_eq!((event.cursor, event.kind.as_str(), event.payload), (third, "health", vec![3]));
+    assert_eq!(
+        (event.cursor, event.kind.as_str(), event.payload),
+        (third, "health", vec![3])
+    );
 
-    let mut every = journal.subscribe(&first, Vec::new(), far(&manual)).expect("subscribes");
+    let mut every = journal
+        .subscribe(&first, Vec::new(), far(&manual))
+        .expect("subscribes");
     let next = every.next().await.expect("an event").expect("not refused");
     assert_eq!(next.payload, vec![2], "no kinds asked is every kind");
 }
@@ -119,11 +148,31 @@ async fn a_foreign_cursor_is_not_mine_and_an_old_one_is_out_of_range() {
     journal.publish("tick", vec![4]);
 
     let refused = |after: &str| journal.subscribe(after, Vec::new(), far(&manual)).err();
-    assert_eq!(refused("e5f6a7b8.boot1:2"), Some(Refusal::CursorNotMine), "another instance");
-    assert_eq!(refused("a1b2c3d4.boot0:2"), Some(Refusal::CursorNotMine), "an earlier boot");
-    assert_eq!(refused("a1b2c3d4.boot1:99"), Some(Refusal::CursorNotMine), "a sequence never issued");
-    assert_eq!(refused("garbage"), Some(Refusal::CursorNotMine), "not a cursor of ours");
-    assert_eq!(refused(&oldest), Some(Refusal::OutOfRange), "older than the two kept");
+    assert_eq!(
+        refused("e5f6a7b8.boot1:2"),
+        Some(Refusal::CursorNotMine),
+        "another instance"
+    );
+    assert_eq!(
+        refused("a1b2c3d4.boot0:2"),
+        Some(Refusal::CursorNotMine),
+        "an earlier boot"
+    );
+    assert_eq!(
+        refused("a1b2c3d4.boot1:99"),
+        Some(Refusal::CursorNotMine),
+        "a sequence never issued"
+    );
+    assert_eq!(
+        refused("garbage"),
+        Some(Refusal::CursorNotMine),
+        "not a cursor of ours"
+    );
+    assert_eq!(
+        refused(&oldest),
+        Some(Refusal::OutOfRange),
+        "older than the two kept"
+    );
     assert_eq!(refused(&journal.head()), None);
 }
 
@@ -142,7 +191,9 @@ async fn a_watcher_reads_health_then_sees_only_later_changes() {
     assert_eq!(snapshot.parts[0].state, pb::State::Failing as i32);
     journal.publish("tick", vec![]);
 
-    let mut watch = journal.subscribe(&snapshot.as_of, kinds(&[crate::health::KIND]), far(&manual)).expect("subscribes");
+    let mut watch = journal
+        .subscribe(&snapshot.as_of, kinds(&[crate::health::KIND]), far(&manual))
+        .expect("subscribes");
     manual.advance(Duration::from_secs(5)).await;
     board.set_part("memory/index", State::Serving, "");
     let event = watch.next().await.expect("an event").expect("not refused");
@@ -161,9 +212,16 @@ async fn a_watcher_reads_health_then_sees_only_later_changes() {
 async fn describe_answers_the_descriptor_and_its_sha256() {
     use pb::describe_server::Describe as _;
     let describe = Describe::new(b"abc".to_vec());
-    let reply = describe.get(tonic::Request::new(pb::DescribeRequest {})).await.expect("answers").into_inner();
+    let reply = describe
+        .get(tonic::Request::new(pb::DescribeRequest {}))
+        .await
+        .expect("answers")
+        .into_inner();
     assert_eq!(reply.file_descriptor_set, b"abc");
-    assert_eq!(reply.digest, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    assert_eq!(
+        reply.digest,
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    );
 }
 
 /// The refusals reach a gRPC caller by name, over a real socket: the status message IS the
@@ -176,41 +234,74 @@ async fn the_refusals_reach_a_grpc_caller_by_name() {
 
     let (journal, manual) = journal(8);
     let deadline = far(&manual);
-    let service = crate::journal::EventsService::new(journal.clone(), move |meta: &tonic::metadata::MetadataMap| {
-        if meta.get(anemnez_extension::principal::GRPC_METADATA_KEY).is_some() {
-            Ok(deadline)
-        } else {
-            Err(tonic::Status::unauthenticated("no principal"))
-        }
-    });
+    let service = crate::journal::EventsService::new(
+        journal.clone(),
+        move |meta: &tonic::metadata::MetadataMap| {
+            if meta
+                .get(anemnez_extension::principal::GRPC_METADATA_KEY)
+                .is_some()
+            {
+                Ok(deadline)
+            } else {
+                Err(tonic::Status::unauthenticated("no principal"))
+            }
+        },
+    );
     let dir = tempfile::tempdir().expect("a temp dir");
     let socket = dir.path().join("events.sock");
     let listener = tokio::net::UnixListener::bind(&socket).expect("binds");
     let incoming = tokio_stream::wrappers::UnixListenerStream::new(listener);
-    tokio::spawn(tonic::transport::Server::builder().add_service(EventsServer::new(service)).serve_with_incoming(incoming));
+    tokio::spawn(
+        tonic::transport::Server::builder()
+            .add_service(EventsServer::new(service))
+            .serve_with_incoming(incoming),
+    );
 
     let path = socket.clone();
     let channel = tonic::transport::Endpoint::from_static("http://[::]:50051")
         .connect_with_connector(tower::service_fn(move |_: tonic::transport::Uri| {
             let path = path.clone();
-            async move { Ok::<_, std::io::Error>(hyper_util::rt::TokioIo::new(tokio::net::UnixStream::connect(path).await?)) }
+            async move {
+                Ok::<_, std::io::Error>(hyper_util::rt::TokioIo::new(
+                    tokio::net::UnixStream::connect(path).await?,
+                ))
+            }
         }))
         .await
         .expect("connects");
     let mut client = EventsClient::new(channel);
     let request = |after: &str| {
-        let mut r = tonic::Request::new(pb::EventsRequest { after: after.to_owned(), kinds: Vec::new() });
-        r.metadata_mut().insert(anemnez_extension::principal::GRPC_METADATA_KEY, "token".parse().expect("ascii"));
+        let mut r = tonic::Request::new(pb::EventsRequest {
+            after: after.to_owned(),
+            kinds: Vec::new(),
+        });
+        r.metadata_mut().insert(
+            anemnez_extension::principal::GRPC_METADATA_KEY,
+            "token".parse().expect("ascii"),
+        );
         r
     };
 
-    let refused = client.events(request("e5f6a7b8.boot1:1")).await.expect_err("refused");
-    assert_eq!((refused.code(), refused.message()), (tonic::Code::FailedPrecondition, "cursor-not-mine"));
+    let refused = client
+        .events(request("e5f6a7b8.boot1:1"))
+        .await
+        .expect_err("refused");
+    assert_eq!(
+        (refused.code(), refused.message()),
+        (tonic::Code::FailedPrecondition, "cursor-not-mine")
+    );
 
-    let unsigned = client.events(pb::EventsRequest::default()).await.expect_err("refused");
+    let unsigned = client
+        .events(pb::EventsRequest::default())
+        .await
+        .expect_err("refused");
     assert_eq!(unsigned.code(), tonic::Code::Unauthenticated);
 
-    let mut stream = client.events(request("")).await.expect("opens").into_inner();
+    let mut stream = client
+        .events(request(""))
+        .await
+        .expect("opens")
+        .into_inner();
     let cursor = journal.publish("tick", vec![7]);
     let event = stream.message().await.expect("reads").expect("an event");
     assert_eq!((event.cursor, event.payload), (cursor, vec![7]));

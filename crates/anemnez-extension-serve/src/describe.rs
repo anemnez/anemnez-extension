@@ -18,8 +18,16 @@ pub struct Describe {
 impl Describe {
     /// The service for an encoded `FileDescriptorSet`.
     pub fn new(file_descriptor_set: Vec<u8>) -> Describe {
-        let digest = Sha256::digest(&file_descriptor_set).iter().map(|b| format!("{b:02x}")).collect();
-        Describe { reply: pb::DescribeReply { file_descriptor_set, digest } }
+        let digest = Sha256::digest(&file_descriptor_set)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        Describe {
+            reply: pb::DescribeReply {
+                file_descriptor_set,
+                digest,
+            },
+        }
     }
 
     /// The descriptor's SHA-256, lowercase hex.

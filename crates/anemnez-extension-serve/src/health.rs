@@ -27,8 +27,14 @@ pub struct Board {
 impl Board {
     /// A board starting in `STARTING`, publishing to `journal`.
     pub fn new(journal: Journal) -> Board {
-        let reply = pb::HealthReply { state: pb::State::Starting as i32, ..Default::default() };
-        Board { journal, reply: Arc::new(Mutex::new(reply)) }
+        let reply = pb::HealthReply {
+            state: pb::State::Starting as i32,
+            ..Default::default()
+        };
+        Board {
+            journal,
+            reply: Arc::new(Mutex::new(reply)),
+        }
     }
 
     /// Set the extension's own state.
@@ -52,7 +58,12 @@ impl Board {
                 }
                 detail.clone_into(&mut part.detail);
             }
-            None => reply.parts.push(pb::Part { name: name.to_owned(), state, detail: detail.to_owned(), since: now }),
+            None => reply.parts.push(pb::Part {
+                name: name.to_owned(),
+                state,
+                detail: detail.to_owned(),
+                since: now,
+            }),
         }
         self.publish(&mut reply);
     }
