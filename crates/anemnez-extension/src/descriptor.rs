@@ -20,6 +20,9 @@ use crate::options::{
 /// The extension field number of `anemnez_method` on `google.protobuf.MethodOptions`.
 pub const METHOD_OPTIONS_FIELD: u32 = 51701;
 
+/// The extension field number of `anemnez_service` on `google.protobuf.ServiceOptions`.
+pub const SERVICE_OPTIONS_FIELD: u32 = 51702;
+
 /// One offered method, as the descriptor declares it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Method {
@@ -142,6 +145,18 @@ pub enum DescriptorRefusal {
     OptionsMalformed(String),
     /// An example's `args_json` is not a JSON object of the request's top-level fields, and why.
     ExampleMismatch(String, String),
+    /// No service in the descriptor carries `anemnez_service`: it says nothing of what it serves.
+    ServiceOptionsMissing,
+    /// Two services carry `anemnez_service` (both named): a descriptor serves one contract.
+    ServiceOptionsTwice(String, String),
+    /// The service's `anemnez_service` is not a valid `ServiceOptions` (the service named).
+    ServiceOptionsMalformed(String),
+    /// The service names no contract (the service named).
+    ContractMissing(String),
+    /// The service states no version (the service named).
+    VersionMissing(String),
+    /// The service states no cursor scope (the service named).
+    CursorScopeMissing(String),
 }
 
 impl DescriptorRefusal {
@@ -161,6 +176,12 @@ impl DescriptorRefusal {
             Self::InputUnknown(_) => "input-unknown",
             Self::OptionsMalformed(_) => "options-malformed",
             Self::ExampleMismatch(..) => "example-mismatch",
+            Self::ServiceOptionsMissing => "service-options-missing",
+            Self::ServiceOptionsTwice(..) => "service-options-twice",
+            Self::ServiceOptionsMalformed(_) => "service-options-malformed",
+            Self::ContractMissing(_) => "contract-missing",
+            Self::VersionMissing(_) => "version-missing",
+            Self::CursorScopeMissing(_) => "cursor-scope-missing",
         }
     }
 }
@@ -171,6 +192,10 @@ impl std::fmt::Display for DescriptorRefusal {
             Self::Malformed(why) => write!(f, "malformed descriptor: {why}"),
             Self::RouteKey(path, why) => write!(f, "{path}: {why}"),
             Self::ExampleMismatch(path, why) => write!(f, "{path}: example-mismatch: {why}"),
+            Self::ServiceOptionsMissing => f.write_str(self.name()),
+            Self::ServiceOptionsTwice(first, second) => {
+                write!(f, "{}: {first} and {second}", self.name())
+            }
             Self::CallersMissing(p)
             | Self::PermissionMissing(p)
             | Self::PersonActAllowed(p)
@@ -180,7 +205,11 @@ impl std::fmt::Display for DescriptorRefusal {
             | Self::DescriptionMissing(p)
             | Self::UnboundedCollection(p)
             | Self::InputUnknown(p)
-            | Self::OptionsMalformed(p) => write!(f, "{p}: {}", self.name()),
+            | Self::OptionsMalformed(p)
+            | Self::ServiceOptionsMalformed(p)
+            | Self::ContractMissing(p)
+            | Self::VersionMissing(p)
+            | Self::CursorScopeMissing(p) => write!(f, "{p}: {}", self.name()),
         }
     }
 }
@@ -441,15 +470,104 @@ fn find_message<'a>(set: &'a FileDescriptorSet, type_name: &str) -> Option<&'a D
 
 /// The anemnez options of one raw `MethodDescriptorProto`: field 4 (`options`), and within it every
 /// occurrence of field 51701, concatenated, which protobuf merges as one message.
-fn method_options(raw_method: &[u8]) -> Option<Vec<u8>> {
-    let options = repeated(raw_method, 4).ok()?;
+/// What the descriptor's one service declares of itself (`anemnez_service`): the contract it serves
+/// and its version, read without a manifest. Every bridge reads it alike (Substrate's mount,
+/// Agora's MCP face), so it lives beside [`check_descriptor`].
+///
+/// # Errors
+/// [`DescriptorRefusal::Malformed`] for bytes that are not a `FileDescriptorSet`;
+/// `service-options-missing` when no service carries the option, `service-options-twice` when two
+/// do, and `service-options-malformed`, `contract-missing`, `version-missing` or
+/// `cursor-scope-missing` for one that says too little.
+pub fn service_of(
+    file_descriptor_set: &[u8],
+) -> Result<crate::options::ServiceOptions, DescriptorRefusal> {
+    let set = FileDescriptorSet::decode(file_descriptor_set)
+        .map_err(|e| DescriptorRefusal::Malformed(e.to_string()))?;
+    let raw_files =
+        repeated(file_descriptor_set, 1).map_err(|why| DescriptorRefusal::Malformed(why.into()))?;
+    if raw_files.len() != set.file.len() {
+        return Err(DescriptorRefusal::Malformed(format!(
+            "{} files decoded, {} read raw",
+            set.file.len(),
+            raw_files.len()
+        )));
+    }
+    let mut found: Option<(String, Vec<u8>)> = None;
+    for (file, raw_file) in set.file.iter().zip(raw_files) {
+        for (service, raw_service) in services_of(file, raw_file)? {
+            let Some(bytes) = extension(raw_service, 3, SERVICE_OPTIONS_FIELD) else {
+                continue;
+            };
+            let name = format!(
+                "{}{}{}",
+                file.package(),
+                dot(file.package()),
+                service.name()
+            );
+            if let Some((first, _)) = &found {
+                return Err(DescriptorRefusal::ServiceOptionsTwice(first.clone(), name));
+            }
+            found = Some((name, bytes));
+        }
+    }
+    let (name, bytes) = found.ok_or(DescriptorRefusal::ServiceOptionsMissing)?;
+    let raw = wire::ServiceOptions::decode(bytes.as_slice())
+        .map_err(|_| DescriptorRefusal::ServiceOptionsMalformed(name.clone()))?;
+    if raw.contract.is_empty() {
+        return Err(DescriptorRefusal::ContractMissing(name));
+    }
+    if raw.version.is_empty() {
+        return Err(DescriptorRefusal::VersionMissing(name));
+    }
+    let cursor_scope = match raw.cursor_scope {
+        1 => crate::options::CursorScope::Swarm,
+        2 => crate::options::CursorScope::Instance,
+        _ => return Err(DescriptorRefusal::CursorScopeMissing(name)),
+    };
+    Ok(crate::options::ServiceOptions {
+        contract: raw.contract,
+        version: raw.version,
+        cursor_scope,
+        parts_depth: raw.parts_depth,
+        events_kept: raw.events_kept,
+    })
+}
+
+/// A file's services, each with its raw bytes, or `malformed` naming the file when the raw list
+/// can't be read or doesn't match the decoded one (D: never a silent truncation that would answer a
+/// broken descriptor as service-options-missing).
+fn services_of<'a>(
+    file: &'a FileDescriptorProto,
+    raw_file: &'a [u8],
+) -> Result<Vec<(&'a prost_types::ServiceDescriptorProto, &'a [u8])>, DescriptorRefusal> {
+    let malformed = |why: String| DescriptorRefusal::Malformed(format!("{}: {why}", file.name()));
+    let raw = repeated(raw_file, 6).map_err(|why| malformed(why.to_string()))?;
+    if raw.len() != file.service.len() {
+        return Err(malformed(format!(
+            "{} services decoded, {} read raw",
+            file.service.len(),
+            raw.len()
+        )));
+    }
+    Ok(file.service.iter().zip(raw).collect())
+}
+
+/// The bytes of extension `number` in the options message at field `options_field` of a raw
+/// descriptor message, every occurrence joined as protobuf merges them.
+fn extension(raw: &[u8], options_field: u32, number: u32) -> Option<Vec<u8>> {
+    let options = repeated(raw, options_field).ok()?;
     let mut found: Option<Vec<u8>> = None;
     for block in options {
-        for bytes in repeated(block, METHOD_OPTIONS_FIELD).ok()? {
+        for bytes in repeated(block, number).ok()? {
             found.get_or_insert_with(Vec::new).extend_from_slice(bytes);
         }
     }
     found
+}
+
+fn method_options(raw_method: &[u8]) -> Option<Vec<u8>> {
+    extension(raw_method, 4, METHOD_OPTIONS_FIELD)
 }
 
 /// Every length-delimited occurrence of field `number` in a raw message.
@@ -573,6 +691,20 @@ mod wire {
 
     #[derive(Clone, Copy, PartialEq, prost::Message)]
     pub struct Empty {}
+
+    #[derive(Clone, PartialEq, prost::Message)]
+    pub struct ServiceOptions {
+        #[prost(string, tag = "1")]
+        pub contract: String,
+        #[prost(string, tag = "2")]
+        pub version: String,
+        #[prost(int32, tag = "3")]
+        pub cursor_scope: i32,
+        #[prost(uint32, tag = "4")]
+        pub parts_depth: u32,
+        #[prost(uint32, tag = "5")]
+        pub events_kept: u32,
+    }
 }
 
 #[cfg(test)]
@@ -669,6 +801,111 @@ mod tests {
         .encode_to_vec();
         file.extend(ld(6, &service));
         ld(1, &file)
+    }
+
+    /// One file with one service per entry: its name and, when given, its `anemnez_service`.
+    fn services(entries: &[(&str, Option<&wire::ServiceOptions>)]) -> Vec<u8> {
+        let mut file = FileDescriptorProto {
+            name: Some("herald.proto".into()),
+            package: Some("herald.v2".into()),
+            ..Default::default()
+        }
+        .encode_to_vec();
+        for (name, options) in entries {
+            let mut service = ServiceDescriptorProto {
+                name: Some((*name).into()),
+                ..Default::default()
+            }
+            .encode_to_vec();
+            if let Some(o) = options {
+                service.extend(ld(3, &ld(SERVICE_OPTIONS_FIELD, &o.encode_to_vec())));
+            }
+            file.extend(ld(6, &service));
+        }
+        ld(1, &file)
+    }
+
+    fn herald() -> wire::ServiceOptions {
+        wire::ServiceOptions {
+            contract: "herald".into(),
+            version: "2.3.0".into(),
+            cursor_scope: 2,
+            parts_depth: 1,
+            events_kept: 64,
+        }
+    }
+
+    /// A bridge reads what a descriptor's one service declares of itself, with no manifest.
+    #[test]
+    fn service_of_reads_the_one_service_that_declares_itself() {
+        let options = service_of(&services(&[("Admin", None), ("Herald", Some(&herald()))]))
+            .expect("one service declares itself");
+        assert_eq!(options.contract, "herald");
+        assert_eq!(options.version, "2.3.0");
+        assert_eq!(options.cursor_scope, crate::options::CursorScope::Instance);
+        assert_eq!((options.parts_depth, options.events_kept), (1, 64));
+    }
+
+    /// D: a raw service list that doesn't match the decoded one is malformed, naming the file,
+    /// never a silent truncation answered as service-options-missing.
+    #[test]
+    fn a_service_list_that_does_not_match_is_malformed() {
+        let service = |name: &str| ServiceDescriptorProto {
+            name: Some(name.into()),
+            ..Default::default()
+        };
+        let file = FileDescriptorProto {
+            name: Some("herald.proto".into()),
+            service: vec![service("Herald"), service("Admin")],
+            ..Default::default()
+        };
+        // The raw file carries one service where two were decoded: truncated.
+        let raw = ld(6, &service("Herald").encode_to_vec());
+        let refused = services_of(&file, &raw).expect_err("refused");
+        assert_eq!(refused.name(), "malformed");
+        assert!(refused.to_string().contains("herald.proto"), "{refused}");
+    }
+
+    /// Every refusal names what is wrong: none declares, two declare, or one says too little.
+    #[test]
+    fn service_of_refuses_by_name() {
+        let name = |r: Result<crate::options::ServiceOptions, DescriptorRefusal>| {
+            r.expect_err("refused").name()
+        };
+        assert_eq!(
+            name(service_of(&services(&[("Herald", None)]))),
+            "service-options-missing"
+        );
+        assert_eq!(
+            service_of(&services(&[
+                ("Herald", Some(&herald())),
+                ("Other", Some(&herald()))
+            ]))
+            .expect_err("refused"),
+            DescriptorRefusal::ServiceOptionsTwice(
+                "herald.v2.Herald".into(),
+                "herald.v2.Other".into()
+            )
+        );
+        let mut nameless = herald();
+        nameless.contract.clear();
+        assert_eq!(
+            name(service_of(&services(&[("Herald", Some(&nameless))]))),
+            "contract-missing"
+        );
+        let mut unversioned = herald();
+        unversioned.version.clear();
+        assert_eq!(
+            name(service_of(&services(&[("Herald", Some(&unversioned))]))),
+            "version-missing"
+        );
+        let mut scopeless = herald();
+        scopeless.cursor_scope = 0;
+        assert_eq!(
+            name(service_of(&services(&[("Herald", Some(&scopeless))]))),
+            "cursor-scope-missing"
+        );
+        assert_eq!(name(service_of(b"not a descriptor")), "malformed");
     }
 
     fn good() -> wire::MethodOptions {

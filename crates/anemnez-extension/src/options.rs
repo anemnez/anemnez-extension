@@ -67,6 +67,25 @@ pub enum CursorScope {
     Instance,
 }
 
+/// What a product's service declares of itself (`anemnez_service`): the contract it serves and its
+/// version, where its cursors mean something, how deep its health parts nest, and how many events
+/// it keeps. A bridge reads it with [`crate::descriptor::service_of`]: the contract is the
+/// namespace agents see, and the version is what a caller's required range is checked against.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct ServiceOptions {
+    /// The contract served: the namespace agents see (`herald`).
+    pub contract: String,
+    /// Its version, `MAJOR.MINOR.PATCH`.
+    pub version: String,
+    /// Where a cursor means something.
+    pub cursor_scope: CursorScope,
+    /// How deep health parts nest.
+    pub parts_depth: u32,
+    /// How many events it keeps.
+    pub events_kept: u32,
+}
+
 /// How a method's result comes back: a collection is a cursor or capped, never unbounded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
