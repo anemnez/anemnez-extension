@@ -22,7 +22,7 @@ a public repo). Read `docs/specs/CONTRACT.md` first.
 - **Releasing is Herald's**, to Artichoke only for now. Land by train; never publish by hand.
 - **Versions: Herald treats the workspace's base version as a floor** and releases the next free
   number, so a train never bumps it just to release. Bump it past the NEWEST PUBLISHED kernel only
-  when the serve crate starts using a kernel item not yet published: the package proof builds serve
+  when another crate here (serve, fixture, client) starts using a kernel item not yet published, a proto value included (the fixture's `effect: ACT` before ACT was released): the package proof builds each crate
   against the published kernel exactly as a consumer resolves it, so it goes red until then. Never a
   `[patch]` overlay, which would prove a combination nobody can install (B, D, H, 2026-11-07).
 - VCS is jj; never git.

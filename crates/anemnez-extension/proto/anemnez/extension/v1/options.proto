@@ -56,10 +56,18 @@ message Result {
   message One {}
 }
 
+// What a call does (D, 2026-11-07). person_act is orthogonal: it says WHO must confirm, while effect
+// says WHAT happens, so a person's act can be WRITE or ACT.
 enum Effect {
   EFFECT_UNSPECIFIED = 0;
+  // Changes nothing.
   READ = 1;
+  // Changes state this product owns and stores, visible in its data afterwards (hold a repo, put a
+  // secret).
   WRITE = 2;
+  // Causes something outside the call's own data: runs a gate, sends a notification, moves a
+  // channel, starts a process.
+  ACT = 3;
 }
 
 // Where a call goes. Default local-first.

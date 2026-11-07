@@ -44,7 +44,7 @@ fn every_health_state_is_the_protos() {
 fn every_option_enum_is_the_protos() {
     use crate::options::*;
     assert_eq!(
-        names(&[Effect::Read, Effect::Write]),
+        names(&[Effect::Read, Effect::Write, Effect::Act]),
         proto_enum(protos::OPTIONS, "Effect")
     );
     assert_eq!(

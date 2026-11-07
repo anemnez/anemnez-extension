@@ -39,14 +39,14 @@ service Fixture {
       description: "Hold a repo, saying why; answered by the instance leading that repo."
       result: { one: {} } effect: WRITE
       route: { keyed: { group: "fixture-repo" key: "repo" } }
-      presence: FULL permission: ASK callers: AGENT blocks: true
+      presence: FULL permission: ASK callers: AGENT blocks: true person_act: true
     };
   }
   rpc Run(RunRequest) returns (RunReply) {
     option (anemnez.extension.v1.anemnez_method) = {
       description: "Run to completion: bounded only by its own end, with no budget."
-      result: { one: {} } effect: WRITE presence: INDEX permission: ASK callers: AGENT
-      runs_to_completion: true
+      result: { one: {} } effect: ACT presence: INDEX permission: ASK callers: AGENT
+      runs_to_completion: true person_act: true
     };
   }
   rpc Wait(WaitRequest) returns (WaitReply) {

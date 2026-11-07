@@ -39,7 +39,7 @@ outside a caller's range is refused at connect with both versions named, never c
 |---|---|---|
 | `description` | text | what the method does, written for the agent that calls it; its quality is a proof in the product's gate |
 | `result` | `cursor` \| `bound(n)` \| `one` | a collection is a resumable cursor or capped at n; a descriptor with an unbounded collection is refused at connect |
-| `effect` | `read` \| `write` | whether it changes anything |
+| `effect` | `read` \| `write` \| `act` | what the call does (D): `read` changes nothing; `write` changes state this product owns, visible in its data afterwards; `act` causes something outside the call's own data (runs a gate, sends a notification, moves a channel, starts a process). `person_act` is orthogonal: who confirms, not what happens |
 | `route` | `leader(group)` \| `leader(group, key)` \| `local-first` \| `any` | where a call goes: the instance leading `group` (its election, fabric SWARM.md), the instance holding the call's `key` in `group` (one leader per key, resolved through Fabric's lock on every call), this host's instance first, or any instance. Default `local-first` |
 | `person_act` | bool | the act is a person's: the caller's grant must be Ask-gated, and the product refuses it from an agent principal without one |
 | `presence` | `full` \| `minimal` \| `index` \| `hidden` | how prominently a caller's tool surface lists it (Substrate's four tiers, TOOL_GUIDE) |

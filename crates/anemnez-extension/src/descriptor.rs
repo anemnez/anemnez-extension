@@ -362,6 +362,7 @@ fn parse(raw: &wire::MethodOptions) -> Parsed {
     let effect = match raw.effect {
         1 => Some(Effect::Read),
         2 => Some(Effect::Write),
+        3 => Some(Effect::Act),
         _ => None,
     };
     let presence = match raw.presence {

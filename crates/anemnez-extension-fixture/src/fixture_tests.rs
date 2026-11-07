@@ -37,6 +37,16 @@ fn the_good_fixture_offers_every_method_shape() {
     );
     assert_eq!(hold.route_key.as_ref().map(|k| k.number), Some(1));
     assert!(by("Run").options.runs_to_completion);
+    // One person's act of each effect, so a bridge's mapping has both cases (C, D).
+    use anemnez_extension::options::Effect;
+    assert_eq!(
+        (hold.options.effect, hold.options.person_act),
+        (Effect::Write, true)
+    );
+    assert_eq!(
+        (by("Run").options.effect, by("Run").options.person_act),
+        (Effect::Act, true)
+    );
     assert!(
         !by("Wait").options.runs_to_completion,
         "Wait owns its budget by its field, not the flag"

@@ -3,12 +3,18 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Whether a method changes anything.
+/// What a call does (D, 2026-11-07); `person_act` is orthogonal (who confirms, not what happens).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[non_exhaustive]
 pub enum Effect {
+    /// Changes nothing.
     Read,
+    /// Changes state this product owns and stores, visible in its data afterwards.
     Write,
+    /// Causes something outside the call's own data: runs a gate, sends a notification, moves a
+    /// channel, starts a process.
+    Act,
 }
 
 /// How prominently a caller's tool surface lists a method (Substrate's four tiers).
