@@ -59,6 +59,19 @@ bytes finds the key without decoding the whole call (B). At call time an empty k
 `no-key` before the call leaves. The bridge resolves the key's holder through Fabric's lock on every
 call and never caches it past one read, so a handoff routes the next call to the new holder (D).
 
+<!-- claim: every-bridge-refuses-a-descriptor-alike -->
+**Every bridge refuses a descriptor alike** (B, D, H, 2026-11-07). `descriptor::check_descriptor`
+takes the encoded `FileDescriptorSet` that `Describe/Get` serves and answers either every offered
+method (path, parsed `MethodOptions`, a keyed route's field) or EVERY refusal, each named with its
+method: `callers-missing`, `permission-missing`, `person-act-allowed`, `result-missing`,
+`unbounded-collection` (an output with a repeated field declared `one`), `effect-missing`,
+`presence-missing`, `description-missing`, `route-key`, `input-unknown`, `options-malformed`. A
+method with no anemnez options is not offered, so nothing gets a face by omission. Substrate's Lua
+mount, Agora's MCP face and the conformance proof all call it. What is a bridge's own (a Lua
+identifier, reserved names, version ranges against the manifest) stays the bridge's. The options are
+protobuf extensions, which `prost_types` drops on decode, so it reads them from each method's raw
+option bytes; a parity test holds that reader to the proto's generated code.
+
 <!-- claim: a-product-pushes-events-as-a-stream-it-serves -->
 **A product's events are one more method it serves**, never a push through Fabric: a server stream
 `Events(after: cursor, kinds?)` declared in the descriptor, one stream with one cursor space, resumable

@@ -446,3 +446,74 @@ fn only_one_uncompressed_frame_is_digested() {
     assert_eq!(crate::digest::digest_frame(&[0, 0, 0]), None, "short");
     assert_eq!(crate::digest::digest_frame(&[]), None, "empty");
 }
+
+/// The kernel's hand-written options decoder reads exactly what the proto's generated code writes:
+/// options encoded with `pb::MethodOptions` (from options.proto) parse to the same values.
+#[test]
+fn the_descriptor_check_reads_the_protos_own_encoding() {
+    fn ld(field: u32, bytes: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        prost::encoding::encode_key(field, prost::encoding::WireType::LengthDelimited, &mut out);
+        prost::encoding::encode_varint(bytes.len() as u64, &mut out);
+        out.extend_from_slice(bytes);
+        out
+    }
+    let options = pb::MethodOptions {
+        description: "Land a train.".into(),
+        result: Some(pb::Result {
+            shape: Some(pb::result::Shape::Bound(50)),
+        }),
+        effect: pb::Effect::Write as i32,
+        route: Some(pb::Route {
+            to: Some(pb::route::To::Leader("herald".into())),
+        }),
+        person_act: true,
+        presence: pb::Presence::Minimal as i32,
+        permission: pb::Permission::Ask as i32,
+        callers: pb::Callers::Product as i32,
+        session: pb::Session::Opens as i32,
+    };
+    let mut method = prost_types::MethodDescriptorProto {
+        name: Some("Land".into()),
+        input_type: Some(".h.v1.Req".into()),
+        output_type: Some(".h.v1.Req".into()),
+        ..Default::default()
+    }
+    .encode_to_vec();
+    method.extend(ld(4, &ld(51701, &options.encode_to_vec())));
+    let mut service = prost_types::ServiceDescriptorProto {
+        name: Some("H".into()),
+        ..Default::default()
+    }
+    .encode_to_vec();
+    service.extend(ld(2, &method));
+    let mut file = prost_types::FileDescriptorProto {
+        package: Some("h.v1".into()),
+        message_type: vec![prost_types::DescriptorProto {
+            name: Some("Req".into()),
+            ..Default::default()
+        }],
+        ..Default::default()
+    }
+    .encode_to_vec();
+    file.extend(ld(6, &service));
+
+    let methods = anemnez_extension::descriptor::check_descriptor(&ld(1, &file)).expect("admitted");
+    use anemnez_extension::options::*;
+    assert_eq!(methods.len(), 1);
+    assert_eq!(methods[0].path, "/h.v1.H/Land");
+    assert_eq!(
+        methods[0].options,
+        MethodOptions {
+            description: "Land a train.".into(),
+            result: ResultShape::Bound(50),
+            effect: Effect::Write,
+            route: Route::Leader("herald".into()),
+            person_act: true,
+            presence: Presence::Minimal,
+            permission: Permission::Ask,
+            callers: Callers::Product,
+            session: Some(Session::Opens),
+        }
+    );
+}

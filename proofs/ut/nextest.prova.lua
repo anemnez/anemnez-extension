@@ -88,3 +88,5 @@ spoken_for("the-verifier-applies-retired-versus-revoked", "principal_tests::a_re
 spoken_for("the-verifier-applies-retired-versus-revoked (units)", "principal_tests::a_record_time_in_the_wrong_unit_is_refused_as_implausible")
 spoken_for("a-nonce-is-durable-before-the-method-runs (a crash)", "edge_tests::an_acknowledged_nonce_survives_an_abort_and_a_reopen")
 spoken_for("a-nonce-is-durable-before-the-method-runs (group commit)", "edge_tests::a_batch_is_one_sync")
+spoken_for("every-bridge-refuses-a-descriptor-alike", "descriptor::tests::every_refusal_is_answered_by_name")
+spoken_for("every-bridge-refuses-a-descriptor-alike (parity)", "serve_tests::the_descriptor_check_reads_the_protos_own_encoding")

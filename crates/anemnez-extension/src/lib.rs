@@ -8,6 +8,7 @@
 //! These are plain Rust types for the contract's vocabulary. The protos are the source of truth,
 //! and a test holds every enum here to its proto, name for name.
 
+pub mod descriptor;
 pub mod health;
 pub mod options;
 pub mod signed;

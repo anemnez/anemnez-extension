@@ -6,7 +6,7 @@ members = ["crates/*"]
 edition = "2024"
 repository = "https://github.com/anemnez/anemnez-extension"
 license = "MIT OR Apache-2.0"
-version = "0.2.2"
+version = "0.2.4"
 # Released to Artichoke only for now (the User, 2026-11-05); crates.io comes when third-party
 # extensibility is advertised, and then Herald publishes each version to both, same bytes
 # (fabric CONVERGENCE.md §0 (7)).
@@ -21,7 +21,7 @@ serde_json = "1"
 
 # The serving face (crates/anemnez-extension-serve): the gRPC stack matches Substrate's and
 # anemnez-service's (tonic 0.12 / prost 0.13), so a product pulls in no second copy.
-anemnez-extension = { path = "crates/anemnez-extension", version = "0.2.2", registry = "artichoke" }
+anemnez-extension = { path = "crates/anemnez-extension", version = "0.2.4", registry = "artichoke" }
 anemnez-clock = { version = "0.1.4", registry = "artichoke" }
 tonic = "0.12"
 tonic-build = "0.12"
