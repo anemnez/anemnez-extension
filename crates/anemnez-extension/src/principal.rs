@@ -373,6 +373,66 @@ impl Token {
     }
 }
 
+/// One key in an issuer's record (PRINCIPAL_TOKEN §2). Times are Unix MILLISECONDS, like a token's
+/// `issued_ms`, and the unit is in each name so a seconds value is never mistaken for one (D).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PublishedKey {
+    pub key_id: String,
+    /// `ed25519` is the one algorithm this version verifies.
+    pub alg: String,
+    pub key: Vec<u8>,
+    pub made_at_ms: u64,
+    /// Rotated: still verifies a token issued before this.
+    pub retired_at_ms: Option<u64>,
+    /// Revoked (compromise): refuses every token, whatever its `issued` says.
+    pub revoked_at_ms: Option<u64>,
+}
+
+/// An issuer's published record (`fabric.principals/<issuer>`), its attestation already checked
+/// against a pinned host node by whoever read it. Pure data, so a client reading Fabric and the serve
+/// crate verifying calls share one type and one rule (D, 2026-11-07).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeyRecord {
+    pub issuer: String,
+    pub keys: Vec<PublishedKey>,
+}
+
+impl KeyRecord {
+    /// The key that may verify a token with `key_id` issued at `issued` (step 5's rule, applied the
+    /// same for every product): a revoked key never, since a thief holding it can backdate `issued`;
+    /// a retired key only for a token issued before its retirement; a live key always.
+    ///
+    /// # Errors
+    /// [`Refusal::UnknownKey`] when no key may.
+    pub fn key_for(&self, key_id: &str, issued_ms: u64) -> Result<&[u8], Refusal> {
+        let key = self
+            .keys
+            .iter()
+            .find(|k| k.key_id == key_id)
+            .ok_or(Refusal::UnknownKey)?;
+        // A unit slip fails loudly (D): a time outside 2020 to 2100 in milliseconds is a record written
+        // in the wrong unit, and the record is refused rather than compared off by a thousand.
+        let times = [Some(key.made_at_ms), key.retired_at_ms, key.revoked_at_ms];
+        if times
+            .into_iter()
+            .flatten()
+            .any(|t| !PLAUSIBLE_MS.contains(&t))
+        {
+            return Err(Refusal::Unattested);
+        }
+        if key.alg != "ed25519" || key.revoked_at_ms.is_some() {
+            return Err(Refusal::UnknownKey);
+        }
+        if key
+            .retired_at_ms
+            .is_some_and(|retired| issued_ms >= retired)
+        {
+            return Err(Refusal::UnknownKey);
+        }
+        Ok(&key.key)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -504,6 +564,41 @@ mod tests {
         );
         assert!(plausible("x", NOW_MS).is_ok());
         assert!(plausible("x", NOW_MS * 1_000).is_err(), "microseconds too");
+    }
+
+    fn record(retired_at_ms: Option<u64>, revoked_at_ms: Option<u64>) -> KeyRecord {
+        KeyRecord {
+            issuer: "01a1-substrate".into(),
+            keys: vec![PublishedKey {
+                key_id: "k1".into(),
+                alg: "ed25519".into(),
+                key: vec![7; 32],
+                made_at_ms: NOW_MS - 86_400_000,
+                retired_at_ms,
+                revoked_at_ms,
+            }],
+        }
+    }
+
+    /// Step 5's rule, once for every product: live verifies, revoked never (a backdated issued
+    /// included), retired only before its retirement, and a seconds-sized time is unattested.
+    #[test]
+    fn key_for_applies_retired_versus_revoked() {
+        assert!(record(None, None).key_for("k1", NOW_MS).is_ok());
+        assert_eq!(
+            record(None, None).key_for("k2", NOW_MS),
+            Err(Refusal::UnknownKey)
+        );
+        let revoked = record(None, Some(NOW_MS));
+        assert_eq!(
+            revoked.key_for("k1", NOW_MS - 3_600_000),
+            Err(Refusal::UnknownKey)
+        );
+        let retired = record(Some(NOW_MS), None);
+        assert!(retired.key_for("k1", NOW_MS - 1).is_ok());
+        assert_eq!(retired.key_for("k1", NOW_MS), Err(Refusal::UnknownKey));
+        let in_secs = record(Some(NOW_MS / 1_000), None);
+        assert_eq!(in_secs.key_for("k1", NOW_MS), Err(Refusal::Unattested));
     }
 
     #[test]

@@ -22,63 +22,9 @@ use anemnez_clock::{Clock, Mono};
 use crate::digest::RequestDigest;
 use anemnez_extension::principal::{self, Claims, Expect, MAX_TTL_MS, Refusal, SKEW_MS, Token};
 
-/// One key in an issuer's record (PRINCIPAL_TOKEN §2). Times are Unix MILLISECONDS, like a token's
-/// `issued_ms`, and the unit is in each name so a seconds value is never mistaken for one (D).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PublishedKey {
-    pub key_id: String,
-    /// `ed25519` is the one algorithm this version verifies.
-    pub alg: String,
-    pub key: Vec<u8>,
-    pub made_at_ms: u64,
-    /// Rotated: still verifies a token issued before this.
-    pub retired_at_ms: Option<u64>,
-    /// Revoked (compromise): refuses every token, whatever its `issued` says.
-    pub revoked_at_ms: Option<u64>,
-}
-
-/// An issuer's published record, its attestation already checked against a pinned host node.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct KeyRecord {
-    pub issuer: String,
-    pub keys: Vec<PublishedKey>,
-}
-
-impl KeyRecord {
-    /// The key that may verify a token with `key_id` issued at `issued` (step 5's rule, applied the
-    /// same for every product): a revoked key never, since a thief holding it can backdate `issued`;
-    /// a retired key only for a token issued before its retirement; a live key always.
-    ///
-    /// # Errors
-    /// [`Refusal::UnknownKey`] when no key may.
-    pub fn key_for(&self, key_id: &str, issued_ms: u64) -> Result<&[u8], Refusal> {
-        let key = self
-            .keys
-            .iter()
-            .find(|k| k.key_id == key_id)
-            .ok_or(Refusal::UnknownKey)?;
-        // A unit slip fails loudly (D): a time outside 2020 to 2100 in milliseconds is a record written
-        // in the wrong unit, and the record is refused rather than compared off by a thousand.
-        let times = [Some(key.made_at_ms), key.retired_at_ms, key.revoked_at_ms];
-        if times
-            .into_iter()
-            .flatten()
-            .any(|t| !principal::PLAUSIBLE_MS.contains(&t))
-        {
-            return Err(Refusal::Unattested);
-        }
-        if key.alg != "ed25519" || key.revoked_at_ms.is_some() {
-            return Err(Refusal::UnknownKey);
-        }
-        if key
-            .retired_at_ms
-            .is_some_and(|retired| issued_ms >= retired)
-        {
-            return Err(Refusal::UnknownKey);
-        }
-        Ok(&key.key)
-    }
-}
+/// The issuer's record and step 5's rule live in the kernel (D, 2026-11-07); re-exported here so
+/// nothing moves for this crate's users.
+pub use anemnez_extension::principal::{KeyRecord, PublishedKey};
 
 /// Steps 5 and 6: the issuer's published record, with its attestation checked.
 #[tonic::async_trait]
