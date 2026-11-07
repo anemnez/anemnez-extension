@@ -95,6 +95,10 @@ message ServiceOptions {
   CursorScope cursor_scope = 3;
   // How deep health parts nest.
   uint32 parts_depth = 4;
+  // How many events the extension keeps: how far behind a subscriber may fall before its stream
+  // ends with data-loss, and how old a cursor may be before it is out-of-range. A consumer sizes
+  // its reading to it.
+  uint32 events_kept = 5;
 }
 
 enum CursorScope {

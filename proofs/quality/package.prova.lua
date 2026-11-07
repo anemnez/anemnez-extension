@@ -1,4 +1,5 @@
--- Quality gate: the crate is always publishable.
+-- Quality gate: each crate is always publishable (the kernel, anemnez-extension, and its serving face,
+-- anemnez-extension-serve).
 --
 -- anemnez-extension is published to Artichoke's Cargo registry (`publish = ["artichoke"]`), and its
 -- consumers build from that published `.crate`, not from this checkout. So the gate builds the
@@ -10,12 +11,12 @@
 
 local packaged = prova.fixture("cargo_package", Scope.File, function()
 	return shell.run(
-		{ "cargo", "package", "-p", "anemnez-extension", "--allow-dirty" },
+		{ "cargo", "package", "-p", "anemnez-extension", "-p", "anemnez-extension-serve", "--allow-dirty" },
 		{ cwd = prova.root, merge_stderr = true, timeout = "900s" }
 	)
 end)
 
-prova.test("the crate packages and builds from its package alone", {
+prova.test("each crate packages and builds from its package alone", {
 	requires = { "cargo" },
 	switch = "quality",
 	locks = { prova.writes("cargo") },

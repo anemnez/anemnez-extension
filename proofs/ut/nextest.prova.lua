@@ -55,3 +55,26 @@ end)
 --   	end
 --   	t:expect(false, "parser::tests::rejects_unterminated_input is missing from the account"):is_true()
 --   end)
+
+-- The serving face's claims (CONTRACT.md §2; substrate docs/plans/ASYNCIFICATION.md names the
+-- `async-…` ones), each spoken for by its named case in the deputy's account.
+local function spoken_for(claim, case)
+	prova.test(claim .. ", spoken for by " .. case, {
+		requires = { "cargo-nextest" },
+		locks = { prova.writes("cargo") },
+	}, function(t)
+		for _, c in ipairs(junit.load(t:use(deputy)).cases) do
+			if c.name == case then
+				t:expect(c.outcome, c.name):equals("passed")
+				return
+			end
+		end
+		t:expect(false, case .. " is missing from the account"):is_true()
+	end)
+end
+
+spoken_for("async-stream-never-awaits-a-subscriber", "serve_tests::a_publisher_never_waits_on_a_subscriber_that_never_reads")
+spoken_for("a-stream-ends-at-its-tokens-expiry-on-the-injected-clock", "serve_tests::a_stream_ends_with_expired_at_its_tokens_expiry_on_the_injected_clock")
+spoken_for("async-cancelled-only-by-its-owner", "serve_tests::a_dropped_subscriber_cancels_nothing")
+spoken_for("health-is-state-with-parts", "serve_tests::a_watcher_reads_health_then_sees_only_later_changes")
+spoken_for("a-product-pushes-events-as-a-stream-it-serves", "serve_tests::a_foreign_cursor_is_not_mine_and_an_old_one_is_out_of_range")

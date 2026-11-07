@@ -5,3 +5,22 @@
 # too-many-lines-threshold is also 100, so the census works identically whether this file landed
 # or the project's own config won.
 too-many-lines-threshold = 100
+
+# The clock standard (prova-project-standards `cargo/clock-bans`): time is read and waited on through
+# an injected anemnez-clock `Clock`, never off the system directly, so a test advances a ManualClock
+# instead of waiting a timer out. The kernel reads no time at all (`signed::fresh` takes `now_ms`);
+# the serving face reads only the Clock it is given. Clippy runs at -D warnings, so any hit is red.
+disallowed-methods = [
+	{ path = "std::time::Instant::now", reason = "clock: read Clock::now_mono from the injected Clock" },
+	{ path = "std::time::SystemTime::now", reason = "clock: read Clock::now_wall from the injected Clock" },
+	{ path = "std::thread::sleep", reason = "clock: wait with Clock::sleep on the injected Clock" },
+	{ path = "tokio::time::sleep", reason = "clock: wait with Clock::sleep on the injected Clock" },
+	{ path = "tokio::time::sleep_until", reason = "clock: wait with Clock::sleep_until on the injected Clock" },
+	{ path = "tokio::time::interval", reason = "clock: tick with Clock::interval on the injected Clock" },
+	{ path = "tokio::time::interval_at", reason = "clock: tick with Clock::interval_at on the injected Clock" },
+	{ path = "tokio::time::timeout", reason = "clock: bound with Clock::timeout on the injected Clock" },
+	{ path = "tokio::time::timeout_at", reason = "clock: bound with Clock::timeout_at on the injected Clock" },
+	{ path = "tokio::time::Instant::now", reason = "clock: read Clock::now_mono from the injected Clock" },
+	{ path = "chrono::Utc::now", reason = "clock: read Clock::now_wall().to_chrono() from the injected Clock" },
+	{ path = "chrono::Local::now", reason = "clock: read Clock::now_wall() from the injected Clock" },
+]

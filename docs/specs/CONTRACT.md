@@ -59,7 +59,9 @@ never papers over it) (I, B). An instance-scoped cursor also names the instance'
 `<inst8>.<boot>:<seq>`), so a cursor from before a restart, whose sequence the restart reset, is
 `cursor-not-mine` too, never silently resumed. Two more refusals end a stream, each surfaced, never
 silent: `out-of-range`, a cursor older than what is kept (start fresh at the head), and `data-loss`, a
-subscriber fallen behind the live stream (resubscribe from the last cursor seen). A stream's principal is checked when it opens, and the product ends it at
+subscriber fallen behind the live stream (resubscribe from the last cursor seen). The descriptor also states `events_kept`, how many events the product keeps: how far
+behind a subscriber may fall before `data-loss`, and how old a cursor may be before `out-of-range`, so a
+consumer sizes its reading to it (C). A stream's principal is checked when it opens, and the product ends it at
 that token's expiry with a retryable `expired`; the subscriber re-mints and resumes from its cursor. A
 caller subscribes to the products it is granted; across hosts the stream rides Fabric's stream brokering
 (fabric SWARM.md `#fabric-brokers-streams-not-protocols`).
@@ -104,3 +106,35 @@ replayed as another. The algorithm tag is framed from day one (`ed25519` today, 
 Secure Enclave key arrives), so a new algorithm needs no new framing. `signed::verify` checks the
 signature and `signed::fresh` the window from `SKEW_MS` and `MAX_TTL_MS`, given the verifier's own
 clock reading. Each schema keeps its own refusal steps (audience, method, nonce) beside these.
+
+## 2. The serving face: `anemnez-extension-serve`
+
+The kernel crate is pure: types, the protos and the signed framing, with no runtime and no clock
+(substrate `docs/plans/ASYNCIFICATION.md`, layer 1). Serving the contract is async (layer 3), and
+lives in a crate of its own, `anemnez-extension-serve`, never a feature of the kernel, because Cargo
+unifies features and one consumer's `serve` would put tokio into every other's kernel build (B). It
+offers a product the contract's three services: a `Journal` behind `Events`, a health `Board` behind
+`Health`, and `Describe` over the product's own `FileDescriptorSet`. A product takes them; it does
+not reimplement them, so every product keeps these rules alike:
+
+<!-- claim: async-stream-never-awaits-a-subscriber -->
+**Publishing never waits on a subscriber.** `Journal::publish` is a plain call: it appends and wakes.
+A subscriber is a position in the journal, never a queue the publisher fills, so a subscriber that
+never reads costs the publisher nothing. One that falls more than `events_kept` behind has its stream
+ended with `data-loss`, never silently skipped.
+
+<!-- claim: a-stream-ends-at-its-tokens-expiry-on-the-injected-clock -->
+**A stream ends at its token's expiry, on the injected clock.** The serving face takes an
+`anemnez-clock` `Clock` at construction and never reads the system's; a stream's expiry is a `Mono`
+deadline on that clock, read once when it opens (C), so a `ManualClock` test drives it end to end.
+
+<!-- claim: async-cancelled-only-by-its-owner -->
+**A dropped subscriber cancels nothing.** A stream only reads the journal; the product's own work
+never runs inside a handler's future, so a client that disconnects ends its stream and nothing else.
+
+**The refusals reach a caller by name.** A refusal's name is the gRPC status message, under the
+nearest code: `cursor-not-mine` FAILED_PRECONDITION, `out-of-range` OUT_OF_RANGE, `data-loss`
+DATA_LOSS, `expired` UNAUTHENTICATED (retryable: re-mint and resume from the last cursor).
+
+Cursors are instance-scoped today (`<inst8>.<boot>:<seq>`); a swarm-scoped journal, whose cursors
+resume at any instance, is the next slice.

@@ -1,0 +1,10 @@
+# Artichoke's Cargo registry (Fabric): where every Anemnez library is published by Herald, and taken
+# from BY VERSION (fabric CONVERGENCE.md §0 (14)). The address is THIS host's own Artichoke on
+# loopback, so a build reaches no other machine. Reads need a token: `[registries.artichoke] token`
+# in ~/.cargo/credentials.toml, minted on the host's own Artichoke, never copied between hosts.
+[registries.artichoke]
+index = "sparse+http://127.0.0.1:7787/crates/index/"
+
+# Cargo refuses an authenticated registry unless a credential provider is on.
+[registry]
+global-credential-providers = ["cargo:token"]

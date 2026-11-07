@@ -16,3 +16,19 @@ publish = ["artichoke"]
 serde = { version = "1", features = ["derive"] }
 ed25519-dalek = "2"
 serde_json = "1"
+
+# The serving face (crates/anemnez-extension-serve): the gRPC stack matches Substrate's and
+# anemnez-service's (tonic 0.12 / prost 0.13), so a product pulls in no second copy.
+anemnez-extension = { path = "crates/anemnez-extension", version = "0.1.1", registry = "artichoke" }
+anemnez-clock = { version = "0.1.4", registry = "artichoke" }
+tonic = "0.12"
+tonic-build = "0.12"
+prost = "0.13"
+prost-types = "0.13"
+tokio = { version = "1", features = ["sync", "macros"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+sha2 = "0.10"
+tempfile = "3"
+tokio-stream = { version = "0.1", features = ["net"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+tower = "0.5"
