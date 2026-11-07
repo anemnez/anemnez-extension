@@ -16,9 +16,9 @@ a public repo). Read `docs/specs/CONTRACT.md` first.
   them name for name by `parity_tests.rs`.
 - **Proofs:** `prova`, `prova run ut`, `prova run quality`, `prova run all`.
 - **Releasing is Herald's**, to Artichoke only for now. Land by train; never publish by hand.
-- **A train that changes the kernel API the serve crate uses bumps the workspace's base version**
-  (patch for an addition, minor for a break), which is semver. The package proof builds serve against
-  the PUBLISHED kernel of that version, exactly as a consumer resolves it, so it goes red until the
-  bump; never a `[patch]` overlay, which would prove a combination nobody can install (B, D, H,
-  2026-11-07).
+- **Versions: Herald treats the workspace's base version as a floor** and releases the next free
+  number, so a train never bumps it just to release. Bump it past the NEWEST PUBLISHED kernel only
+  when the serve crate starts using a kernel item not yet published: the package proof builds serve
+  against the published kernel exactly as a consumer resolves it, so it goes red until then. Never a
+  `[patch]` overlay, which would prove a combination nobody can install (B, D, H, 2026-11-07).
 - VCS is jj; never git.

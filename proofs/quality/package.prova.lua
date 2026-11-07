@@ -25,8 +25,8 @@ prova.test("each crate packages and builds from its package alone", {
 	local out = r.stdout or ""
 	t:expect(
 		r.code,
-		"cargo package failed. If anemnez-extension-serve uses a kernel item the published kernel of this "
-			.. "version lacks, bump the workspace version in Cargo.toml (CLAUDE.md):\n" .. out
+		"cargo package failed. If anemnez-extension-serve uses a kernel item the newest published kernel "
+			.. "lacks, bump the workspace version past that published version (CLAUDE.md):\n" .. out
 	):equals(0)
 	t:expect(out:find("Packaged", 1, true), "cargo package reported no package:\n" .. out):never():is_nil()
 	t:expect(out:find("Verifying", 1, true), "the package was not built on its own:\n" .. out):never():is_nil()
