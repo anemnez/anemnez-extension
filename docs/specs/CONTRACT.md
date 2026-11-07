@@ -182,8 +182,8 @@ does not know still verifies, and a request whose bytes changed in flight is ref
 `Nonces::record` has, so a method never runs on a token whose nonce a restart could forget. The crate
 ships that store, `FileNonces::open(data_dir, clock)` (K, D), in its one edge module (ASYNCIFICATION
 §4): one writer thread owns an append-only file and each caller awaits a oneshot. It group-commits:
-it takes every record already queued, appends them, makes them durable with ONE full sync (`F_FULLFSYNC` on
-macOS, where `fsync` leaves data in the drive's cache: D), and only then answers each, so a burst costs one fsync. At open it keeps what has not passed its hold (a torn
+it takes every record already queued, appends them, makes them durable with ONE full sync (std's `sync_data`, which
+is `F_FULLFSYNC` on macOS, where a plain `fsync` leaves data in the drive's cache: D, J), and only then answers each, so a burst costs one fsync. At open it keeps what has not passed its hold (a torn
 last line, never answered, is dropped), and it compacts by atomic rename once dead entries dominate.
 A write that fails refuses the batch, never admits it. An acknowledged nonce survives a crash: a
 child process records one, is answered, and aborts, and the reopened store still refuses it.

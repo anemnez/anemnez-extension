@@ -180,29 +180,13 @@ impl Store {
     }
 }
 
-/// Make a file's writes durable on the DRIVE, not just handed to it (D, 2026-11-07). On macOS
-/// `fsync` (what `sync_data` does) leaves the data in the drive's own write cache, so an answered
-/// nonce could be lost on power loss and its token replayed after a reboot. `F_FULLFSYNC` asks the
-/// drive to flush, as J's raft WAL does; a filesystem that does not support it answers ENOTSUP or
-/// EINVAL, and then `sync_data` is the best there is. With group commit this is one full flush per
-/// batch. A process-abort test cannot see the difference (the page cache survives an abort); this
-/// comment is the reason the call is what it is.
+/// Make a file's writes durable on the drive. On macOS a plain `fsync` leaves data in the drive's
+/// own write cache, so an answered nonce could be lost on power loss and its token replayed after a
+/// reboot. Rust std's `sync_data` (and `sync_all`) on Apple platforms already calls
+/// `fcntl(F_FULLFSYNC)`, which asks the drive to flush (J measured it on MB16, 2026-11-07: about 5 ms,
+/// against 19 µs for a plain fsync). So this IS `sync_data`, by name, so nobody swaps in a raw
+/// `libc`/`nix` fsync, which would not flush the drive. With group commit it is one flush per batch.
 pub fn full_sync(file: &File) -> io::Result<()> {
-    #[cfg(any(target_os = "macos", target_os = "ios"))]
-    {
-        use std::os::fd::AsRawFd;
-        // SAFETY: fcntl with F_FULLFSYNC takes only the descriptor, which `file` owns and keeps open
-        // for the duration of the call; it reads and writes no memory of ours.
-        let done = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_FULLFSYNC) };
-        if done != -1 {
-            return Ok(());
-        }
-        let error = io::Error::last_os_error();
-        match error.raw_os_error() {
-            Some(libc::ENOTSUP | libc::EINVAL) => {}
-            _ => return Err(error),
-        }
-    }
     file.sync_data()
 }
 
