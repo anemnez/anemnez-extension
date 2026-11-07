@@ -179,8 +179,14 @@ does not know still verifies, and a request whose bytes changed in flight is ref
 
 <!-- claim: a-nonce-is-durable-before-the-method-runs -->
 **A nonce is durable before the method runs.** `Verifier::verify` answers only after
-`Nonces::record` has, so a method never runs on a token whose nonce a restart could forget. A product
-supplies a durable store that group-commits (one fsync per batch of a few milliseconds);
+`Nonces::record` has, so a method never runs on a token whose nonce a restart could forget. The crate
+ships that store, `FileNonces::open(data_dir, clock)` (K, D), in its one edge module (ASYNCIFICATION
+§4): one writer thread owns an append-only file and each caller awaits a oneshot. It group-commits:
+it takes every record already queued, appends them, makes them durable with ONE `sync_data`, and only
+then answers each, so a burst costs one fsync. At open it keeps what has not passed its hold (a torn
+last line, never answered, is dropped), and it compacts by atomic rename once dead entries dominate.
+A write that fails refuses the batch, never admits it. An acknowledged nonce survives a crash: a
+child process records one, is answered, and aborts, and the reopened store still refuses it.
 `MemoryNonces` is for tests only.
 
 **The rollout rule** (PRINCIPAL_TOKEN §3, B and D, for every product). A call carrying no token is

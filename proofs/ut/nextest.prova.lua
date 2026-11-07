@@ -86,3 +86,5 @@ spoken_for("a-token-binds-the-bytes-as-received", "serve_tests::a_request_with_a
 spoken_for("a-token-binds-the-bytes-as-received (in flight)", "serve_tests::the_refusals_reach_a_grpc_caller_by_name")
 spoken_for("the-verifier-applies-retired-versus-revoked", "principal_tests::a_revoked_key_refuses_even_a_backdated_token_and_a_retired_key_only_later_ones")
 spoken_for("the-verifier-applies-retired-versus-revoked (units)", "principal_tests::a_record_time_in_the_wrong_unit_is_refused_as_implausible")
+spoken_for("a-nonce-is-durable-before-the-method-runs (a crash)", "edge_tests::an_acknowledged_nonce_survives_an_abort_and_a_reopen")
+spoken_for("a-nonce-is-durable-before-the-method-runs (group commit)", "edge_tests::a_batch_is_one_sync")

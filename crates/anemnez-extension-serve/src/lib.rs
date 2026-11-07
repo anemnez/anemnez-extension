@@ -17,12 +17,14 @@
 
 pub mod describe;
 pub mod digest;
+pub mod edge;
 pub mod health;
 pub mod journal;
 pub mod principal;
 
 pub use describe::Describe;
 pub use digest::{DigestLayer, RequestDigest};
+pub use edge::FileNonces;
 pub use health::Board;
 pub use journal::{EventsService, Journal, Refusal, Subscription};
 pub use principal::{
@@ -35,6 +37,8 @@ pub mod pb {
     tonic::include_proto!("anemnez.extension.v1");
 }
 
+#[cfg(test)]
+mod edge_tests;
 #[cfg(test)]
 mod principal_tests;
 #[cfg(test)]
