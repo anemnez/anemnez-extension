@@ -90,3 +90,5 @@ spoken_for("a-nonce-is-durable-before-the-method-runs (a crash)", "edge_tests::a
 spoken_for("a-nonce-is-durable-before-the-method-runs (group commit)", "edge_tests::a_batch_is_one_sync")
 spoken_for("every-bridge-refuses-a-descriptor-alike", "descriptor::tests::every_refusal_is_answered_by_name")
 spoken_for("every-bridge-refuses-a-descriptor-alike (parity)", "serve_tests::the_descriptor_check_reads_the_protos_own_encoding")
+spoken_for("every-bridge-mounts-the-same-fixture", "fixture_tests::the_good_fixture_answers_over_its_socket")
+spoken_for("every-bridge-mounts-the-same-fixture (variants)", "fixture_tests::each_variant_is_refused_where_its_rule_lives")

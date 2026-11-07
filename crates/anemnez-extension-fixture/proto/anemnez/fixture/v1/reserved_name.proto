@@ -1,0 +1,19 @@
+// Fixture variant 'reserved_name': a descriptor a bridge must refuse at connect.
+syntax = "proto3";
+
+package anemnez.fixture.reservedname.v1;
+
+import "anemnez/extension/v1/options.proto";
+
+service Fixture {
+  option (anemnez.extension.v1.anemnez_service) = { contract: "string" version: "1.0.0" cursor_scope: INSTANCE events_kept: 64 };
+  rpc Get(Req) returns (One) { option (anemnez.extension.v1.anemnez_method) = { description: "One item." result: { one: {} } effect: READ presence: FULL permission: ALLOW callers: AGENT }; }
+}
+
+message Req {}
+message One {
+  string id = 1;
+}
+message Many {
+  repeated string ids = 1;
+}

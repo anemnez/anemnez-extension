@@ -1,0 +1,97 @@
+// The fixture product: one of each method shape the contract describes, so a bridge's mount and the
+// conformance proof run against one real descriptor (anemnez-extension CONTRACT.md).
+syntax = "proto3";
+
+package anemnez.fixture.v1;
+
+import "anemnez/extension/v1/options.proto";
+
+service Fixture {
+  option (anemnez.extension.v1.anemnez_service) = {
+    contract: "fixture"
+    version: "1.0.0"
+    cursor_scope: INSTANCE
+    events_kept: 64
+  };
+
+  rpc Items(ItemsRequest) returns (ItemsReply) {
+    option (anemnez.extension.v1.anemnez_method) = {
+      description: "Every item, a page at a time: pass the reply's next as cursor until it is empty."
+      result: { cursor: {} } effect: READ route: { any: {} }
+      presence: FULL permission: ALLOW callers: AGENT
+      examples: "fixture.items{cursor = ''}"
+    };
+  }
+  rpc Recent(RecentRequest) returns (RecentReply) {
+    option (anemnez.extension.v1.anemnez_method) = {
+      description: "The five newest items."
+      result: { bound: 5 } effect: READ presence: FULL permission: ALLOW callers: AGENT
+    };
+  }
+  rpc Get(GetRequest) returns (Item) {
+    option (anemnez.extension.v1.anemnez_method) = {
+      description: "One item by id."
+      result: { one: {} } effect: READ presence: MINIMAL permission: ALLOW callers: AGENT
+    };
+  }
+  rpc Hold(HoldRequest) returns (HoldReply) {
+    option (anemnez.extension.v1.anemnez_method) = {
+      description: "Hold a repo, saying why; answered by the instance leading that repo."
+      result: { one: {} } effect: WRITE
+      route: { keyed: { group: "fixture-repo" key: "repo" } }
+      presence: FULL permission: ASK callers: AGENT blocks: true
+    };
+  }
+  rpc Run(RunRequest) returns (RunReply) {
+    option (anemnez.extension.v1.anemnez_method) = {
+      description: "Run to completion: bounded only by its own end, with no budget."
+      result: { one: {} } effect: WRITE presence: INDEX permission: ASK callers: AGENT
+      runs_to_completion: true
+    };
+  }
+  rpc Wait(WaitRequest) returns (WaitReply) {
+    option (anemnez.extension.v1.anemnez_method) = {
+      description: "Wait up to timeout_ms on the fixture's clock: the request's own budget."
+      result: { one: {} } effect: READ presence: INDEX permission: ALLOW callers: AGENT
+    };
+  }
+  // No anemnez options: not offered, so no bridge gives it a face ('not exposed').
+  rpc Ping(PingRequest) returns (PingReply);
+}
+
+message Item {
+  string id = 1;
+  string name = 2;
+}
+message ItemsRequest {
+  string cursor = 1;
+}
+message ItemsReply {
+  repeated Item items = 1;
+  string next = 2;
+}
+message RecentRequest {}
+message RecentReply {
+  repeated Item items = 1;
+}
+message GetRequest {
+  string id = 1;
+}
+message HoldRequest {
+  string repo = 1;
+  string why = 2;
+}
+message HoldReply {
+  string repo = 1;
+  string cursor = 2;
+}
+message RunRequest {}
+message RunReply {}
+message WaitRequest {
+  uint64 timeout_ms = 1;
+}
+message WaitReply {
+  uint64 waited_ms = 1;
+}
+message PingRequest {}
+message PingReply {}

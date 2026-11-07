@@ -11,7 +11,7 @@
 
 local packaged = prova.fixture("cargo_package", Scope.File, function()
 	return shell.run(
-		{ "cargo", "package", "-p", "anemnez-extension", "-p", "anemnez-extension-serve", "--allow-dirty" },
+		{ "cargo", "package", "-p", "anemnez-extension", "-p", "anemnez-extension-serve", "-p", "anemnez-extension-fixture", "--allow-dirty" },
 		{ cwd = prova.root, merge_stderr = true, timeout = "900s" }
 	)
 end)

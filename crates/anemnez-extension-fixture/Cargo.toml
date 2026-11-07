@@ -1,0 +1,28 @@
+[package]
+name = "anemnez-extension-fixture"
+description = "A tiny Anemnez extension with one of each method shape, and variants a bridge must refuse: what every bridge's mount test and the conformance proof run against"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+anemnez-extension.workspace = true
+anemnez-extension-serve = { path = "../anemnez-extension-serve", version = "0.3.0", registry = "artichoke" }
+anemnez-clock.workspace = true
+tonic.workspace = true
+prost.workspace = true
+tokio = { workspace = true, features = ["net", "rt"] }
+tokio-stream.workspace = true
+
+[build-dependencies]
+anemnez-extension.workspace = true
+tonic-build.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tempfile.workspace = true
+hyper-util.workspace = true
+tower.workspace = true
+http.workspace = true

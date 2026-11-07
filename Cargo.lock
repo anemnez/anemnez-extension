@@ -35,6 +35,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "anemnez-extension-fixture"
+version = "0.3.0"
+dependencies = [
+ "anemnez-clock",
+ "anemnez-extension",
+ "anemnez-extension-serve",
+ "http",
+ "hyper-util",
+ "prost",
+ "tempfile",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+ "tonic-build",
+ "tower 0.5.3",
+]
+
+[[package]]
 name = "anemnez-extension-serve"
 version = "0.3.0"
 dependencies = [

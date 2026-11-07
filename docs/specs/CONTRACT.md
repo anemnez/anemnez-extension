@@ -218,3 +218,19 @@ DATA_LOSS, `expired` UNAUTHENTICATED (retryable: re-mint and resume from the las
 
 Cursors are instance-scoped today (`<inst8>.<boot>:<seq>`); a swarm-scoped journal, whose cursors
 resume at any instance, is the next slice.
+
+## 3. The fixture: `anemnez-extension-fixture`
+
+<!-- claim: every-bridge-mounts-the-same-fixture -->
+**Every bridge is proven against the same fixture product** (B, C, D, H, 2026-11-07), so a bridge
+and the contract cannot drift. `anemnez_extension_fixture::serve(dir, clock, Variant)` runs a tiny
+extension in-process on a Unix socket with one of each method shape: `Items` (a cursor Sequence,
+route `any`), `Recent` (`bound(5)`), `Get` (`one`), `Hold` (a keyed-leader write that `blocks`),
+`Run` (`runs_to_completion`), `Wait(timeout_ms)` (owns its budget by its field, not the flag: C),
+and `Ping` with no anemnez options (not exposed: D), plus the contract's Describe, Health and
+Events. Describe serves the variant's real protoc `FileDescriptorSet`. The refusing variants are
+`Unbounded` and `PersonActAllow`, which `check_descriptor` refuses, and `WrongMajor`,
+`CollidingNames` and `ReservedName`, which it admits for the bridge to refuse, since those rules are
+the bridge's. Every unary reply echoes the caller's principal token's digest as
+`anemnez-principal-digest`, so a call path can be proven to carry the token end to end; tokens are
+not verified by the fixture yet.
