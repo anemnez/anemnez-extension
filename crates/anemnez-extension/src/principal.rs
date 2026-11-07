@@ -21,7 +21,7 @@ pub const MCP_META_PATH: [&str; 2] = ["anemnez", "principal"];
 /// (CONTRACT.md `#one-skew-for-the-swarm`; substrate `docs/specs/PRINCIPAL_TOKEN.md`).
 pub const SKEW_MS: u64 = 30_000;
 
-/// The longest a principal token may live: `expires - issued` never exceeds it.
+/// The longest a principal token may live: `expires_ms - issued_ms` never exceeds it.
 pub const MAX_TTL_MS: u64 = 300_000;
 
 /// The signed message's domain string: a token's signature is never anything else's.
@@ -50,10 +50,10 @@ pub struct Claims {
     pub method: String,
     /// SHA-256 of the call's body ([`grpc_body`], or the MCP arguments' JCS).
     pub body: [u8; 32],
-    /// Unix seconds.
-    pub issued: u64,
-    /// Unix seconds; `expires - issued` never exceeds [`MAX_TTL_MS`].
-    pub expires: u64,
+    /// Unix milliseconds (every time in a signed record is ms, named so: D, 2026-11-07).
+    pub issued_ms: u64,
+    /// Unix milliseconds; `expires_ms - issued_ms` never exceeds [`MAX_TTL_MS`].
+    pub expires_ms: u64,
     /// Random, from the OS CSPRNG (the minter supplies it: this crate draws nothing).
     pub nonce: [u8; 16],
 }
@@ -164,8 +164,8 @@ impl Claims {
             Part::Str(&self.audience),
             Part::Str(&self.method),
             Part::Bytes(&self.body),
-            Part::U64(self.issued),
-            Part::U64(self.expires),
+            Part::U64(self.issued_ms),
+            Part::U64(self.expires_ms),
             Part::Bytes(&self.nonce),
         ]
     }
@@ -195,10 +195,11 @@ pub fn grpc_body(request_bytes: &[u8]) -> [u8; 32] {
 /// [`Refusal::Malformed`] for claims whose life exceeds [`MAX_TTL_MS`] or runs backwards, or that
 /// encode past [`MAX_ENCODED`]: nothing is minted that a product would refuse for its shape.
 pub fn mint(claims: &Claims, seed: &[u8; 32]) -> Result<String, Refusal> {
+    plausible("issued_ms", claims.issued_ms)?;
+    plausible("expires_ms", claims.expires_ms)?;
     let life_ms = claims
-        .expires
-        .checked_sub(claims.issued)
-        .and_then(|s| s.checked_mul(1_000))
+        .expires_ms
+        .checked_sub(claims.issued_ms)
         .ok_or_else(|| Refusal::Malformed("expires before issued".into()))?;
     if life_ms > MAX_TTL_MS {
         return Err(Refusal::Malformed(format!(
@@ -217,6 +218,24 @@ pub fn mint(claims: &Claims, seed: &[u8; 32]) -> Result<String, Refusal> {
         )));
     }
     Ok(token)
+}
+
+/// The earliest and latest plausible Unix millisecond: 2020-01-01 and 2100-01-01 UTC.
+pub const PLAUSIBLE_MS: std::ops::Range<u64> = 1_577_836_800_000..4_102_444_800_000;
+
+/// A time in a signed record outside [`PLAUSIBLE_MS`] is a unit slip (seconds where ms belong, or
+/// the reverse), refused loudly rather than read as a moment decades away.
+///
+/// # Errors
+/// [`Refusal::Malformed`], naming the field.
+pub fn plausible(field: &str, ms: u64) -> Result<u64, Refusal> {
+    if PLAUSIBLE_MS.contains(&ms) {
+        Ok(ms)
+    } else {
+        Err(Refusal::Malformed(format!(
+            "{field} {ms} is not a Unix millisecond between 2020 and 2100"
+        )))
+    }
 }
 
 /// The fields framed as the signed message frames them, without its domain and algorithm.
@@ -255,8 +274,14 @@ pub fn decode(token: &str) -> Result<Token, Refusal> {
         audience: fields.string("audience")?,
         method: fields.string("method")?,
         body: fields.fixed::<32>("body")?,
-        issued: u64::from_be_bytes(fields.fixed::<8>("issued")?),
-        expires: u64::from_be_bytes(fields.fixed::<8>("expires")?),
+        issued_ms: plausible(
+            "issued_ms",
+            u64::from_be_bytes(fields.fixed::<8>("issued_ms")?),
+        )?,
+        expires_ms: plausible(
+            "expires_ms",
+            u64::from_be_bytes(fields.fixed::<8>("expires_ms")?),
+        )?,
         nonce: fields.fixed::<16>("nonce")?,
     };
     let sig = fields.fixed::<64>("sig")?;
@@ -313,12 +338,8 @@ impl Token {
         if c.method != expect.method || &c.body != expect.body {
             return Err(Refusal::CallMismatch);
         }
-        let ms = |secs: u64| {
-            i64::try_from(secs)
-                .unwrap_or(i64::MAX)
-                .saturating_mul(1_000)
-        };
-        signed::fresh(ms(c.issued), Some(ms(c.expires)), expect.now_ms)?;
+        let ms = |t: u64| i64::try_from(t).unwrap_or(i64::MAX);
+        signed::fresh(ms(c.issued_ms), Some(ms(c.expires_ms)), expect.now_ms)?;
         Ok(())
     }
 
@@ -357,7 +378,7 @@ mod tests {
     use super::*;
 
     const SEED: [u8; 32] = [3; 32];
-    const NOW_S: u64 = 1_767_225_600;
+    const NOW_MS: u64 = 1_767_225_600_000;
 
     fn claims() -> Claims {
         let key = signed::public_key(Alg::Ed25519, &SEED);
@@ -369,8 +390,8 @@ mod tests {
             audience: "herald@2/01a1-herald".into(),
             method: "/herald.v2.Herald/Queue".into(),
             body: grpc_body(b"request"),
-            issued: NOW_S,
-            expires: NOW_S + 300,
+            issued_ms: NOW_MS,
+            expires_ms: NOW_MS + MAX_TTL_MS,
             nonce: [9; 16],
         }
     }
@@ -380,7 +401,7 @@ mod tests {
             audience: "herald@2/01a1-herald",
             method: "/herald.v2.Herald/Queue",
             body,
-            now_ms: i64::try_from(NOW_S).unwrap() * 1_000,
+            now_ms: i64::try_from(NOW_MS).unwrap(),
         }
     }
 
@@ -468,8 +489,21 @@ mod tests {
             assert!(matches!(decode(&bad), Err(Refusal::Malformed(_))), "{bad}");
         }
         let mut long = claims();
-        long.expires = long.issued + 301;
+        long.expires_ms = long.issued_ms + MAX_TTL_MS + 1;
         assert!(matches!(mint(&long, &SEED), Err(Refusal::Malformed(_))));
+    }
+
+    /// A seconds value where ms belong is refused at mint and at decode, never read as 1970.
+    #[test]
+    fn a_seconds_value_in_a_ms_field_fails_loudly() {
+        let mut secs = claims();
+        secs.issued_ms = NOW_MS / 1_000;
+        secs.expires_ms = NOW_MS / 1_000 + 300;
+        assert!(
+            matches!(mint(&secs, &SEED), Err(Refusal::Malformed(why)) if why.contains("issued_ms"))
+        );
+        assert!(plausible("x", NOW_MS).is_ok());
+        assert!(plausible("x", NOW_MS * 1_000).is_err(), "microseconds too");
     }
 
     #[test]

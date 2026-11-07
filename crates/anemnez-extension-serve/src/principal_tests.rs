@@ -27,9 +27,9 @@ pub(crate) fn published(seed: &[u8; 32]) -> crate::PublishedKey {
         key_id: principal::key_id(&key),
         alg: "ed25519".into(),
         key,
-        made_at_secs: 1_767_225_600,
-        retired_at_secs: None,
-        revoked_at_secs: None,
+        made_at_ms: 1_767_225_600_000,
+        retired_at_ms: None,
+        revoked_at_ms: None,
     }
 }
 
@@ -65,7 +65,8 @@ pub(crate) fn verifier(manual: &ManualClock, absent_admitted: bool) -> Verifier 
     )
 }
 
-/// A token for `method` with `body`, living `life` seconds from the clock's now.
+/// A token for `method` with `body`, living `life` seconds from the clock's now (issued and
+/// expires in ms).
 pub(crate) fn mint(
     manual: &ManualClock,
     method: &str,
@@ -73,7 +74,7 @@ pub(crate) fn mint(
     life: u64,
     nonce: u8,
 ) -> String {
-    let now = u64::try_from(manual.clock().now_wall().unix_secs()).expect("after 1970");
+    let now = u64::try_from(manual.clock().now_wall().unix_millis()).expect("after 1970");
     let claims = Claims {
         issuer: ISSUER.into(),
         key_id: principal::key_id(&signed::public_key(Alg::Ed25519, &SEED)),
@@ -82,8 +83,8 @@ pub(crate) fn mint(
         audience: AUDIENCE.into(),
         method: method.into(),
         body,
-        issued: now,
-        expires: now + life,
+        issued_ms: now,
+        expires_ms: now + life * 1_000,
         nonce: [nonce; 16],
     };
     principal::mint(&claims, &SEED).expect("mints")
@@ -183,7 +184,7 @@ async fn each_step_refuses_by_its_own_name() {
 async fn an_unpublished_key_is_unknown_and_a_forged_signature_is_bad() {
     let manual = ManualClock::new();
     let v = verifier(&manual, false);
-    let now = u64::try_from(manual.clock().now_wall().unix_secs()).expect("after 1970");
+    let now = u64::try_from(manual.clock().now_wall().unix_millis()).expect("after 1970");
     let mut claims = Claims {
         issuer: ISSUER.into(),
         key_id: principal::key_id(&signed::public_key(Alg::Ed25519, &[9; 32])),
@@ -192,8 +193,8 @@ async fn an_unpublished_key_is_unknown_and_a_forged_signature_is_bad() {
         audience: AUDIENCE.into(),
         method: METHOD.into(),
         body: [1; 32],
-        issued: now,
-        expires: now + 60,
+        issued_ms: now,
+        expires_ms: now + 60_000,
         nonce: [6; 16],
     };
     let unknown = principal::mint(&claims, &[9; 32]).expect("mints");
@@ -307,8 +308,8 @@ async fn an_absent_token_is_admitted_only_under_the_rollout_rule_and_counted() {
     assert_eq!(status(&checked).code(), tonic::Code::InvalidArgument);
 }
 
-/// A token for the test call, signed by `seed`, issued at `issued` (Unix seconds).
-fn signed_at(seed: &[u8; 32], issued: u64, nonce: u8) -> String {
+/// A token for the test call, signed by `seed`, issued at `issued_ms` (Unix milliseconds).
+fn signed_at(seed: &[u8; 32], issued_ms: u64, nonce: u8) -> String {
     let claims = Claims {
         issuer: ISSUER.into(),
         key_id: principal::key_id(&signed::public_key(Alg::Ed25519, seed)),
@@ -317,8 +318,8 @@ fn signed_at(seed: &[u8; 32], issued: u64, nonce: u8) -> String {
         audience: AUDIENCE.into(),
         method: METHOD.into(),
         body: [1; 32],
-        issued,
-        expires: issued + 60,
+        issued_ms,
+        expires_ms: issued_ms + 60_000,
         nonce: [nonce; 16],
     };
     principal::mint(&claims, seed).expect("mints")
@@ -330,12 +331,12 @@ fn signed_at(seed: &[u8; 32], issued: u64, nonce: u8) -> String {
 #[tokio::test]
 async fn a_revoked_key_refuses_even_a_backdated_token_and_a_retired_key_only_later_ones() {
     let manual = ManualClock::new();
-    let now = u64::try_from(manual.clock().now_wall().unix_secs()).expect("after 1970");
+    let now = u64::try_from(manual.clock().now_wall().unix_millis()).expect("after 1970");
     let (rotated, stolen) = ([21; 32], [22; 32]);
     let mut retired = published(&rotated);
-    retired.retired_at_secs = Some(now);
+    retired.retired_at_ms = Some(now);
     let mut revoked = published(&stolen);
-    revoked.revoked_at_secs = Some(now);
+    revoked.revoked_at_ms = Some(now);
     let v = Verifier::new(
         AUDIENCE,
         manual.clock(),
@@ -346,7 +347,7 @@ async fn a_revoked_key_refuses_even_a_backdated_token_and_a_retired_key_only_lat
         Arc::new(MemoryNonces::new(manual.clock())),
     );
 
-    let backdated = signed_at(&stolen, now - 10, 1);
+    let backdated = signed_at(&stolen, now - 10_000, 1);
     assert_eq!(
         v.verify(&backdated, METHOD, &[1; 32])
             .await
@@ -354,7 +355,7 @@ async fn a_revoked_key_refuses_even_a_backdated_token_and_a_retired_key_only_lat
         Refusal::UnknownKey,
         "a revoked key's issued is the thief's to write"
     );
-    let before = signed_at(&rotated, now - 10, 2);
+    let before = signed_at(&rotated, now - 10_000, 2);
     assert!(
         v.verify(&before, METHOD, &[1; 32]).await.is_ok(),
         "issued before the rotation"
@@ -369,25 +370,25 @@ async fn a_revoked_key_refuses_even_a_backdated_token_and_a_retired_key_only_lat
     );
 }
 
-/// A unit slip fails loudly (D): a record time in milliseconds where seconds belong is implausible,
+/// A unit slip fails loudly (D): a record time in seconds where milliseconds belong is implausible,
 /// and the record is refused `unattested` rather than compared off by a thousand.
 #[tokio::test]
 async fn a_record_time_in_the_wrong_unit_is_refused_as_implausible() {
     let manual = ManualClock::new();
-    let now = u64::try_from(manual.clock().now_wall().unix_secs()).expect("after 1970");
+    let now = u64::try_from(manual.clock().now_wall().unix_millis()).expect("after 1970");
     let rotated = [23; 32];
-    let mut in_ms = published(&rotated);
-    in_ms.retired_at_secs = Some(now * 1_000);
+    let mut in_secs = published(&rotated);
+    in_secs.retired_at_ms = Some(now / 1_000);
     let v = Verifier::new(
         AUDIENCE,
         manual.clock(),
         Arc::new(OneKey {
             absent_admitted: false,
-            extra: vec![in_ms],
+            extra: vec![in_secs],
         }),
         Arc::new(MemoryNonces::new(manual.clock())),
     );
-    let token = signed_at(&rotated, now + 10, 1);
+    let token = signed_at(&rotated, now + 10_000, 1);
     assert_eq!(
         v.verify(&token, METHOD, &[1; 32])
             .await

@@ -22,24 +22,20 @@ use anemnez_clock::{Clock, Mono};
 use crate::digest::RequestDigest;
 use anemnez_extension::principal::{self, Claims, Expect, MAX_TTL_MS, Refusal, SKEW_MS, Token};
 
-/// One key in an issuer's record (PRINCIPAL_TOKEN §2). Times are Unix SECONDS, like a token's
-/// `issued` (B), and the unit is in each name so a milliseconds value is never mistaken for one (D).
+/// One key in an issuer's record (PRINCIPAL_TOKEN §2). Times are Unix MILLISECONDS, like a token's
+/// `issued_ms`, and the unit is in each name so a seconds value is never mistaken for one (D).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublishedKey {
     pub key_id: String,
     /// `ed25519` is the one algorithm this version verifies.
     pub alg: String,
     pub key: Vec<u8>,
-    pub made_at_secs: u64,
+    pub made_at_ms: u64,
     /// Rotated: still verifies a token issued before this.
-    pub retired_at_secs: Option<u64>,
+    pub retired_at_ms: Option<u64>,
     /// Revoked (compromise): refuses every token, whatever its `issued` says.
-    pub revoked_at_secs: Option<u64>,
+    pub revoked_at_ms: Option<u64>,
 }
-
-/// The Unix seconds a key record's times may take: 2020-01-01 to 2100-01-01. A milliseconds value
-/// falls far outside it.
-pub const PLAUSIBLE_SECS: std::ops::Range<u64> = 1_577_836_800..4_102_444_800;
 
 /// An issuer's published record, its attestation already checked against a pinned host node.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,30 +51,29 @@ impl KeyRecord {
     ///
     /// # Errors
     /// [`Refusal::UnknownKey`] when no key may.
-    pub fn key_for(&self, key_id: &str, issued: u64) -> Result<&[u8], Refusal> {
+    pub fn key_for(&self, key_id: &str, issued_ms: u64) -> Result<&[u8], Refusal> {
         let key = self
             .keys
             .iter()
             .find(|k| k.key_id == key_id)
             .ok_or(Refusal::UnknownKey)?;
-        // A unit slip fails loudly (D): a time outside 2020 to 2100 in seconds is a record written in
-        // the wrong unit, and the record is refused rather than compared off by a thousand.
-        let times = [
-            Some(key.made_at_secs),
-            key.retired_at_secs,
-            key.revoked_at_secs,
-        ];
+        // A unit slip fails loudly (D): a time outside 2020 to 2100 in milliseconds is a record written
+        // in the wrong unit, and the record is refused rather than compared off by a thousand.
+        let times = [Some(key.made_at_ms), key.retired_at_ms, key.revoked_at_ms];
         if times
             .into_iter()
             .flatten()
-            .any(|t| !PLAUSIBLE_SECS.contains(&t))
+            .any(|t| !principal::PLAUSIBLE_MS.contains(&t))
         {
             return Err(Refusal::Unattested);
         }
-        if key.alg != "ed25519" || key.revoked_at_secs.is_some() {
+        if key.alg != "ed25519" || key.revoked_at_ms.is_some() {
             return Err(Refusal::UnknownKey);
         }
-        if key.retired_at_secs.is_some_and(|retired| issued >= retired) {
+        if key
+            .retired_at_ms
+            .is_some_and(|retired| issued_ms >= retired)
+        {
             return Err(Refusal::UnknownKey);
         }
         Ok(&key.key)
@@ -227,7 +222,7 @@ impl Verifier {
         if record.issuer != claims.issuer {
             return Err(Refusal::Unattested);
         }
-        parsed.verify(record.key_for(&claims.key_id, claims.issued)?)?;
+        parsed.verify(record.key_for(&claims.key_id, claims.issued_ms)?)?;
         // Held for MAX_TTL + SKEW past its issue, the sum of the two named constants, so changing
         // either can never open a replay window.
         let hold = i64::try_from(MAX_TTL_MS + SKEW_MS).unwrap_or(i64::MAX);
@@ -235,10 +230,10 @@ impl Verifier {
             .record(
                 &claims.issuer,
                 claims.nonce,
-                millis(claims.issued).saturating_add(hold),
+                as_i64(claims.issued_ms).saturating_add(hold),
             )
             .await?;
-        let left = millis(claims.expires).saturating_sub(now_ms).max(0);
+        let left = as_i64(claims.expires_ms).saturating_sub(now_ms).max(0);
         Ok(Admitted {
             claims: parsed.claims.clone(),
             expires: self.clock.now_mono()
@@ -326,8 +321,6 @@ pub fn status(refusal: &Refusal) -> tonic::Status {
     tonic::Status::new(code, refusal.name())
 }
 
-fn millis(secs: u64) -> i64 {
-    i64::try_from(secs)
-        .unwrap_or(i64::MAX)
-        .saturating_mul(1_000)
+fn as_i64(ms: u64) -> i64 {
+    i64::try_from(ms).unwrap_or(i64::MAX)
 }

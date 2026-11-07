@@ -166,10 +166,12 @@ never retried, are PERMISSION_DENIED; `malformed` is INVALID_ARGUMENT.
 **The verifier, not the product, picks the key** (B, D, 2026-11-07; PRINCIPAL_TOKEN §2). `Keys`
 answers the issuer's whole record and `KeyRecord::key_for` applies the rule the same for every
 product. A REVOKED key refuses every token, a backdated one included, since `issued` is signed by
-the key a thief holds. A RETIRED key verifies only a token issued before its `retired_at_secs`. Either
-refusal is `unknown-key`. The record's times are Unix seconds like `issued` (B), named with the unit
-(`made_at_secs`, `retired_at_secs`, `revoked_at_secs`), and a time outside 2020 to 2100 is a unit slip,
-refused `unattested` rather than compared off by a thousand (D).
+the key a thief holds. A RETIRED key verifies only a token issued before its `retired_at_ms`. Either
+refusal is `unknown-key`. Every time in a signed record is Unix MILLISECONDS, named with the unit
+(the token's `issued_ms` and `expires_ms`; the record's `made_at_ms`, `retired_at_ms`,
+`revoked_at_ms`; D, 2026-11-07, matching `fabric.devices` and the Iris answer), and a time outside
+2020 to 2100 (`principal::PLAUSIBLE_MS`) is a unit slip: refused `malformed` in a token and
+`unattested` in a record, rather than compared off by a thousand.
 
 <!-- claim: a-token-binds-the-bytes-as-received -->
 **A token binds the request bytes as received**, so a request carrying a field the product's build
