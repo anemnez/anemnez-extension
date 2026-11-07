@@ -165,6 +165,25 @@ pub fn check_route_key(
     })
 }
 
+/// One worked call: the method's request as a JSON argument object, and a one-line caption. A bridge
+/// type-checks `args_json` against the method's parameters and renders it its own way (Lua, JSON).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct Example {
+    pub args_json: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub caption: String,
+}
+
+impl Example {
+    pub fn new(args_json: impl Into<String>, caption: impl Into<String>) -> Example {
+        Example {
+            args_json: args_json.into(),
+            caption: caption.into(),
+        }
+    }
+}
+
 /// Everything written on one method. `#[non_exhaustive]`, so a new option is a minor release
 /// rather than a break for every bridge (D): build one with [`MethodOptions::new`], then set the
 /// optional fields.
@@ -194,7 +213,7 @@ pub struct MethodOptions {
     pub runs_to_completion: bool,
     /// Worked calls, for a caller's help.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub examples: Vec<String>,
+    pub examples: Vec<Example>,
 }
 
 impl MethodOptions {

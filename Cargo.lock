@@ -22,7 +22,7 @@ dependencies = [
 
 [[package]]
 name = "anemnez-extension"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "base64",
  "ed25519-dalek",
@@ -36,7 +36,7 @@ dependencies = [
 
 [[package]]
 name = "anemnez-extension-fixture"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anemnez-clock",
  "anemnez-extension",
@@ -54,7 +54,7 @@ dependencies = [
 
 [[package]]
 name = "anemnez-extension-serve"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anemnez-clock",
  "anemnez-extension",

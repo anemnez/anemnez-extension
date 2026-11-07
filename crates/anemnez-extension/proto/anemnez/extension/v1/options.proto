@@ -30,8 +30,19 @@ message MethodOptions {
   // method whose request carries a wait-budget field (timeout_ms and its kin) owns its budget
   // without this; Substrate derives that, so it is never stated twice (C). Independent of blocks.
   bool runs_to_completion = 11;
-  // Worked calls, for a caller's help.
-  repeated string examples = 12;
+  // Field 12 was a free-text example in 0.3; never reuse it.
+  reserved 12;
+  // Worked calls, for a caller's help: each the method's request as a JSON argument object, which
+  // a bridge type-checks against the method's parameters and renders its own way (B).
+  repeated Example examples = 13;
+}
+
+// One worked call.
+message Example {
+  // The request, as a JSON object of its fields: '{"repo": "substrate", "why": "deploy freeze"}'.
+  string args_json = 1;
+  // A one-line caption.
+  string caption = 2;
 }
 
 // How a method's result comes back. A collection is a cursor or capped; never unbounded.

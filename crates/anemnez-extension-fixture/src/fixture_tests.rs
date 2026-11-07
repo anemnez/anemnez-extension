@@ -41,7 +41,13 @@ fn the_good_fixture_offers_every_method_shape() {
         !by("Wait").options.runs_to_completion,
         "Wait owns its budget by its field, not the flag"
     );
-    assert_eq!(by("Items").options.examples, ["fixture.items{cursor = ''}"]);
+    assert_eq!(
+        by("Items").options.examples,
+        [anemnez_extension::options::Example::new(
+            r#"{"cursor": ""}"#,
+            "The first page"
+        )]
+    );
 }
 
 /// Each refusing variant is refused by the contract's check where the rule is the contract's, and

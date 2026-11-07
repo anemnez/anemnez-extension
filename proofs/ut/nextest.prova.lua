@@ -92,3 +92,4 @@ spoken_for("every-bridge-refuses-a-descriptor-alike", "descriptor::tests::every_
 spoken_for("every-bridge-refuses-a-descriptor-alike (parity)", "serve_tests::the_descriptor_check_reads_the_protos_own_encoding")
 spoken_for("every-bridge-mounts-the-same-fixture", "fixture_tests::the_good_fixture_answers_over_its_socket")
 spoken_for("every-bridge-mounts-the-same-fixture (variants)", "fixture_tests::each_variant_is_refused_where_its_rule_lives")
+spoken_for("every-bridge-refuses-a-descriptor-alike (examples)", "descriptor::tests::an_example_that_is_not_the_requests_fields_is_refused")

@@ -140,6 +140,8 @@ pub enum DescriptorRefusal {
     InputUnknown(String),
     /// The anemnez options are not a valid `MethodOptions`.
     OptionsMalformed(String),
+    /// An example's `args_json` is not a JSON object of the request's top-level fields, and why.
+    ExampleMismatch(String, String),
 }
 
 impl DescriptorRefusal {
@@ -158,6 +160,7 @@ impl DescriptorRefusal {
             Self::UnboundedCollection(_) => "unbounded-collection",
             Self::InputUnknown(_) => "input-unknown",
             Self::OptionsMalformed(_) => "options-malformed",
+            Self::ExampleMismatch(..) => "example-mismatch",
         }
     }
 }
@@ -167,6 +170,7 @@ impl std::fmt::Display for DescriptorRefusal {
         match self {
             Self::Malformed(why) => write!(f, "malformed descriptor: {why}"),
             Self::RouteKey(path, why) => write!(f, "{path}: {why}"),
+            Self::ExampleMismatch(path, why) => write!(f, "{path}: example-mismatch: {why}"),
             Self::CallersMissing(p)
             | Self::PermissionMissing(p)
             | Self::PersonActAllowed(p)
@@ -286,6 +290,11 @@ fn check_method(
     if raw.description.trim().is_empty() {
         refused.push(DescriptorRefusal::DescriptionMissing(p()));
     }
+    for example in &raw.examples {
+        if let Err(why) = example_fits(&example.args_json, input) {
+            refused.push(DescriptorRefusal::ExampleMismatch(p(), why));
+        }
+    }
     let mut route_key = None;
     if let Route::Keyed { key, .. } = &route {
         match input {
@@ -313,7 +322,11 @@ fn check_method(
                     session,
                     blocks: raw.blocks,
                     runs_to_completion: raw.runs_to_completion,
-                    examples: raw.examples,
+                    examples: raw
+                        .examples
+                        .into_iter()
+                        .map(|e| crate::options::Example::new(e.args_json, e.caption))
+                        .collect(),
                 },
                 route_key,
             ))
@@ -388,6 +401,22 @@ fn parse(raw: &wire::MethodOptions) -> Parsed {
         result,
         route,
     }
+}
+
+/// Whether an example's `args_json` is a JSON object whose keys are all top-level fields of the
+/// request `input` (when the descriptor holds it). The full type check is the bridge's.
+fn example_fits(args_json: &str, input: Option<&DescriptorProto>) -> Result<(), String> {
+    let value: serde_json::Value =
+        serde_json::from_str(args_json).map_err(|e| format!("args_json is not JSON: {e}"))?;
+    let object = value.as_object().ok_or("args_json is not a JSON object")?;
+    if let Some(input) = input {
+        for key in object.keys() {
+            if !input.field.iter().any(|f| f.name() == key) {
+                return Err(format!("'{key}' is not a field of {}", input.name()));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// The message a fully qualified type name (`.pkg.Outer.Inner`) names, if the set holds it.
@@ -487,8 +516,8 @@ mod wire {
         pub blocks: bool,
         #[prost(bool, tag = "11")]
         pub runs_to_completion: bool,
-        #[prost(string, repeated, tag = "12")]
-        pub examples: Vec<String>,
+        #[prost(message, repeated, tag = "13")]
+        pub examples: Vec<WireExample>,
     }
 
     #[derive(Clone, PartialEq, prost::Message)]
@@ -531,6 +560,14 @@ mod wire {
         pub group: String,
         #[prost(string, tag = "2")]
         pub key: String,
+    }
+
+    #[derive(Clone, PartialEq, prost::Message)]
+    pub struct WireExample {
+        #[prost(string, tag = "1")]
+        pub args_json: String,
+        #[prost(string, tag = "2")]
+        pub caption: String,
     }
 
     #[derive(Clone, Copy, PartialEq, prost::Message)]
@@ -658,7 +695,10 @@ mod tests {
     fn a_good_descriptor_answers_every_offered_method() {
         let mut land = good();
         land.blocks = true;
-        land.examples = vec!["herald.land{repo = 'agora'}".into()];
+        land.examples = vec![wire::WireExample {
+            args_json: r#"{"repo": "agora"}"#.into(),
+            caption: "Land agora".into(),
+        }];
         land.route = Some(wire::Route {
             to: Some(wire::To::Keyed(wire::Leader {
                 group: "herald-repo".into(),
@@ -729,7 +769,13 @@ mod tests {
             }
         );
         assert!(methods[0].options.blocks && !methods[0].options.runs_to_completion);
-        assert_eq!(methods[0].options.examples, ["herald.land{repo = 'agora'}"]);
+        assert_eq!(
+            methods[0].options.examples,
+            [crate::options::Example::new(
+                r#"{"repo": "agora"}"#,
+                "Land agora"
+            )]
+        );
         assert_eq!(methods[1].options.result, ResultShape::Cursor);
         assert_eq!(methods[1].options.route, Route::Any);
     }
@@ -853,5 +899,56 @@ mod tests {
             "a nested type is not top-level"
         );
         assert_eq!(find_message(&set, ".q.v1.First"), None, "another package");
+    }
+
+    /// An example must be a JSON object of the request's top-level fields, or the method is refused
+    /// example-mismatch by name; the full type check is the bridge's.
+    #[test]
+    fn an_example_that_is_not_the_requests_fields_is_refused() {
+        let example = |args: &str| wire::WireExample {
+            args_json: args.into(),
+            caption: String::new(),
+        };
+        let mut unknown = good();
+        unknown.examples = vec![example(r#"{"repo": "agora", "nope": 1}"#)];
+        let mut not_object = good();
+        not_object.examples = vec![example(r#"["agora"]"#)];
+        let mut not_json = good();
+        not_json.examples = vec![example("herald.land{repo = 'agora'}")];
+        let bytes = set(vec![
+            method(
+                "Unknown",
+                ".herald.v2.LandRequest",
+                ".herald.v2.LandReply",
+                Some(&unknown),
+            ),
+            method(
+                "NotObject",
+                ".herald.v2.LandRequest",
+                ".herald.v2.LandReply",
+                Some(&not_object),
+            ),
+            method(
+                "NotJson",
+                ".herald.v2.LandRequest",
+                ".herald.v2.LandReply",
+                Some(&not_json),
+            ),
+        ]);
+        let refused = check_descriptor(&bytes).expect_err("refused");
+        let found: Vec<String> = refused.iter().map(ToString::to_string).collect();
+        assert_eq!(
+            refused
+                .iter()
+                .map(DescriptorRefusal::name)
+                .collect::<Vec<_>>(),
+            ["example-mismatch"; 3]
+        );
+        assert!(
+            found[0].contains("'nope' is not a field of LandRequest"),
+            "{found:?}"
+        );
+        assert!(found[1].contains("not a JSON object"), "{found:?}");
+        assert!(found[2].contains("not JSON"), "{found:?}");
     }
 }

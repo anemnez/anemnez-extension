@@ -19,7 +19,7 @@ service Fixture {
       description: "Every item, a page at a time: pass the reply's next as cursor until it is empty."
       result: { cursor: {} } effect: READ route: { any: {} }
       presence: FULL permission: ALLOW callers: AGENT
-      examples: "fixture.items{cursor = ''}"
+      examples: { args_json: '{"cursor": ""}' caption: "The first page" }
     };
   }
   rpc Recent(RecentRequest) returns (RecentReply) {

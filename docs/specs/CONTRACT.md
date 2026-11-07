@@ -48,7 +48,7 @@ outside a caller's range is refused at connect with both versions named, never c
 | `session` | `opens` \| `within` \| `closes` | for state that outlives one call (Archetect's prompt sessions, Prova's held topologies): `opens` answers a session id, `within` and `closes` take it. A session belongs to the principal that opened it, and the product ends it when that principal's grant goes (E) |
 | `blocks` | bool, default false | a call that does not finish at once parks the calling mind's execute (Substrate RUNTIME S2c) rather than answering Pending |
 | `runs_to_completion` | bool, default false | bounded only by its own end, like `process.run`, so the caller's deadline is not charged for it. A request carrying a wait-budget field (`timeout_ms` and its kin) owns its budget without this; the bridge derives that, so it is never stated twice (C). Independent of `blocks` (D) |
-| `examples` | text, repeated | worked calls, for a caller's help |
+| `examples` | `Example{args_json, caption}`, repeated (field 13; 12 is reserved) | worked calls, for a caller's help: each the request as a JSON argument object, which a bridge type-checks against the method's parameters and renders its own way (Lua for Substrate, JSON for Agora's MCP face: B, D); `check_descriptor` refuses `example-mismatch` when it isn't a JSON object of the request's top-level fields |
 
 <!-- claim: a-keyed-route-names-a-string-field -->
 **A keyed route names one string field of the call** (B, D, H, 2026-11-07). `leader(group, key)`

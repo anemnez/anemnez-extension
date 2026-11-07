@@ -474,7 +474,10 @@ fn the_descriptor_check_reads_the_protos_own_encoding() {
         session: pb::Session::Opens as i32,
         blocks: true,
         runs_to_completion: true,
-        examples: vec!["herald.land{train = 'train/h-x'}".into()],
+        examples: vec![pb::Example {
+            args_json: r#"{"train": "train/h-x"}"#.into(),
+            caption: "Land one".into(),
+        }],
     };
     let mut method = prost_types::MethodDescriptorProto {
         name: Some("Land".into()),
@@ -494,6 +497,13 @@ fn the_descriptor_check_reads_the_protos_own_encoding() {
         package: Some("h.v1".into()),
         message_type: vec![prost_types::DescriptorProto {
             name: Some("Req".into()),
+            field: vec![prost_types::FieldDescriptorProto {
+                name: Some("train".into()),
+                number: Some(1),
+                r#type: Some(prost_types::field_descriptor_proto::Type::String as i32),
+                label: Some(prost_types::field_descriptor_proto::Label::Optional as i32),
+                ..Default::default()
+            }],
             ..Default::default()
         }],
         ..Default::default()
@@ -518,6 +528,6 @@ fn the_descriptor_check_reads_the_protos_own_encoding() {
     want.session = Some(Session::Opens);
     want.blocks = true;
     want.runs_to_completion = true;
-    want.examples = vec!["herald.land{train = 'train/h-x'}".into()];
+    want.examples = vec![Example::new(r#"{"train": "train/h-x"}"#, "Land one")];
     assert_eq!(methods[0].options, want);
 }
