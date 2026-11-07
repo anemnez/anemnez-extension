@@ -20,6 +20,11 @@ use crate::principal::{MAX_TTL_MS, SKEW_MS};
 pub enum Alg {
     /// Ed25519 (RFC 8032), a 32-byte public key and a 64-byte signature.
     Ed25519,
+    /// ECDSA over P-256 with SHA-256 (a Fabric node's identity, a Secure Enclave key): a SEC1 public
+    /// key (33 or 65 bytes) and a fixed 64-byte `r ‖ s` signature, never DER, so it frames as one
+    /// part. A high-`s` signature is accepted: the statements it signs are bound by their own nonce
+    /// or record, so malleability gains a forger nothing.
+    P256,
 }
 
 impl Alg {
@@ -28,6 +33,7 @@ impl Alg {
     pub const fn tag(self) -> &'static str {
         match self {
             Self::Ed25519 => "ed25519",
+            Self::P256 => "p256",
         }
     }
 
@@ -38,6 +44,7 @@ impl Alg {
     pub fn from_tag(tag: &str) -> Result<Self, Refusal> {
         match tag {
             "ed25519" => Ok(Self::Ed25519),
+            "p256" => Ok(Self::P256),
             other => Err(Refusal::Malformed(format!("unknown algorithm '{other}'"))),
         }
     }
@@ -134,7 +141,8 @@ pub fn message(domain: &str, alg: Alg, parts: &[Part<'_>]) -> Result<Vec<u8>, Re
 /// token, the person's device for an answer).
 ///
 /// # Errors
-/// [`Refusal::Malformed`] when a part cannot be framed ([`message`]).
+/// [`Refusal::Malformed`] when a part cannot be framed ([`message`]), or `seed` is not a valid
+/// P-256 secret scalar.
 pub fn sign(
     domain: &str,
     alg: Alg,
@@ -147,10 +155,22 @@ pub fn sign(
         Alg::Ed25519 => Ok(ed25519_dalek::SigningKey::from_bytes(seed)
             .sign(&message)
             .to_bytes()),
+        Alg::P256 => {
+            use p256::ecdsa::signature::Signer as _;
+            let sig: p256::ecdsa::Signature = p256_signing_key(seed)?.sign(&message);
+            Ok(sig.to_bytes().into())
+        }
     }
 }
 
-/// The public key for the private key `seed`.
+fn p256_signing_key(seed: &[u8; 32]) -> Result<p256::ecdsa::SigningKey, Refusal> {
+    p256::ecdsa::SigningKey::from_bytes(seed.into())
+        .map_err(|_| Refusal::Malformed("not a valid P-256 secret scalar".into()))
+}
+
+/// The public key for the private key `seed`: Ed25519's 32 bytes, or P-256's uncompressed SEC1
+/// point (65 bytes). A seed that is no valid P-256 scalar has no public key: empty, which every
+/// [`verify`] refuses as malformed.
 #[must_use]
 pub fn public_key(alg: Alg, seed: &[u8; 32]) -> Vec<u8> {
     match alg {
@@ -158,6 +178,14 @@ pub fn public_key(alg: Alg, seed: &[u8; 32]) -> Vec<u8> {
             .verifying_key()
             .to_bytes()
             .to_vec(),
+        Alg::P256 => p256_signing_key(seed)
+            .map(|k| {
+                k.verifying_key()
+                    .to_encoded_point(false)
+                    .as_bytes()
+                    .to_vec()
+            })
+            .unwrap_or_default(),
     }
 }
 
@@ -191,6 +219,22 @@ pub fn verify(
                 &ed25519_dalek::Signature::from_bytes(sig),
             )
             .map_err(|_| Refusal::BadSignature)
+        }
+        Alg::P256 => {
+            use p256::ecdsa::signature::Verifier as _;
+            let key = p256::ecdsa::VerifyingKey::from_sec1_bytes(key).map_err(|_| {
+                Refusal::Malformed(format!("not a SEC1 P-256 public key ({} bytes)", key.len()))
+            })?;
+            if sig.len() != 64 {
+                return Err(Refusal::Malformed(format!(
+                    "a P-256 signature is 64 bytes r ‖ s, not {}",
+                    sig.len()
+                )));
+            }
+            let sig = p256::ecdsa::Signature::from_slice(sig)
+                .map_err(|_| Refusal::Malformed("not a P-256 r ‖ s signature".into()))?;
+            key.verify(&message(domain, alg, parts)?, &sig)
+                .map_err(|_| Refusal::BadSignature)
         }
     }
 }
@@ -297,8 +341,53 @@ mod tests {
         assert!(matches!(short, Err(Refusal::Malformed(_))), "{short:?}");
         let short = verify(DOMAIN, Alg::Ed25519, &parts("allow"), &sig, &key[..31]);
         assert!(matches!(short, Err(Refusal::Malformed(_))), "{short:?}");
-        assert!(matches!(Alg::from_tag("p256"), Err(Refusal::Malformed(_))));
+        assert!(matches!(Alg::from_tag("p384"), Err(Refusal::Malformed(_))));
+        assert_eq!(Alg::from_tag(Alg::P256.tag()), Ok(Alg::P256));
         assert_eq!(Alg::from_tag(Alg::Ed25519.tag()), Ok(Alg::Ed25519));
+    }
+
+    /// P-256 (a Fabric node's attestation): its signature checks, any change refuses it, the alg is
+    /// framed so an Ed25519 signature can never pass as one, and a DER signature is malformed.
+    #[test]
+    fn a_p256_signature_checks_and_any_change_refuses_it() {
+        let key = public_key(Alg::P256, &SEED);
+        assert_eq!(key.len(), 65, "uncompressed SEC1");
+        let sig = sign(DOMAIN, Alg::P256, &parts("allow"), &SEED).unwrap();
+        assert_eq!(
+            verify(DOMAIN, Alg::P256, &parts("allow"), &sig, &key),
+            Ok(())
+        );
+        assert_eq!(
+            verify(DOMAIN, Alg::P256, &parts("deny"), &sig, &key),
+            Err(Refusal::BadSignature)
+        );
+        let other = public_key(Alg::P256, &[8; 32]);
+        assert_eq!(
+            verify(DOMAIN, Alg::P256, &parts("allow"), &sig, &other),
+            Err(Refusal::BadSignature)
+        );
+        // The alg tag is framed: an Ed25519 signature over the same parts is not a P-256 one.
+        let ed = sign(DOMAIN, Alg::Ed25519, &parts("allow"), &SEED).unwrap();
+        assert!(verify(DOMAIN, Alg::P256, &parts("allow"), &ed, &key).is_err());
+        // A compressed key verifies too; a DER-length signature is refused by shape.
+        let compressed = p256::ecdsa::VerifyingKey::from_sec1_bytes(&key)
+            .unwrap()
+            .to_encoded_point(true)
+            .as_bytes()
+            .to_vec();
+        assert_eq!(
+            verify(DOMAIN, Alg::P256, &parts("allow"), &sig, &compressed),
+            Ok(())
+        );
+        let der = [0x30u8; 70];
+        assert!(matches!(
+            verify(DOMAIN, Alg::P256, &parts("allow"), &der, &key),
+            Err(Refusal::Malformed(_))
+        ));
+        assert!(
+            public_key(Alg::P256, &[0; 32]).is_empty(),
+            "zero is no scalar"
+        );
     }
 
     /// The windows at their edges, from the two named constants (never a literal).

@@ -114,8 +114,9 @@ principal token, an Iris answer) is signed over the same message, built by `sign
 domain string, the algorithm tag, then the schema's parts, each a u32 big-endian length then its
 bytes, with strings UTF-8 and integers 8-byte big-endian. The domain string names the schema and its
 version (`anemnez-principal/1`, `anemnez-iris-answer/1`), so a signature made for one can never be
-replayed as another. The algorithm tag is framed from day one (`ed25519` today, `p256` when a
-Secure Enclave key arrives), so a new algorithm needs no new framing. `signed::verify` checks the
+replayed as another. The algorithm tag is framed from day one, so a new algorithm needs no new framing: `ed25519`
+(principal keys, Iris devices) and `p256` (a Fabric node's identity attesting a record, later a
+Secure Enclave key; a SEC1 key and a fixed 64-byte `r ‖ s` signature, never DER, B 2026-11-07). `signed::verify` checks the
 signature and `signed::fresh` the window from `SKEW_MS` and `MAX_TTL_MS`, given the verifier's own
 clock reading. Each schema keeps its own refusal steps (audience, method, nonce) beside these.
 
