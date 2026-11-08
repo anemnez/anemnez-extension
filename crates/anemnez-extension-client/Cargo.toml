@@ -17,7 +17,7 @@ http.workspace = true
 
 [dev-dependencies]
 anemnez-extension = { workspace = true }
-anemnez-extension-fixture = { path = "../anemnez-extension-fixture", version = "0.4.2", registry = "artichoke" }
+anemnez-extension-fixture = { path = "../anemnez-extension-fixture", version = "0.4.3", registry = "artichoke" }
 anemnez-clock.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net"] }
 tempfile.workspace = true

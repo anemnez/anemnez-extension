@@ -227,10 +227,21 @@ pub fn check_descriptor(file_descriptor_set: &[u8]) -> Result<Vec<Method>, Vec<D
         .map_err(|why| vec![DescriptorRefusal::Malformed(why.into())])?;
     let mut methods = Vec::new();
     let mut refused = Vec::new();
+    if raw_files.len() != set.file.len() {
+        return Err(vec![files_mismatch(set.file.len(), raw_files.len())]);
+    }
     for (file, raw_file) in set.file.iter().zip(raw_files) {
-        let raw_services = repeated(raw_file, 6).unwrap_or_default();
-        for (service, raw_service) in file.service.iter().zip(raw_services) {
-            let raw_methods = repeated(raw_service, 2).unwrap_or_default();
+        for (service, raw_service) in services_of(file, raw_file).map_err(|r| vec![r])? {
+            let raw_methods = repeated(raw_service, 2)
+                .ok()
+                .filter(|raw| raw.len() == service.method.len())
+                .ok_or_else(|| {
+                    vec![DescriptorRefusal::Malformed(format!(
+                        "{}: the methods of {} don't read raw",
+                        file.name(),
+                        service.name()
+                    ))]
+                })?;
             for (method, raw_method) in service.method.iter().zip(raw_methods) {
                 let path = format!(
                     "/{}{}{}/{}",
@@ -239,8 +250,13 @@ pub fn check_descriptor(file_descriptor_set: &[u8]) -> Result<Vec<Method>, Vec<D
                     service.name(),
                     method.name()
                 );
-                let Some(bytes) = method_options(raw_method) else {
-                    continue;
+                let bytes = match method_options(raw_method) {
+                    Ok(Some(bytes)) => bytes,
+                    Ok(None) => continue,
+                    Err(_) => {
+                        refused.push(DescriptorRefusal::OptionsMalformed(path));
+                        continue;
+                    }
                 };
                 let input = find_message(&set, method.input_type());
                 let output = find_message(&set, method.output_type());
@@ -468,8 +484,6 @@ fn find_message<'a>(set: &'a FileDescriptorSet, type_name: &str) -> Option<&'a D
     })
 }
 
-/// The anemnez options of one raw `MethodDescriptorProto`: field 4 (`options`), and within it every
-/// occurrence of field 51701, concatenated, which protobuf merges as one message.
 /// What the descriptor's one service declares of itself (`anemnez_service`): the contract it serves
 /// and its version, read without a manifest. Every bridge reads it alike (Substrate's mount,
 /// Agora's MCP face), so it lives beside [`check_descriptor`].
@@ -487,24 +501,22 @@ pub fn service_of(
     let raw_files =
         repeated(file_descriptor_set, 1).map_err(|why| DescriptorRefusal::Malformed(why.into()))?;
     if raw_files.len() != set.file.len() {
-        return Err(DescriptorRefusal::Malformed(format!(
-            "{} files decoded, {} read raw",
-            set.file.len(),
-            raw_files.len()
-        )));
+        return Err(files_mismatch(set.file.len(), raw_files.len()));
     }
     let mut found: Option<(String, Vec<u8>)> = None;
     for (file, raw_file) in set.file.iter().zip(raw_files) {
         for (service, raw_service) in services_of(file, raw_file)? {
-            let Some(bytes) = extension(raw_service, 3, SERVICE_OPTIONS_FIELD) else {
-                continue;
-            };
             let name = format!(
                 "{}{}{}",
                 file.package(),
                 dot(file.package()),
                 service.name()
             );
+            let Some(bytes) = extension(raw_service, 3, SERVICE_OPTIONS_FIELD)
+                .map_err(|_| DescriptorRefusal::ServiceOptionsMalformed(name.clone()))?
+            else {
+                continue;
+            };
             if let Some((first, _)) = &found {
                 return Err(DescriptorRefusal::ServiceOptionsTwice(first.clone(), name));
             }
@@ -534,6 +546,10 @@ pub fn service_of(
     })
 }
 
+fn files_mismatch(decoded: usize, raw: usize) -> DescriptorRefusal {
+    DescriptorRefusal::Malformed(format!("{decoded} files decoded, {raw} read raw"))
+}
+
 /// A file's services, each with its raw bytes, or `malformed` naming the file when the raw list
 /// can't be read or doesn't match the decoded one (D: never a silent truncation that would answer a
 /// broken descriptor as service-options-missing).
@@ -554,23 +570,26 @@ fn services_of<'a>(
 }
 
 /// The bytes of extension `number` in the options message at field `options_field` of a raw
-/// descriptor message, every occurrence joined as protobuf merges them.
-fn extension(raw: &[u8], options_field: u32, number: u32) -> Option<Vec<u8>> {
-    let options = repeated(raw, options_field).ok()?;
+/// descriptor message, every occurrence joined as protobuf merges them; `None` when it is absent,
+/// and an error for bytes that can't be read, never an absence (a broken option is not a missing one).
+fn extension(raw: &[u8], options_field: u32, number: u32) -> Result<Option<Vec<u8>>, &'static str> {
     let mut found: Option<Vec<u8>> = None;
-    for block in options {
-        for bytes in repeated(block, number).ok()? {
+    for block in repeated(raw, options_field)? {
+        for bytes in repeated(block, number)? {
             found.get_or_insert_with(Vec::new).extend_from_slice(bytes);
         }
     }
-    found
+    Ok(found)
 }
 
-fn method_options(raw_method: &[u8]) -> Option<Vec<u8>> {
+/// The anemnez options of one raw `MethodDescriptorProto`: field 4 (`options`), and within it every
+/// occurrence of field 51701, concatenated, which protobuf merges as one message.
+fn method_options(raw_method: &[u8]) -> Result<Option<Vec<u8>>, &'static str> {
     extension(raw_method, 4, METHOD_OPTIONS_FIELD)
 }
 
-/// Every length-delimited occurrence of field `number` in a raw message.
+/// Every length-delimited occurrence of field `number` in a raw message. Every field read this way
+/// is a message, so `number` with any other wire type is unreadable, never skipped.
 fn repeated(message: &[u8], number: u32) -> Result<Vec<&[u8]>, &'static str> {
     let mut out = Vec::new();
     let mut rest = message;
@@ -578,6 +597,9 @@ fn repeated(message: &[u8], number: u32) -> Result<Vec<&[u8]>, &'static str> {
         let (key, after) = varint(rest)?;
         rest = after;
         let field = u32::try_from(key >> 3).map_err(|_| "field number too large")?;
+        if field == number && key & 7 != 2 {
+            return Err("a message field with another wire type");
+        }
         match key & 7 {
             0 => rest = varint(rest)?.1,
             1 => rest = rest.get(8..).ok_or("short fixed64")?,
@@ -864,6 +886,63 @@ mod tests {
         let refused = services_of(&file, &raw).expect_err("refused");
         assert_eq!(refused.name(), "malformed");
         assert!(refused.to_string().contains("herald.proto"), "{refused}");
+    }
+
+    /// A broken option is not a missing one: `anemnez_service` that can't be read (here, sent as a
+    /// varint, which protobuf itself would skip as an unknown field) is malformed, naming the service.
+    #[test]
+    fn an_unreadable_service_option_is_malformed_not_missing() {
+        let mut file = FileDescriptorProto {
+            name: Some("herald.proto".into()),
+            package: Some("herald.v2".into()),
+            ..Default::default()
+        }
+        .encode_to_vec();
+        let mut service = ServiceDescriptorProto {
+            name: Some("Herald".into()),
+            ..Default::default()
+        }
+        .encode_to_vec();
+        let mut varint = Vec::new();
+        prost::encoding::encode_key(
+            SERVICE_OPTIONS_FIELD,
+            prost::encoding::WireType::Varint,
+            &mut varint,
+        );
+        varint.push(1);
+        service.extend(ld(3, &varint));
+        file.extend(ld(6, &service));
+        assert_eq!(
+            service_of(&ld(1, &file)).expect_err("refused"),
+            DescriptorRefusal::ServiceOptionsMalformed("herald.v2.Herald".into())
+        );
+    }
+
+    /// The same on a method: an `anemnez_method` that can't be read is options-malformed by path,
+    /// never 'not offered'.
+    #[test]
+    fn an_unreadable_method_option_is_malformed_not_unoffered() {
+        let mut land = method(
+            "Land",
+            ".herald.v2.LandRequest",
+            ".herald.v2.LandReply",
+            None,
+        );
+        let mut varint = Vec::new();
+        prost::encoding::encode_key(
+            METHOD_OPTIONS_FIELD,
+            prost::encoding::WireType::Varint,
+            &mut varint,
+        );
+        varint.push(1);
+        land.extend(ld(4, &varint));
+        let refused = check_descriptor(&set(vec![land])).expect_err("refused");
+        assert_eq!(
+            refused,
+            vec![DescriptorRefusal::OptionsMalformed(
+                "/herald.v2.Herald/Land".into()
+            )]
+        );
     }
 
     /// Every refusal names what is wrong: none declares, two declare, or one says too little.

@@ -3,11 +3,27 @@
 use std::time::Duration;
 
 use anemnez_clock::ManualClock;
-use anemnez_extension::descriptor::check_descriptor;
+use anemnez_extension::descriptor::{check_descriptor, service_of};
 use anemnez_extension::options::{ResultShape, Route};
 use anemnez_extension::principal::Token;
 
 use crate::{DIGEST_KEY, Variant, pb, serve};
+
+/// A bridge reads the service's own declaration from a descriptor protoc wrote, not only from
+/// hand-built bytes (`descriptor::service_of`).
+#[test]
+fn the_fixture_declares_its_service() {
+    let service = service_of(Variant::Good.file_descriptor_set()).expect("declared");
+    assert_eq!(
+        (service.contract.as_str(), service.version.as_str()),
+        ("fixture", "1.0.0")
+    );
+    assert_eq!(
+        service.cursor_scope,
+        anemnez_extension::options::CursorScope::Instance
+    );
+    assert_eq!(service.events_kept, 64);
+}
 
 /// The good descriptor offers every method shape, and Ping, with no anemnez options, is not exposed.
 #[test]
