@@ -140,59 +140,10 @@ fn within(table: &[(u32, u32)], cp: u32) -> bool {
         .is_ok()
 }
 
-/// Default_Ignorable_Code_Point, from DerivedCoreProperties (generated; `label_tests` holds it to the file).
-pub(crate) const DEFAULT_IGNORABLE: &[(u32, u32)] = &[
-    (0x00AD, 0x00AD),
-    (0x034F, 0x034F),
-    (0x061C, 0x061C),
-    (0x115F, 0x1160),
-    (0x17B4, 0x17B5),
-    (0x180B, 0x180D),
-    (0x180E, 0x180E),
-    (0x180F, 0x180F),
-    (0x200B, 0x200F),
-    (0x202A, 0x202E),
-    (0x2060, 0x2064),
-    (0x2065, 0x2065),
-    (0x2066, 0x206F),
-    (0x3164, 0x3164),
-    (0xFE00, 0xFE0F),
-    (0xFEFF, 0xFEFF),
-    (0xFFA0, 0xFFA0),
-    (0xFFF0, 0xFFF8),
-    (0x1BCA0, 0x1BCA3),
-    (0x1D173, 0x1D17A),
-    (0xE0000, 0xE0000),
-    (0xE0001, 0xE0001),
-    (0xE0002, 0xE001F),
-    (0xE0020, 0xE007F),
-    (0xE0080, 0xE00FF),
-    (0xE0100, 0xE01EF),
-    (0xE01F0, 0xE0FFF),
-];
+// The property tables, generated from `unicode/<UNICODE>/` by `label_tests` (with the Swift copy
+// Iris.app vendors, `swift/PlainLabelTables.swift`); never edited by hand.
+include!("label_tables.rs");
 
-/// Bidi_Control, from PropList (generated; `label_tests` holds it to the file).
-pub(crate) const BIDI_CONTROL: &[(u32, u32)] = &[
-    (0x061C, 0x061C),
-    (0x200E, 0x200F),
-    (0x202A, 0x202E),
-    (0x2066, 0x2069),
-];
-
-/// White_Space, from PropList (generated; `label_tests` holds it to the file).
-pub(crate) const WHITE_SPACE: &[(u32, u32)] = &[
-    (0x0009, 0x000D),
-    (0x0020, 0x0020),
-    (0x0085, 0x0085),
-    (0x00A0, 0x00A0),
-    (0x1680, 0x1680),
-    (0x2000, 0x200A),
-    (0x2028, 0x2028),
-    (0x2029, 0x2029),
-    (0x202F, 0x202F),
-    (0x205F, 0x205F),
-    (0x3000, 0x3000),
-];
 #[cfg(test)]
 #[path = "label_tests.rs"]
 mod label_tests;

@@ -261,7 +261,9 @@ variation selectors, tags), no `White_Space` other than U+0020, and no space at 
 refusal is named (`empty`, `too-long`, `control`, `line-break`, `bidi`, `ignorable`, `space`,
 `edge-space`) with the code point and the release (`label::UNICODE`, today `16.0.0`). The
 properties are never typed by hand: `unicode/<release>/` keeps Unicode's lines verbatim under their
-headers, and a test regenerates the tables from them and compares. A release bump can only add
+headers, and one generator (`label_tests`) renders both `src/label_tables.rs` and the Swift copy
+Iris.app vendors, `swift/PlainLabelTables.swift`, failing if either committed file differs (D), so
+the Swift check shares the generated table and the vectors hold its logic. A release bump can only add
 refusals, so it is a reviewed change: `label::VECTORS`, the vector file every caller runs, lists each
 name and its verdict, and a bump that changes one fails, listing all that changed. A named limit: it
 judges what a name contains, not what it looks like. A visible confusable (a fullwidth `Ｇ`, a Cyrillic

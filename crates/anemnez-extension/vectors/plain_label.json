@@ -137,6 +137,18 @@
   {
    "name": "Lane\u2003A",
    "refused": "space"
+  },
+  {
+   "name": "Studio \u2014 \u6771\u4eac \u00fc",
+   "refused": null
+  },
+  {
+   "name": "G\u0600",
+   "refused": null
+  },
+  {
+   "name": "G\u06dd",
+   "refused": null
   }
  ]
 }
