@@ -1,0 +1,142 @@
+{
+ "unicode": "16.0.0",
+ "about": "plain_label's shared vectors: each name and the refusal it gets (null = accepted). A Unicode bump that changes a verdict fails these, listing every name that changed, for review.",
+ "vectors": [
+  {
+   "name": "G",
+   "refused": null
+  },
+  {
+   "name": "Lane A",
+   "refused": null
+  },
+  {
+   "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "refused": null
+  },
+  {
+   "name": "Lan\u00e9",
+   "refused": null
+  },
+  {
+   "name": "\u0420\u0430\u0431\u043e\u0442\u0430",
+   "refused": null
+  },
+  {
+   "name": "\u5de5\u4f5c",
+   "refused": null
+  },
+  {
+   "name": "\uff27",
+   "refused": null
+  },
+  {
+   "name": "Work-1.2_x",
+   "refused": null
+  },
+  {
+   "name": "",
+   "refused": "empty"
+  },
+  {
+   "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "refused": "too-long"
+  },
+  {
+   "name": " G",
+   "refused": "edge-space"
+  },
+  {
+   "name": "G ",
+   "refused": "edge-space"
+  },
+  {
+   "name": "G\u0007",
+   "refused": "control"
+  },
+  {
+   "name": "G\u0085",
+   "refused": "control"
+  },
+  {
+   "name": "G\u007f",
+   "refused": "control"
+  },
+  {
+   "name": "G\u2028",
+   "refused": "line-break"
+  },
+  {
+   "name": "G\u2029",
+   "refused": "line-break"
+  },
+  {
+   "name": "G\u202e",
+   "refused": "bidi"
+  },
+  {
+   "name": "G\u061c",
+   "refused": "bidi"
+  },
+  {
+   "name": "G\u200e",
+   "refused": "bidi"
+  },
+  {
+   "name": "G\u2066",
+   "refused": "bidi"
+  },
+  {
+   "name": "G\u3164",
+   "refused": "ignorable"
+  },
+  {
+   "name": "\u115fG",
+   "refused": "ignorable"
+  },
+  {
+   "name": "G\u1160",
+   "refused": "ignorable"
+  },
+  {
+   "name": "G\uffa0",
+   "refused": "ignorable"
+  },
+  {
+   "name": "G\u200b",
+   "refused": "ignorable"
+  },
+  {
+   "name": "G\u00ad",
+   "refused": "ignorable"
+  },
+  {
+   "name": "Work\ufe0f",
+   "refused": "ignorable"
+  },
+  {
+   "name": "G\udb40\udc41",
+   "refused": "ignorable"
+  },
+  {
+   "name": "G\ufeff",
+   "refused": "ignorable"
+  },
+  {
+   "name": "G\u034f",
+   "refused": "ignorable"
+  },
+  {
+   "name": "Lane\u00a0A",
+   "refused": "space"
+  },
+  {
+   "name": "Lane\u3000A",
+   "refused": "space"
+  },
+  {
+   "name": "Lane\u2003A",
+   "refused": "space"
+  }
+ ]
+}

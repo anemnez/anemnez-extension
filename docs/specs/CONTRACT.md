@@ -248,3 +248,22 @@ and the caller hands those same bytes to the principal token's body digest and t
 re-encoding. `unary` calls the exact method path over a raw-bytes codec, and `decode` turns the reply
 back into JSON with the proto's own field names and every field present. Substrate's Lua mount and
 Agora's MCP face both call it.
+
+## 5. A name a person reads: `label::plain_label` (D, H, 2026-11-09)
+
+<!-- claim: a-name-is-judged-by-one-check-from-unicodes-own-data -->
+**A name is judged by one check, from Unicode's own data.** Every name a person reads as an identity
+(Fabric's swarm names, Iris's identity and account, Stoa's heads, intake's frames) goes through
+`label::plain_label`, so no product keeps its own list and none falls short (A found one already
+short). A label is 1 to 64 characters with no control character, no U+2028 or U+2029, no
+`Bidi_Control`, no `Default_Ignorable_Code_Point` (the invisible characters, Hangul fillers,
+variation selectors, tags), no `White_Space` other than U+0020, and no space at either end. Each
+refusal is named (`empty`, `too-long`, `control`, `line-break`, `bidi`, `ignorable`, `space`,
+`edge-space`) with the code point and the release (`label::UNICODE`, today `16.0.0`). The
+properties are never typed by hand: `unicode/<release>/` keeps Unicode's lines verbatim under their
+headers, and a test regenerates the tables from them and compares. A release bump can only add
+refusals, so it is a reviewed change: `label::VECTORS`, the vector file every caller runs, lists each
+name and its verdict, and a bump that changes one fails, listing all that changed. A named limit: it
+judges what a name contains, not what it looks like. A visible confusable (a fullwidth `Ｇ`, a Cyrillic
+letter shaped like a Latin one) passes; telling lookalikes apart needs NFKC and Unicode's confusables
+data, a separate check.

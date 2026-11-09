@@ -96,3 +96,6 @@ spoken_for("every-bridge-refuses-a-descriptor-alike (examples)", "descriptor::te
 spoken_for("every-bridge-encodes-a-call-alike", "client_tests::a_call_goes_from_json_to_the_product_and_back")
 spoken_for("every-bridge-encodes-a-call-alike (strict)", "client_tests::arguments_that_are_not_the_request_are_refused_by_name")
 spoken_for("every-bridge-encodes-a-call-alike (bytes)", "client_tests::the_encoded_bytes_are_the_requests_own_encoding")
+spoken_for("a-name-is-judged-by-one-check-from-unicodes-own-data", "label::label_tests::the_tables_are_unicodes_own_data")
+spoken_for("a-name-is-judged-by-one-check-from-unicodes-own-data (vectors)", "label::label_tests::every_shared_vector_holds")
+spoken_for("a-name-is-judged-by-one-check-from-unicodes-own-data (named)", "label::label_tests::a_refusal_names_the_rule_and_the_code_point")

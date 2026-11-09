@@ -10,6 +10,7 @@
 
 pub mod descriptor;
 pub mod health;
+pub mod label;
 pub mod options;
 pub mod signed;
 
