@@ -111,6 +111,22 @@ impl Board {
         changed
     }
 
+    /// Say what a restart would cost now (`None`: name the product only). Publishes only on a change,
+    /// answering whether there was one, so a product may set it on every recompute.
+    pub fn set_restart_cost(&self, cost: Option<&anemnez_extension::health::RestartCost>) -> bool {
+        let want = cost.map(|c| pb::RestartCost {
+            line: c.line.clone(),
+            secs: c.secs,
+        });
+        let mut reply = self.reply();
+        if reply.restart_cost == want {
+            return false;
+        }
+        reply.restart_cost = want;
+        self.publish(&mut reply);
+        true
+    }
+
     /// The snapshot, with the cursor it is true as of.
     pub fn get(&self) -> pb::HealthReply {
         let reply = self.reply();
@@ -207,6 +223,30 @@ mod tests {
             "a detail is a change"
         );
         assert_ne!(journal.head(), head);
+    }
+
+    /// What a restart costs is said, published only when it changes, and taken back (D, 2026-11-10).
+    #[test]
+    fn a_restart_cost_is_said_once_per_change_and_can_be_taken_back() {
+        let (board, journal) = board();
+        let cost = anemnez_extension::health::RestartCost {
+            line: "qwen-35b warm".into(),
+            secs: Some(40),
+        };
+        assert!(board.set_restart_cost(Some(&cost)));
+        let got = board.get().restart_cost.expect("said");
+        assert_eq!((got.line.as_str(), got.secs), ("qwen-35b warm", Some(40)));
+        let head = journal.head();
+        assert!(
+            !board.set_restart_cost(Some(&cost)),
+            "the same cost again is no change"
+        );
+        assert_eq!(journal.head(), head);
+        assert!(
+            board.set_restart_cost(None),
+            "absent again: the product's name only"
+        );
+        assert_eq!(board.get().restart_cost, None);
     }
 
     /// A stopped model's part goes, and its going is published (K).

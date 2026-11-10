@@ -6,7 +6,7 @@ members = ["crates/*"]
 edition = "2024"
 repository = "https://github.com/anemnez/anemnez-extension"
 license = "MIT OR Apache-2.0"
-version = "0.4.3"
+version = "0.4.7"
 # Released to Artichoke only for now (the User, 2026-11-05); crates.io comes when third-party
 # extensibility is advertised, and then Herald publishes each version to both, same bytes
 # (fabric CONVERGENCE.md §0 (7)).

@@ -3,17 +3,25 @@
 use crate::health::State;
 use crate::protos;
 
-/// The value names of `enum <name> { … }` in `proto`, without the `*_UNSPECIFIED` zero.
-fn proto_enum(proto: &str, name: &str) -> Vec<String> {
+/// The lines inside `<kind> <name> { … }` in `proto` that assign a number, comments skipped.
+fn assignments<'a>(proto: &'a str, kind: &str, name: &str) -> Vec<&'a str> {
     let start = proto
-        .find(&format!("enum {name} {{"))
-        .unwrap_or_else(|| panic!("enum {name} is in the proto"));
+        .find(&format!("{kind} {name} {{"))
+        .unwrap_or_else(|| panic!("{kind} {name} is in the proto"));
     let body = &proto[start..];
     let body = &body[body.find('{').unwrap_or(0) + 1..body.find('}').unwrap_or(body.len())];
     body.lines()
         .map(str::trim)
         .filter(|l| !l.starts_with("//") && l.contains('='))
-        .filter_map(|l| l.split('=').next().map(|n| n.trim().to_owned()))
+        .filter_map(|l| l.split('=').next())
+        .collect()
+}
+
+/// The value names of `enum <name> { … }` in `proto`, without the `*_UNSPECIFIED` zero.
+fn proto_enum(proto: &str, name: &str) -> Vec<String> {
+    assignments(proto, "enum", name)
+        .into_iter()
+        .map(|n| n.trim().to_owned())
         .filter(|n| !n.ends_with("_UNSPECIFIED"))
         .collect()
 }
@@ -107,4 +115,51 @@ fn every_proto_is_written_where_its_import_names_it() {
     }
     protos::write_all(&root).expect("idempotent");
     drop(std::fs::remove_dir_all(&root));
+}
+
+/// The field names of `message <name> { … }` in `proto`.
+fn proto_fields(proto: &str, name: &str) -> Vec<String> {
+    assignments(proto, "message", name)
+        .into_iter()
+        .filter_map(|l| l.split_whitespace().last().map(str::to_owned))
+        .collect()
+}
+
+/// The keys serde writes for `value`, every optional one present.
+fn keys<T: serde::Serialize>(value: &T) -> Vec<String> {
+    serde_json::to_value(value)
+        .ok()
+        .and_then(|v| v.as_object().map(|o| o.keys().cloned().collect()))
+        .unwrap_or_default()
+}
+
+#[test]
+fn health_and_restart_cost_carry_the_protos_fields() {
+    use crate::health::{Health, Part, RestartCost};
+    let cost = RestartCost {
+        line: "l".into(),
+        secs: Some(1),
+    };
+    let mut ours = keys(&cost);
+    ours.sort();
+    let mut theirs = proto_fields(protos::HEALTH, "RestartCost");
+    theirs.sort();
+    assert_eq!(ours, theirs, "RestartCost");
+    let health = Health {
+        state: State::Serving,
+        parts: vec![Part {
+            name: "p".into(),
+            state: State::Serving,
+            detail: "d".into(),
+            since: 1,
+        }],
+        as_of: "c".into(),
+        detail: "d".into(),
+        restart_cost: Some(cost),
+    };
+    let mut ours = keys(&health);
+    ours.sort();
+    let mut theirs = proto_fields(protos::HEALTH, "HealthReply");
+    theirs.sort();
+    assert_eq!(ours, theirs, "HealthReply");
 }

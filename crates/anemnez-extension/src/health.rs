@@ -68,6 +68,16 @@ pub struct Part {
     pub since: i64,
 }
 
+/// What restarting a component would cost now, in its own words (`HealthReply.restart_cost`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RestartCost {
+    /// One sentence a person reads.
+    pub line: String,
+    /// The component's own measured estimate of seconds back to serving; `None` when unmeasured.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secs: Option<u32>,
+}
+
 /// `Health/Get`'s answer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Health {
@@ -78,6 +88,9 @@ pub struct Health {
     pub as_of: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub detail: String,
+    /// What a restart would cost now; `None`: name the product only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restart_cost: Option<RestartCost>,
 }
 
 impl Health {
@@ -109,6 +122,10 @@ mod tests {
             }],
             as_of: "c-42".into(),
             detail: String::new(),
+            restart_cost: Some(RestartCost {
+                line: "qwen-35b warm".into(),
+                secs: None,
+            }),
         };
         let text = serde_json::to_string(&health).expect("writes");
         assert!(
@@ -121,5 +138,12 @@ mod tests {
             back.part("memory/index").map(|p| p.state),
             Some(State::Failing)
         );
+        assert!(
+            text.contains(r#""restart_cost":{"line":"qwen-35b warm"}"#),
+            "{text}"
+        );
+        let old: Health = serde_json::from_str(r#"{"state":"SERVING","as_of":"c"}"#)
+            .expect("an older answer reads");
+        assert_eq!(old.restart_cost, None, "absent: the product's name only");
     }
 }

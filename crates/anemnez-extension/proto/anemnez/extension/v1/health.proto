@@ -17,6 +17,18 @@ message HealthReply {
   // The events cursor this answer is true as of.
   string as_of = 3;
   string detail = 4;
+  // What restarting this instance would cost now, in its own words (D, 2026-11-10: Herald's announce
+  // names it for every train that would reload it). Absent: say the product's name only; nobody guesses.
+  RestartCost restart_cost = 5;
+}
+
+// What a restart costs: live state (which models are warm, how many sessions are attached), so it is
+// Health's, not the static descriptor's.
+message RestartCost {
+  // One sentence a person reads: "qwen-35b-mlx warm (35B, about 40 s to reload) and the embedder".
+  string line = 1;
+  // The product's own measured estimate of seconds back to serving; unset when it has not measured.
+  optional uint32 secs = 2;
 }
 
 message Part {

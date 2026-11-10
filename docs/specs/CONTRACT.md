@@ -105,6 +105,15 @@ serving: an upgrade verifies on either and records the degradation, because the 
 whether it can do its work, and a product that should be rolled back says `FAILING`. (Substrate's
 `HealthStatus` and `Diagnostic` are replaced by these, not mapped: B, CONVERGENCE.md.)
 
+<!-- claim: health-may-say-what-a-restart-costs -->
+**Health may say what a restart costs** (D, 2026-11-10). `restart_cost`, optional, is `{line, secs}`:
+`line` one sentence a person reads ("qwen-35b-mlx warm (35B, about 40 s to reload) and the embedder"),
+`secs` the component's own measured estimate of time back to serving, unset when it has not measured.
+It is live state (which models are warm, how many sessions are attached), so it is Health's, not the
+descriptor's. Absent means "name the product only": a reader (Herald's announce of what a train
+reloads) never guesses, and a product busy changing itself leaves it absent rather than saying
+"unknown". The serve face's `Board::set_restart_cost` publishes it only on a change.
+
 <!-- claim: every-call-carries-its-callers-principal -->
 **Every call carries its caller's principal, and the product checks it.** A call's metadata carries
 the Substrate-signed principal token (substrate UNIFIED_PROTOCOL B9 (6): per call, at most 5 minutes,
