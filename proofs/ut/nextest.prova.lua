@@ -104,3 +104,4 @@ spoken_for("a-name-is-judged-by-one-check-from-unicodes-own-data (generated)", "
 spoken_for("a-name-is-judged-by-one-check-from-unicodes-own-data (separator)", "label::label_tests::a_separator_lookalike_is_refused_by_name")
 spoken_for("one-exposure-for-every-face", "exposure::tests::one_exposure_for_every_face")
 spoken_for("a-row-tightens-freely-and-loosens-only-by-a-persons-grant", "exposure::tests::a_row_tightens_freely_and_loosens_only_by_a_persons_grant")
+spoken_for("a-methods-default-is-a-floor", "exposure::tests::a_methods_default_is_a_floor")

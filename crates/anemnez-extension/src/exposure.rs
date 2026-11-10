@@ -19,7 +19,9 @@ pub enum Face {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Exposure {
     pub face: Face,
-    /// The method's DEFAULT consent: what a call asks when nothing of the caller's own says more.
+    /// The method's DEFAULT consent: what a call asks when nothing of the caller's own says more. A
+    /// floor, never a ceiling: the product's per-call check may raise a call to Ask (a post to
+    /// another user's member) and never lowers one (CONTRACT.md a-methods-default-is-a-floor).
     pub consent: Permission,
 }
 
@@ -64,6 +66,18 @@ fn strictness(p: Permission) -> u8 {
     }
 }
 
+/// A method's default raised by the product's own per-call answer (a post to another user's member
+/// asks): the stricter of the two, so a per-call check raises a call and never lowers it (CONTRACT.md
+/// a-methods-default-is-a-floor).
+#[must_use]
+pub fn raised(default: Permission, per_call: Permission) -> Permission {
+    if strictness(per_call) > strictness(default) {
+        per_call
+    } else {
+        default
+    }
+}
+
 /// The consent a call is held to: the product's default, resolved through the caller's own row (a
 /// person's setting: Substrate's affordance stores; none on Agora's face). A row may tighten the
 /// default freely; it loosens it only with a person's signed grant, and without one the default
@@ -84,7 +98,7 @@ pub fn effective(
 
 #[cfg(test)]
 mod tests {
-    use super::{Exposure, Face, PersonsGrant, effective, exposure};
+    use super::{Exposure, Face, PersonsGrant, effective, exposure, raised};
     use crate::options::{Callers, Effect, MethodOptions, Permission, Presence, ResultShape};
 
     fn method(
@@ -172,5 +186,21 @@ mod tests {
             Deny,
             "a grant never loosens past a row that tightens"
         );
+    }
+
+    /// CONTRACT.md a-methods-default-is-a-floor: a per-call answer raises an Allow default to Ask or
+    /// Deny, and never lowers an Ask or a Deny.
+    #[test]
+    fn a_methods_default_is_a_floor() {
+        use Permission::{Allow, Ask, Deny};
+        assert_eq!(
+            raised(Allow, Ask),
+            Ask,
+            "a post to another user's member asks, though Post allows"
+        );
+        assert_eq!(raised(Allow, Deny), Deny);
+        assert_eq!(raised(Ask, Allow), Ask, "never lowered");
+        assert_eq!(raised(Deny, Allow), Deny, "never lowered");
+        assert_eq!(raised(Allow, Allow), Allow);
     }
 }

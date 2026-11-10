@@ -293,6 +293,13 @@ function); `consent` is the method's DEFAULT, its `permission`, never Allow for 
 Agora's MCP face and Substrate's Lua mount both call it, so the two surfaces never disagree on what is
 exposed or what asks (house rule 2). No row or grant changes `face`: a hidden method stays hidden.
 
+<!-- claim: a-methods-default-is-a-floor -->
+**A method's default is a floor, never a ceiling** (D, m/7026). Consent that depends on the call (a
+post to another user's member, say) cannot ride a per-method option, so the product's own per-call
+check may raise a call to Ask, or refuse it, whatever the method's default; it never lowers one. A
+face reads `consent: Allow` as "this method asks nothing by itself", never as "a call never asks": it
+relays the product's Ask as it relays any other answer.
+
 <!-- claim: a-row-tightens-freely-and-loosens-only-by-a-persons-grant -->
 **A person's row tightens freely and loosens only with their signed grant.**
 `exposure::effective(default, row, grant)` is the consent a call is held to: the default resolved
