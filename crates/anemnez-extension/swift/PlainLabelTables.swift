@@ -55,4 +55,14 @@ public enum PlainLabelTables {
         0x205F...0x205F,
         0x3000...0x3000,
     ]
+
+    public static let separatorLookalike: [ClosedRange<UInt32>] = [
+        0x00B7...0x00B7,
+        0x0387...0x0387,
+        0x2022...0x2022,
+        0x2219...0x2219,
+        0x22C5...0x22C5,
+        0x30FB...0x30FB,
+        0xFF65...0xFF65,
+    ]
 }

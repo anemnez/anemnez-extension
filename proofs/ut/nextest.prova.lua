@@ -100,3 +100,4 @@ spoken_for("a-name-is-judged-by-one-check-from-unicodes-own-data", "label::label
 spoken_for("a-name-is-judged-by-one-check-from-unicodes-own-data (vectors)", "label::label_tests::every_shared_vector_holds")
 spoken_for("a-name-is-judged-by-one-check-from-unicodes-own-data (named)", "label::label_tests::a_refusal_names_the_rule_and_the_code_point")
 spoken_for("a-name-is-judged-by-one-check-from-unicodes-own-data (generated)", "label::label_tests::the_generated_tables_are_current")
+spoken_for("a-name-is-judged-by-one-check-from-unicodes-own-data (separator)", "label::label_tests::a_separator_lookalike_is_refused_by_name")

@@ -149,6 +149,42 @@
   {
    "name": "G\u06dd",
    "refused": null
+  },
+  {
+   "name": "G\u00b7",
+   "refused": "separator"
+  },
+  {
+   "name": "G\u0387",
+   "refused": "separator"
+  },
+  {
+   "name": "G\u2022",
+   "refused": "separator"
+  },
+  {
+   "name": "G\u2219",
+   "refused": "separator"
+  },
+  {
+   "name": "G\u22c5",
+   "refused": "separator"
+  },
+  {
+   "name": "G\u30fb",
+   "refused": "separator"
+  },
+  {
+   "name": "G\uff65",
+   "refused": "separator"
+  },
+  {
+   "name": "G \u2219 vouched",
+   "refused": "separator"
+  },
+  {
+   "name": "G\u00a0\u00b7",
+   "refused": "space"
   }
  ]
 }

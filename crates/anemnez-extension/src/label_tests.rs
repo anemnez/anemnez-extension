@@ -1,7 +1,8 @@
 //! `plain_label` against Unicode's own data and the shared vectors.
 
 use super::{
-    BIDI_CONTROL, DEFAULT_IGNORABLE, LabelRefusal, UNICODE, VECTORS, WHITE_SPACE, plain_label,
+    BIDI_CONTROL, DEFAULT_IGNORABLE, LabelRefusal, SEPARATOR_LOOKALIKE, UNICODE, VECTORS,
+    WHITE_SPACE, plain_label,
 };
 
 const DERIVED: &str =
@@ -29,6 +30,12 @@ fn ranges(file: &str, property: &str) -> Vec<(u32, u32)> {
     out
 }
 
+/// The separator lookalikes (C, I): what products put between a name and its standing (`G · vouched`)
+/// and what reads as it. No Unicode property names this set, so it is named here, once, and both
+/// tables are generated from it: MIDDLE DOT, GREEK ANO TELEIA, BULLET, BULLET OPERATOR, DOT OPERATOR,
+/// KATAKANA MIDDLE DOT, HALFWIDTH KATAKANA MIDDLE DOT.
+const SEPARATOR_LOOKALIKES: [u32; 7] = [0x00B7, 0x0387, 0x2022, 0x2219, 0x22C5, 0x30FB, 0xFF65];
+
 /// One property's table: its Rust and Swift names, and its ranges from Unicode's own lines.
 struct Table {
     rust: &'static str,
@@ -36,8 +43,8 @@ struct Table {
     ranges: Vec<(u32, u32)>,
 }
 
-/// The three properties, from Unicode's own lines.
-fn properties() -> [Table; 3] {
+/// The three properties, from Unicode's own lines, and the separator lookalikes.
+fn properties() -> [Table; 4] {
     let table = |rust, swift, ranges| Table {
         rust,
         swift,
@@ -55,6 +62,11 @@ fn properties() -> [Table; 3] {
             ranges(PROPLIST, "Bidi_Control"),
         ),
         table("WHITE_SPACE", "whiteSpace", ranges(PROPLIST, "White_Space")),
+        table(
+            "SEPARATOR_LOOKALIKE",
+            "separatorLookalike",
+            SEPARATOR_LOOKALIKES.iter().map(|&cp| (cp, cp)).collect(),
+        ),
     ]
 }
 
@@ -135,6 +147,13 @@ fn the_tables_are_unicodes_own_data() {
     );
     assert_eq!(BIDI_CONTROL, ranges(PROPLIST, "Bidi_Control").as_slice());
     assert_eq!(WHITE_SPACE, ranges(PROPLIST, "White_Space").as_slice());
+    assert!(
+        SEPARATOR_LOOKALIKE
+            .iter()
+            .map(|&(lo, _)| lo)
+            .eq(SEPARATOR_LOOKALIKES),
+        "the separator table is the named list"
+    );
     assert_eq!(
         DEFAULT_IGNORABLE.len(),
         27,
@@ -193,5 +212,27 @@ fn a_refusal_names_the_rule_and_the_code_point() {
     assert_eq!(
         plain_label("G\u{200E}").expect_err("refused").name(),
         "bidi"
+    );
+}
+
+/// A separator lookalike is refused by name, anywhere in a name; it is checked last of the characters,
+/// so a character two rules name is named by the earlier one.
+#[test]
+fn a_separator_lookalike_is_refused_by_name() {
+    let mid = plain_label("G \u{2219} vouched").expect_err("refused");
+    assert_eq!(mid, LabelRefusal::Separator('\u{2219}'));
+    assert_eq!(mid.to_string(), "separator: U+2219 (Unicode 16.0.0)");
+    for cp in SEPARATOR_LOOKALIKES {
+        let c = char::from_u32(cp).expect("a char");
+        assert_eq!(
+            plain_label(&format!("G{c}")).expect_err("refused").name(),
+            "separator",
+            "U+{cp:04X}"
+        );
+    }
+    // Scanning left to right: a no-break space before the dot is named first.
+    assert_eq!(
+        plain_label("G\u{A0}\u{B7}").expect_err("refused").name(),
+        "space"
     );
 }

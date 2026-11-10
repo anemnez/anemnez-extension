@@ -5,11 +5,15 @@
 //! A label is 1 to 64 characters with none of: a control character; a line or paragraph separator
 //! (U+2028, U+2029); a bidirectional control (`Bidi_Control`); a default-ignorable code point
 //! (`Default_Ignorable_Code_Point`: the invisible ones, Hangul fillers, variation selectors, tags); a
-//! space other than U+0020 (`White_Space`: a no-break or em space makes two names look alike); or a
-//! space at either end. Each refusal names the rule and the code point.
+//! space other than U+0020 (`White_Space`: a no-break or em space makes two names look alike); a
+//! separator lookalike (a middle dot, bullet or katakana middle dot, `SEPARATOR_LOOKALIKE`: products
+//! join a name and its standing with ` · `, as in `G · vouched`, so a name holding one can pass for a
+//! name with a standing it hasn't; C, I); or a space at either end. Each refusal names the rule and
+//! the code point.
 //!
 //! The properties are Unicode's own data, never typed by hand: `unicode/<UNICODE>/` keeps the lines
-//! verbatim with their release headers, and the tables below are generated from them, with a test
+//! verbatim with their release headers, and the tables below are generated from them (the separator
+//! lookalikes from one named list in the generator, as they are no Unicode property), with a test
 //! that regenerates and compares. A Unicode bump is one file swap and can only ADD refusals: a name
 //! that passed may start failing, so a bump is a reviewed change, and the shared vectors
 //! ([`VECTORS`]) list what newly fails.
@@ -46,6 +50,8 @@ pub enum LabelRefusal {
     Ignorable(char),
     /// A space other than U+0020.
     Space(char),
+    /// A separator lookalike, which products put between a name and its standing.
+    Separator(char),
     /// A space at the start or the end.
     EdgeSpace,
 }
@@ -61,6 +67,7 @@ impl LabelRefusal {
             LabelRefusal::Bidi(_) => "bidi",
             LabelRefusal::Ignorable(_) => "ignorable",
             LabelRefusal::Space(_) => "space",
+            LabelRefusal::Separator(_) => "separator",
             LabelRefusal::EdgeSpace => "edge-space",
         }
     }
@@ -77,7 +84,8 @@ impl std::fmt::Display for LabelRefusal {
             | LabelRefusal::LineBreak(c)
             | LabelRefusal::Bidi(c)
             | LabelRefusal::Ignorable(c)
-            | LabelRefusal::Space(c) => write!(
+            | LabelRefusal::Space(c)
+            | LabelRefusal::Separator(c) => write!(
                 f,
                 "{}: U+{:04X} (Unicode {UNICODE})",
                 self.name(),
@@ -106,6 +114,8 @@ pub fn plain_label(name: &str) -> Result<(), LabelRefusal> {
             Some(LabelRefusal::Ignorable(c))
         } else if cp != 0x20 && within(WHITE_SPACE, cp) {
             Some(LabelRefusal::Space(c))
+        } else if within(SEPARATOR_LOOKALIKE, cp) {
+            Some(LabelRefusal::Separator(c))
         } else {
             None
         };
