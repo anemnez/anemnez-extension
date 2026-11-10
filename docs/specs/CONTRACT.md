@@ -257,11 +257,15 @@ Agora's MCP face both call it.
 `label::plain_label`, so no product keeps its own list and none falls short (A found one already
 short). A label is 1 to 64 characters with no control character, no U+2028 or U+2029, no
 `Bidi_Control`, no `Default_Ignorable_Code_Point` (the invisible characters, Hangul fillers,
-variation selectors, tags), no `White_Space` other than U+0020, and no space at either end. Each
-refusal is named (`empty`, `too-long`, `control`, `line-break`, `bidi`, `ignorable`, `space`,
-`edge-space`) with the code point and the release (`label::UNICODE`, today `16.0.0`). The
-properties are never typed by hand: `unicode/<release>/` keeps Unicode's lines verbatim under their
-headers, and one generator (`label_tests`) renders both `src/label_tables.rs` and the Swift copy
+variation selectors, tags), no `White_Space` other than U+0020, no separator lookalike, and no space
+at either end. The separator lookalikes are what products put between a name and its standing
+(`G · vouched`) and what reads as it: U+00B7, U+0387, U+2022, U+2219, U+22C5, U+30FB, U+FF65, so a
+name can't carry a standing it hasn't (C, I). Each refusal is named (`empty`, `too-long`,
+`control`, `line-break`, `bidi`, `ignorable`, `space`, `separator`, `edge-space`) with the code
+point and the release (`label::UNICODE`, today `16.0.0`); the characters are checked left to
+right, each by those rules in that order, then the length and the edges. The properties are never
+typed by hand: `unicode/<release>/` keeps Unicode's lines verbatim under their headers, the
+separator set is one named list in the generator (no Unicode property names it), and one generator (`label_tests`) renders both `src/label_tables.rs` and the Swift copy
 Iris.app vendors, `swift/PlainLabelTables.swift`, failing if either committed file differs (D), so
 the Swift check shares the generated table and the vectors hold its logic. A release bump can only add
 refusals, so it is a reviewed change: `label::VECTORS`, the vector file every caller runs, lists each
