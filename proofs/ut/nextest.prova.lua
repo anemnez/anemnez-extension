@@ -102,3 +102,5 @@ spoken_for("a-name-is-judged-by-one-check-from-unicodes-own-data (vectors)", "la
 spoken_for("a-name-is-judged-by-one-check-from-unicodes-own-data (named)", "label::label_tests::a_refusal_names_the_rule_and_the_code_point")
 spoken_for("a-name-is-judged-by-one-check-from-unicodes-own-data (generated)", "label::label_tests::the_generated_tables_are_current")
 spoken_for("a-name-is-judged-by-one-check-from-unicodes-own-data (separator)", "label::label_tests::a_separator_lookalike_is_refused_by_name")
+spoken_for("one-exposure-for-every-face", "exposure::tests::one_exposure_for_every_face")
+spoken_for("a-row-tightens-freely-and-loosens-only-by-a-persons-grant", "exposure::tests::a_row_tightens_freely_and_loosens_only_by_a_persons_grant")

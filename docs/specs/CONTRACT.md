@@ -282,3 +282,23 @@ name and its verdict, and a bump that changes one fails, listing all that change
 judges what a name contains, not what it looks like. A visible confusable (a fullwidth `Ｇ`, a Cyrillic
 letter shaped like a Latin one) passes; telling lookalikes apart needs NFKC and Unicode's confusables
 data, a separate check.
+
+## 6. One exposure for every face: `exposure` (D, C, H, B, A, 2026-11-10)
+
+<!-- claim: one-exposure-for-every-face -->
+**What a method's options mean to an agent face lives once.** `exposure::exposure(&MethodOptions)`
+answers `{face, consent}`: `face` is `Agent` only for a `callers: agent` method whose presence is not
+`hidden`, and `Hidden` otherwise (a product's or an owner's method is never an agent's tool or Lua
+function); `consent` is the method's DEFAULT, its `permission`, never Allow for a `person_act` method.
+Agora's MCP face and Substrate's Lua mount both call it, so the two surfaces never disagree on what is
+exposed or what asks (house rule 2). No row or grant changes `face`: a hidden method stays hidden.
+
+<!-- claim: a-row-tightens-freely-and-loosens-only-by-a-persons-grant -->
+**A person's row tightens freely and loosens only with their signed grant.**
+`exposure::effective(default, row, grant)` is the consent a call is held to: the default resolved
+through the caller's own row (Substrate's affordance stores, which a person sets; Agora's face has none
+and uses the default). A row at or past the default's strictness (Allow < Ask < Deny) stands; a row
+that loosens it stands only with a `PersonsGrant`, a person's signed answer the caller verified
+(Iris), and otherwise the default stands. A `PersonsGrant` is never made from what a Lua or MCP caller
+sends: the mount's own proof (Substrate's, B) holds that a Lua call trying to loosen an Ask is refused.
+

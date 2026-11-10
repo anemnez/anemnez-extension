@@ -9,6 +9,7 @@
 //! and a test holds every enum here to its proto, name for name.
 
 pub mod descriptor;
+pub mod exposure;
 pub mod health;
 pub mod label;
 pub mod options;
