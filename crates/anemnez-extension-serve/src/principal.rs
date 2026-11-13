@@ -69,10 +69,7 @@ pub struct MemoryNonces {
 impl MemoryNonces {
     /// An empty set reading time from `clock`.
     pub fn new(clock: Clock) -> MemoryNonces {
-        MemoryNonces {
-            clock,
-            held: Mutex::new(HashMap::new()),
-        }
+        MemoryNonces { clock, held: Mutex::new(HashMap::new()) }
     }
 }
 
@@ -124,19 +121,8 @@ pub struct Absent {
 
 impl Verifier {
     /// A verifier for `audience` (`<contract>@<major>/<instance id>`), reading time from `clock`.
-    pub fn new(
-        audience: impl Into<String>,
-        clock: Clock,
-        keys: Arc<dyn Keys>,
-        nonces: Arc<dyn Nonces>,
-    ) -> Verifier {
-        Verifier {
-            audience: audience.into(),
-            clock,
-            keys,
-            nonces,
-            absent: Arc::default(),
-        }
+    pub fn new(audience: impl Into<String>, clock: Clock, keys: Arc<dyn Keys>, nonces: Arc<dyn Nonces>) -> Verifier {
+        Verifier { audience: audience.into(), clock, keys, nonces, absent: Arc::default() }
     }
 
     /// The clock the verifier reads.
@@ -149,20 +135,10 @@ impl Verifier {
     ///
     /// # Errors
     /// The first step's [`Refusal`].
-    pub async fn verify(
-        &self,
-        token: &str,
-        method: &str,
-        body: &[u8; 32],
-    ) -> Result<Admitted, Refusal> {
+    pub async fn verify(&self, token: &str, method: &str, body: &[u8; 32]) -> Result<Admitted, Refusal> {
         let parsed = principal::decode(token)?;
         let now_ms = self.clock.now_wall().unix_millis();
-        parsed.admit(&Expect {
-            audience: &self.audience,
-            method,
-            body,
-            now_ms,
-        })?;
+        parsed.admit(&Expect { audience: &self.audience, method, body, now_ms })?;
         let claims = &parsed.claims;
         let record = self.keys.record(&claims.issuer).await?;
         if record.issuer != claims.issuer {
@@ -172,18 +148,11 @@ impl Verifier {
         // Held for MAX_TTL + SKEW past its issue, the sum of the two named constants, so changing
         // either can never open a replay window.
         let hold = i64::try_from(MAX_TTL_MS + SKEW_MS).unwrap_or(i64::MAX);
-        self.nonces
-            .record(
-                &claims.issuer,
-                claims.nonce,
-                as_i64(claims.issued_ms).saturating_add(hold),
-            )
-            .await?;
+        self.nonces.record(&claims.issuer, claims.nonce, as_i64(claims.issued_ms).saturating_add(hold)).await?;
         let left = as_i64(claims.expires_ms).saturating_sub(now_ms).max(0);
         Ok(Admitted {
             claims: parsed.claims.clone(),
-            expires: self.clock.now_mono()
-                + Duration::from_millis(u64::try_from(left).unwrap_or(0)),
+            expires: self.clock.now_mono() + Duration::from_millis(u64::try_from(left).unwrap_or(0)),
             digest: Token::digest(token),
         })
     }
@@ -194,18 +163,11 @@ impl Verifier {
     /// # Errors
     /// The step's [`Refusal`] ([`status`] makes it a gRPC status); an absent token outside the
     /// rollout is `malformed`.
-    pub async fn check_grpc<M>(
-        &self,
-        method: &str,
-        request: &tonic::Request<M>,
-    ) -> Result<Option<Admitted>, Refusal> {
+    pub async fn check_grpc<M>(&self, method: &str, request: &tonic::Request<M>) -> Result<Option<Admitted>, Refusal> {
         if token_of(request).is_none() && self.keys.admit_absent().await {
             let now = self.clock.now_wall().unix_millis();
             let mut absent = self.absent.lock().unwrap_or_else(PoisonError::into_inner);
-            let seen = absent.entry(method.to_owned()).or_insert(Absent {
-                count: 0,
-                last_ms: now,
-            });
+            let seen = absent.entry(method.to_owned()).or_insert(Absent { count: 0, last_ms: now });
             seen.count += 1;
             seen.last_ms = now;
             return Ok(None);
@@ -228,19 +190,11 @@ impl Verifier {
     ///
     /// # Errors
     /// The step's [`Refusal`] ([`status`] makes it a gRPC status).
-    pub async fn verify_grpc<M>(
-        &self,
-        method: &str,
-        request: &tonic::Request<M>,
-    ) -> Result<Admitted, Refusal> {
-        let token =
-            token_of(request).ok_or_else(|| Refusal::Malformed("no principal token".into()))?;
-        let RequestDigest(body) =
-            *request.extensions().get::<RequestDigest>().ok_or_else(|| {
-                Refusal::Malformed(
-                    "no request digest: serve the method through DigestLayer, uncompressed".into(),
-                )
-            })?;
+    pub async fn verify_grpc<M>(&self, method: &str, request: &tonic::Request<M>) -> Result<Admitted, Refusal> {
+        let token = token_of(request).ok_or_else(|| Refusal::Malformed("no principal token".into()))?;
+        let RequestDigest(body) = *request.extensions().get::<RequestDigest>().ok_or_else(|| {
+            Refusal::Malformed("no request digest: serve the method through DigestLayer, uncompressed".into())
+        })?;
         self.verify(token, method, &body).await
     }
 }
@@ -249,10 +203,7 @@ impl Verifier {
 /// (admitting a call that carries none, counted and logged, until its callers mint) asks this first;
 /// a token that IS present always goes through [`Verifier::verify_grpc`].
 pub fn token_of<M>(request: &tonic::Request<M>) -> Option<&str> {
-    request
-        .metadata()
-        .get(principal::GRPC_METADATA_KEY)
-        .and_then(|v| v.to_str().ok())
+    request.metadata().get(principal::GRPC_METADATA_KEY).and_then(|v| v.to_str().ok())
 }
 
 /// A token refusal as a gRPC status: the refusal's name is the message. The four a caller may retry

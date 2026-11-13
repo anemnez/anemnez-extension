@@ -55,9 +55,7 @@ impl DigestLayer {
         I: IntoIterator<Item = P>,
         P: Into<String>,
     {
-        DigestLayer {
-            paths: Arc::new(paths.into_iter().map(Into::into).collect()),
-        }
+        DigestLayer { paths: Arc::new(paths.into_iter().map(Into::into).collect()) }
     }
 }
 
@@ -65,10 +63,7 @@ impl<S> tower_layer::Layer<S> for DigestLayer {
     type Service = DigestService<S>;
 
     fn layer(&self, inner: S) -> DigestService<S> {
-        DigestService {
-            inner,
-            paths: Arc::clone(&self.paths),
-        }
+        DigestService { inner, paths: Arc::clone(&self.paths) }
     }
 }
 
@@ -83,10 +78,7 @@ type BoxFuture<T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send
 
 impl<S> tower_service::Service<http::Request<BoxBody>> for DigestService<S>
 where
-    S: tower_service::Service<http::Request<BoxBody>, Response = http::Response<BoxBody>>
-        + Clone
-        + Send
-        + 'static,
+    S: tower_service::Service<http::Request<BoxBody>, Response = http::Response<BoxBody>> + Clone + Send + 'static,
     S::Future: Send + 'static,
     S::Error: Send + 'static,
 {
@@ -117,9 +109,7 @@ where
             if let Some(digest) = digest_frame(&bytes) {
                 parts.extensions.insert(digest);
             }
-            inner
-                .call(http::Request::from_parts(parts, replay(bytes)))
-                .await
+            inner.call(http::Request::from_parts(parts, replay(bytes))).await
         })
     }
 }

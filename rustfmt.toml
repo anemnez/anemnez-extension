@@ -1,0 +1,4 @@
+# The org's formatting, pinned (prova-project-standards `cargo/rustfmt`): the width the Anemnez
+# Rust is written at, and the compact heuristics that keep single-line matches single-line.
+max_width = 120
+use_small_heuristics = "Max"

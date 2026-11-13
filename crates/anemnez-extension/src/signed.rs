@@ -121,9 +121,8 @@ impl std::error::Error for Refusal {}
 /// token is at most 1 KiB).
 pub fn message(domain: &str, alg: Alg, parts: &[Part<'_>]) -> Result<Vec<u8>, Refusal> {
     fn put(out: &mut Vec<u8>, bytes: &[u8]) -> Result<(), Refusal> {
-        let len = u32::try_from(bytes.len()).map_err(|_| {
-            Refusal::Malformed(format!("a {}-byte part is too long to frame", bytes.len()))
-        })?;
+        let len = u32::try_from(bytes.len())
+            .map_err(|_| Refusal::Malformed(format!("a {}-byte part is too long to frame", bytes.len())))?;
         out.extend_from_slice(&len.to_be_bytes());
         out.extend_from_slice(bytes);
         Ok(())
@@ -143,18 +142,11 @@ pub fn message(domain: &str, alg: Alg, parts: &[Part<'_>]) -> Result<Vec<u8>, Re
 /// # Errors
 /// [`Refusal::Malformed`] when a part cannot be framed ([`message`]), or `seed` is not a valid
 /// P-256 secret scalar.
-pub fn sign(
-    domain: &str,
-    alg: Alg,
-    parts: &[Part<'_>],
-    seed: &[u8; 32],
-) -> Result<[u8; 64], Refusal> {
+pub fn sign(domain: &str, alg: Alg, parts: &[Part<'_>], seed: &[u8; 32]) -> Result<[u8; 64], Refusal> {
     use ed25519_dalek::Signer as _;
     let message = message(domain, alg, parts)?;
     match alg {
-        Alg::Ed25519 => Ok(ed25519_dalek::SigningKey::from_bytes(seed)
-            .sign(&message)
-            .to_bytes()),
+        Alg::Ed25519 => Ok(ed25519_dalek::SigningKey::from_bytes(seed).sign(&message).to_bytes()),
         Alg::P256 => {
             use p256::ecdsa::signature::Signer as _;
             let sig: p256::ecdsa::Signature = p256_signing_key(seed)?.sign(&message);
@@ -174,17 +166,9 @@ fn p256_signing_key(seed: &[u8; 32]) -> Result<p256::ecdsa::SigningKey, Refusal>
 #[must_use]
 pub fn public_key(alg: Alg, seed: &[u8; 32]) -> Vec<u8> {
     match alg {
-        Alg::Ed25519 => ed25519_dalek::SigningKey::from_bytes(seed)
-            .verifying_key()
-            .to_bytes()
-            .to_vec(),
+        Alg::Ed25519 => ed25519_dalek::SigningKey::from_bytes(seed).verifying_key().to_bytes().to_vec(),
         Alg::P256 => p256_signing_key(seed)
-            .map(|k| {
-                k.verifying_key()
-                    .to_encoded_point(false)
-                    .as_bytes()
-                    .to_vec()
-            })
+            .map(|k| k.verifying_key().to_encoded_point(false).as_bytes().to_vec())
             .unwrap_or_default(),
     }
 }
@@ -194,47 +178,30 @@ pub fn public_key(alg: Alg, seed: &[u8; 32]) -> Vec<u8> {
 /// # Errors
 /// [`Refusal::Malformed`] for a key or signature of the wrong length or an invalid key;
 /// [`Refusal::BadSignature`] when the signature does not check.
-pub fn verify(
-    domain: &str,
-    alg: Alg,
-    parts: &[Part<'_>],
-    sig: &[u8],
-    key: &[u8],
-) -> Result<(), Refusal> {
+pub fn verify(domain: &str, alg: Alg, parts: &[Part<'_>], sig: &[u8], key: &[u8]) -> Result<(), Refusal> {
     match alg {
         Alg::Ed25519 => {
-            let key: &[u8; 32] = key.try_into().map_err(|_| {
-                Refusal::Malformed(format!("an ed25519 key is 32 bytes, not {}", key.len()))
-            })?;
-            let sig: &[u8; 64] = sig.try_into().map_err(|_| {
-                Refusal::Malformed(format!(
-                    "an ed25519 signature is 64 bytes, not {}",
-                    sig.len()
-                ))
-            })?;
+            let key: &[u8; 32] = key
+                .try_into()
+                .map_err(|_| Refusal::Malformed(format!("an ed25519 key is 32 bytes, not {}", key.len())))?;
+            let sig: &[u8; 64] = sig
+                .try_into()
+                .map_err(|_| Refusal::Malformed(format!("an ed25519 signature is 64 bytes, not {}", sig.len())))?;
             let key = ed25519_dalek::VerifyingKey::from_bytes(key)
                 .map_err(|_| Refusal::Malformed("not a valid ed25519 public key".into()))?;
-            key.verify_strict(
-                &message(domain, alg, parts)?,
-                &ed25519_dalek::Signature::from_bytes(sig),
-            )
-            .map_err(|_| Refusal::BadSignature)
+            key.verify_strict(&message(domain, alg, parts)?, &ed25519_dalek::Signature::from_bytes(sig))
+                .map_err(|_| Refusal::BadSignature)
         }
         Alg::P256 => {
             use p256::ecdsa::signature::Verifier as _;
-            let key = p256::ecdsa::VerifyingKey::from_sec1_bytes(key).map_err(|_| {
-                Refusal::Malformed(format!("not a SEC1 P-256 public key ({} bytes)", key.len()))
-            })?;
+            let key = p256::ecdsa::VerifyingKey::from_sec1_bytes(key)
+                .map_err(|_| Refusal::Malformed(format!("not a SEC1 P-256 public key ({} bytes)", key.len())))?;
             if sig.len() != 64 {
-                return Err(Refusal::Malformed(format!(
-                    "a P-256 signature is 64 bytes r ‖ s, not {}",
-                    sig.len()
-                )));
+                return Err(Refusal::Malformed(format!("a P-256 signature is 64 bytes r ‖ s, not {}", sig.len())));
             }
             let sig = p256::ecdsa::Signature::from_slice(sig)
                 .map_err(|_| Refusal::Malformed("not a P-256 r ‖ s signature".into()))?;
-            key.verify(&message(domain, alg, parts)?, &sig)
-                .map_err(|_| Refusal::BadSignature)
+            key.verify(&message(domain, alg, parts)?, &sig).map_err(|_| Refusal::BadSignature)
         }
     }
 }
@@ -277,22 +244,13 @@ mod tests {
     const DOMAIN: &str = "anemnez-test/1";
 
     fn parts<'a>(choice: &'a str) -> [Part<'a>; 3] {
-        [
-            Part::Str("device"),
-            Part::Str(choice),
-            Part::I64(1_767_225_600_000),
-        ]
+        [Part::Str("device"), Part::Str(choice), Part::I64(1_767_225_600_000)]
     }
 
     /// The framing, byte for byte: domain, then alg, then each part, every one length-prefixed.
     #[test]
     fn the_message_is_length_prefixed_parts_after_domain_and_alg() {
-        let m = message(
-            "d",
-            Alg::Ed25519,
-            &[Part::U8(1), Part::U64(2), Part::Bytes(&[9, 9])],
-        )
-        .unwrap();
+        let m = message("d", Alg::Ed25519, &[Part::U8(1), Part::U64(2), Part::Bytes(&[9, 9])]).unwrap();
         let mut want = vec![0, 0, 0, 1, b'd', 0, 0, 0, 7];
         want.extend_from_slice(b"ed25519");
         want.extend_from_slice(&[0, 0, 0, 1, 1]);
@@ -313,24 +271,12 @@ mod tests {
     fn a_signature_checks_and_any_change_refuses_it() {
         let key = public_key(Alg::Ed25519, &SEED);
         let sig = sign(DOMAIN, Alg::Ed25519, &parts("allow"), &SEED).unwrap();
-        assert_eq!(
-            verify(DOMAIN, Alg::Ed25519, &parts("allow"), &sig, &key),
-            Ok(())
-        );
+        assert_eq!(verify(DOMAIN, Alg::Ed25519, &parts("allow"), &sig, &key), Ok(()));
         // Another part, another domain (a token's signature replayed as an answer), another key.
-        assert_eq!(
-            verify(DOMAIN, Alg::Ed25519, &parts("deny"), &sig, &key),
-            Err(Refusal::BadSignature)
-        );
-        assert_eq!(
-            verify("anemnez-other/1", Alg::Ed25519, &parts("allow"), &sig, &key),
-            Err(Refusal::BadSignature)
-        );
+        assert_eq!(verify(DOMAIN, Alg::Ed25519, &parts("deny"), &sig, &key), Err(Refusal::BadSignature));
+        assert_eq!(verify("anemnez-other/1", Alg::Ed25519, &parts("allow"), &sig, &key), Err(Refusal::BadSignature));
         let other = public_key(Alg::Ed25519, &[8; 32]);
-        assert_eq!(
-            verify(DOMAIN, Alg::Ed25519, &parts("allow"), &sig, &other),
-            Err(Refusal::BadSignature)
-        );
+        assert_eq!(verify(DOMAIN, Alg::Ed25519, &parts("allow"), &sig, &other), Err(Refusal::BadSignature));
     }
 
     #[test]
@@ -353,41 +299,20 @@ mod tests {
         let key = public_key(Alg::P256, &SEED);
         assert_eq!(key.len(), 65, "uncompressed SEC1");
         let sig = sign(DOMAIN, Alg::P256, &parts("allow"), &SEED).unwrap();
-        assert_eq!(
-            verify(DOMAIN, Alg::P256, &parts("allow"), &sig, &key),
-            Ok(())
-        );
-        assert_eq!(
-            verify(DOMAIN, Alg::P256, &parts("deny"), &sig, &key),
-            Err(Refusal::BadSignature)
-        );
+        assert_eq!(verify(DOMAIN, Alg::P256, &parts("allow"), &sig, &key), Ok(()));
+        assert_eq!(verify(DOMAIN, Alg::P256, &parts("deny"), &sig, &key), Err(Refusal::BadSignature));
         let other = public_key(Alg::P256, &[8; 32]);
-        assert_eq!(
-            verify(DOMAIN, Alg::P256, &parts("allow"), &sig, &other),
-            Err(Refusal::BadSignature)
-        );
+        assert_eq!(verify(DOMAIN, Alg::P256, &parts("allow"), &sig, &other), Err(Refusal::BadSignature));
         // The alg tag is framed: an Ed25519 signature over the same parts is not a P-256 one.
         let ed = sign(DOMAIN, Alg::Ed25519, &parts("allow"), &SEED).unwrap();
         assert!(verify(DOMAIN, Alg::P256, &parts("allow"), &ed, &key).is_err());
         // A compressed key verifies too; a DER-length signature is refused by shape.
-        let compressed = p256::ecdsa::VerifyingKey::from_sec1_bytes(&key)
-            .unwrap()
-            .to_encoded_point(true)
-            .as_bytes()
-            .to_vec();
-        assert_eq!(
-            verify(DOMAIN, Alg::P256, &parts("allow"), &sig, &compressed),
-            Ok(())
-        );
+        let compressed =
+            p256::ecdsa::VerifyingKey::from_sec1_bytes(&key).unwrap().to_encoded_point(true).as_bytes().to_vec();
+        assert_eq!(verify(DOMAIN, Alg::P256, &parts("allow"), &sig, &compressed), Ok(()));
         let der = [0x30u8; 70];
-        assert!(matches!(
-            verify(DOMAIN, Alg::P256, &parts("allow"), &der, &key),
-            Err(Refusal::Malformed(_))
-        ));
-        assert!(
-            public_key(Alg::P256, &[0; 32]).is_empty(),
-            "zero is no scalar"
-        );
+        assert!(matches!(verify(DOMAIN, Alg::P256, &parts("allow"), &der, &key), Err(Refusal::Malformed(_))));
+        assert!(public_key(Alg::P256, &[0; 32]).is_empty(), "zero is no scalar");
     }
 
     /// The windows at their edges, from the two named constants (never a literal).
@@ -397,16 +322,10 @@ mod tests {
         let t = 1_767_225_600_000;
         // Issued in the future: fine within SKEW, refused one past it.
         assert_eq!(fresh(t + skew, Some(t + skew + 1), t), Ok(()));
-        assert_eq!(
-            fresh(t + skew + 1, Some(t + skew + 2), t),
-            Err(Refusal::NotYetValid)
-        );
+        assert_eq!(fresh(t + skew + 1, Some(t + skew + 2), t), Err(Refusal::NotYetValid));
         // Its own end, plus SKEW.
         assert_eq!(fresh(t, Some(t + ttl), t + ttl + skew), Ok(()));
-        assert_eq!(
-            fresh(t, Some(t + ttl), t + ttl + skew + 1),
-            Err(Refusal::Expired)
-        );
+        assert_eq!(fresh(t, Some(t + ttl), t + ttl + skew + 1), Err(Refusal::Expired));
         // A life longer than MAX_TTL, or negative, is refused whatever the clock says.
         assert_eq!(fresh(t, Some(t + ttl + 1), t), Err(Refusal::Expired));
         assert_eq!(fresh(t, Some(t - 1), t), Err(Refusal::Expired));

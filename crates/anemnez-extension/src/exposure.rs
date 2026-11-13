@@ -71,11 +71,7 @@ fn strictness(p: Permission) -> u8 {
 /// a-methods-default-is-a-floor).
 #[must_use]
 pub fn raised(default: Permission, per_call: Permission) -> Permission {
-    if strictness(per_call) > strictness(default) {
-        per_call
-    } else {
-        default
-    }
+    if strictness(per_call) > strictness(default) { per_call } else { default }
 }
 
 /// The consent a call is held to: the product's default, resolved through the caller's own row (a
@@ -83,11 +79,7 @@ pub fn raised(default: Permission, per_call: Permission) -> Permission {
 /// default freely; it loosens it only with a person's signed grant, and without one the default
 /// stands.
 #[must_use]
-pub fn effective(
-    default: Permission,
-    row: Option<Permission>,
-    grant: Option<PersonsGrant>,
-) -> Permission {
+pub fn effective(default: Permission, row: Option<Permission>, grant: Option<PersonsGrant>) -> Permission {
     match row {
         None => default,
         Some(row) if strictness(row) >= strictness(default) => row,
@@ -101,20 +93,8 @@ mod tests {
     use super::{Exposure, Face, PersonsGrant, effective, exposure, raised};
     use crate::options::{Callers, Effect, MethodOptions, Permission, Presence, ResultShape};
 
-    fn method(
-        callers: Callers,
-        presence: Presence,
-        permission: Permission,
-        person_act: bool,
-    ) -> MethodOptions {
-        let mut o = MethodOptions::new(
-            "a method",
-            ResultShape::One,
-            Effect::Write,
-            presence,
-            permission,
-            callers,
-        );
+    fn method(callers: Callers, presence: Presence, permission: Permission, person_act: bool) -> MethodOptions {
+        let mut o = MethodOptions::new("a method", ResultShape::One, Effect::Write, presence, permission, callers);
         o.person_act = person_act;
         o
     }
@@ -123,36 +103,17 @@ mod tests {
     /// face; its consent is its permission, and a person's act never answers Allow.
     #[test]
     fn one_exposure_for_every_face() {
-        let agent =
-            |presence, permission| exposure(&method(Callers::Agent, presence, permission, false));
+        let agent = |presence, permission| exposure(&method(Callers::Agent, presence, permission, false));
         assert_eq!(
             agent(Presence::Full, Permission::Allow),
-            Exposure {
-                face: Face::Agent,
-                consent: Permission::Allow
-            }
+            Exposure { face: Face::Agent, consent: Permission::Allow }
         );
-        assert_eq!(
-            agent(Presence::Index, Permission::Ask).consent,
-            Permission::Ask
-        );
-        assert_eq!(
-            agent(Presence::Hidden, Permission::Allow).face,
-            Face::Hidden,
-            "hidden is hidden"
-        );
+        assert_eq!(agent(Presence::Index, Permission::Ask).consent, Permission::Ask);
+        assert_eq!(agent(Presence::Hidden, Permission::Allow).face, Face::Hidden, "hidden is hidden");
         for callers in [Callers::Product, Callers::Owner] {
-            assert_eq!(
-                exposure(&method(callers, Presence::Full, Permission::Allow, false)).face,
-                Face::Hidden
-            );
+            assert_eq!(exposure(&method(callers, Presence::Full, Permission::Allow, false)).face, Face::Hidden);
         }
-        let act = exposure(&method(
-            Callers::Agent,
-            Presence::Full,
-            Permission::Allow,
-            true,
-        ));
+        let act = exposure(&method(Callers::Agent, Presence::Full, Permission::Allow, true));
         assert_eq!(act.consent, Permission::Ask, "a person's act asks at least");
     }
 
@@ -165,27 +126,11 @@ mod tests {
         assert_eq!(effective(Ask, None, None), Ask, "no row: the default");
         assert_eq!(effective(Allow, Some(Ask), None), Ask, "tightened freely");
         assert_eq!(effective(Ask, Some(Deny), None), Deny, "tightened freely");
-        assert_eq!(
-            effective(Ask, Some(Allow), None),
-            Ask,
-            "a loosening without a grant is refused"
-        );
-        assert_eq!(
-            effective(Deny, Some(Ask), None),
-            Deny,
-            "a loosening without a grant is refused"
-        );
+        assert_eq!(effective(Ask, Some(Allow), None), Ask, "a loosening without a grant is refused");
+        assert_eq!(effective(Deny, Some(Ask), None), Deny, "a loosening without a grant is refused");
         let grant = Some(PersonsGrant::verified());
-        assert_eq!(
-            effective(Ask, Some(Allow), grant),
-            Allow,
-            "a person's signed grant loosens it"
-        );
-        assert_eq!(
-            effective(Allow, Some(Deny), grant),
-            Deny,
-            "a grant never loosens past a row that tightens"
-        );
+        assert_eq!(effective(Ask, Some(Allow), grant), Allow, "a person's signed grant loosens it");
+        assert_eq!(effective(Allow, Some(Deny), grant), Deny, "a grant never loosens past a row that tightens");
     }
 
     /// CONTRACT.md a-methods-default-is-a-floor: a per-call answer raises an Allow default to Ask or
@@ -193,11 +138,7 @@ mod tests {
     #[test]
     fn a_methods_default_is_a_floor() {
         use Permission::{Allow, Ask, Deny};
-        assert_eq!(
-            raised(Allow, Ask),
-            Ask,
-            "a post to another user's member asks, though Post allows"
-        );
+        assert_eq!(raised(Allow, Ask), Ask, "a post to another user's member asks, though Post allows");
         assert_eq!(raised(Allow, Deny), Deny);
         assert_eq!(raised(Ask, Allow), Ask, "never lowered");
         assert_eq!(raised(Deny, Allow), Deny, "never lowered");

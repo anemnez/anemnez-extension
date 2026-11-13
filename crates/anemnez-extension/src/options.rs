@@ -158,36 +158,21 @@ impl std::error::Error for RouteKeyRefusal {}
 /// must be a top-level, non-repeated string field of the method's `input` message. proto3 has no
 /// `required`, so a present-but-empty key is the bridge's refusal per call, not this one's. One pure
 /// function, so every bridge refuses a descriptor alike.
-pub fn check_route_key(
-    input: &prost_types::DescriptorProto,
-    key: &str,
-) -> Result<RouteKey, RouteKeyRefusal> {
+pub fn check_route_key(input: &prost_types::DescriptorProto, key: &str) -> Result<RouteKey, RouteKeyRefusal> {
     use prost_types::field_descriptor_proto::{Label, Type};
     let message = input.name().to_owned();
     let field = input
         .field
         .iter()
         .find(|f| f.name() == key)
-        .ok_or_else(|| RouteKeyRefusal::NoSuchField {
-            message: message.clone(),
-            key: key.to_owned(),
-        })?;
+        .ok_or_else(|| RouteKeyRefusal::NoSuchField { message: message.clone(), key: key.to_owned() })?;
     if field.r#type() != Type::String {
-        return Err(RouteKeyRefusal::NotAString {
-            message,
-            key: key.to_owned(),
-        });
+        return Err(RouteKeyRefusal::NotAString { message, key: key.to_owned() });
     }
     if field.label() == Label::Repeated {
-        return Err(RouteKeyRefusal::Repeated {
-            message,
-            key: key.to_owned(),
-        });
+        return Err(RouteKeyRefusal::Repeated { message, key: key.to_owned() });
     }
-    Ok(RouteKey {
-        name: key.to_owned(),
-        number: field.number(),
-    })
+    Ok(RouteKey { name: key.to_owned(), number: field.number() })
 }
 
 /// One worked call: the method's request as a JSON argument object, and a one-line caption. A bridge
@@ -202,10 +187,7 @@ pub struct Example {
 
 impl Example {
     pub fn new(args_json: impl Into<String>, caption: impl Into<String>) -> Example {
-        Example {
-            args_json: args_json.into(),
-            caption: caption.into(),
-        }
+        Example { args_json: args_json.into(), caption: caption.into() }
     }
 }
 
@@ -302,39 +284,18 @@ mod tests {
             ("depth", 4, Type::Uint32, Label::Optional),
             ("tags", 5, Type::String, Label::Repeated),
         ]);
-        assert_eq!(
-            check_route_key(&land, "repo"),
-            Ok(RouteKey {
-                name: "repo".into(),
-                number: 3
-            })
-        );
+        assert_eq!(check_route_key(&land, "repo"), Ok(RouteKey { name: "repo".into(), number: 3 }));
         let refused = |key: &str| check_route_key(&land, key).expect_err("refused");
-        assert!(matches!(
-            refused("missing"),
-            RouteKeyRefusal::NoSuchField { .. }
-        ));
-        assert!(
-            matches!(refused("repo.name"), RouteKeyRefusal::NoSuchField { .. }),
-            "no nested paths yet"
-        );
-        assert!(matches!(
-            refused("depth"),
-            RouteKeyRefusal::NotAString { .. }
-        ));
+        assert!(matches!(refused("missing"), RouteKeyRefusal::NoSuchField { .. }));
+        assert!(matches!(refused("repo.name"), RouteKeyRefusal::NoSuchField { .. }), "no nested paths yet");
+        assert!(matches!(refused("depth"), RouteKeyRefusal::NotAString { .. }));
         assert!(matches!(refused("tags"), RouteKeyRefusal::Repeated { .. }));
-        assert_eq!(
-            refused("depth").to_string(),
-            "route key 'depth' of LandRequest is not a string"
-        );
+        assert_eq!(refused("depth").to_string(), "route key 'depth' of LandRequest is not a string");
     }
 
     #[test]
     fn a_keyed_route_reads_and_writes_by_name() {
-        let route = Route::Keyed {
-            group: "herald-repo".into(),
-            key: "repo".into(),
-        };
+        let route = Route::Keyed { group: "herald-repo".into(), key: "repo".into() };
         let text = serde_json::to_string(&route).expect("writes");
         assert_eq!(text, r#"{"keyed":{"group":"herald-repo","key":"repo"}}"#);
         assert_eq!(serde_json::from_str::<Route>(&text).expect("reads"), route);
@@ -343,15 +304,9 @@ mod tests {
     #[test]
     fn permission_and_callers_are_required_when_read() {
         let without = r#"{"description":"d","result":"one","effect":"READ","presence":"FULL"}"#;
-        assert!(
-            serde_json::from_str::<MethodOptions>(without).is_err(),
-            "no default for either"
-        );
+        assert!(serde_json::from_str::<MethodOptions>(without).is_err(), "no default for either");
         let with = r#"{"description":"d","result":"one","effect":"READ","presence":"FULL","permission":"ASK","callers":"AGENT"}"#;
         let read: MethodOptions = serde_json::from_str(with).expect("reads");
-        assert_eq!(
-            (read.route, read.person_act, read.session),
-            (Route::LocalFirst, false, None)
-        );
+        assert_eq!((read.route, read.person_act, read.session), (Route::LocalFirst, false, None));
     }
 }
