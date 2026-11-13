@@ -294,7 +294,7 @@ Agora's MCP face and Substrate's Lua mount both call it, so the two surfaces nev
 exposed or what asks (house rule 2). No row or grant changes `face`: a hidden method stays hidden.
 
 <!-- claim: a-methods-default-is-a-floor -->
-**A method's default is a floor, never a ceiling** (D, m/7026). Consent that depends on the call (a
+**A method's default is a floor, never a ceiling** (D). Consent that depends on the call (a
 post to another user's member, say) cannot ride a per-method option, so the product's own per-call
 check may raise a call to Ask, or refuse it, whatever the method's default; it never lowers one. A
 face reads `consent: Allow` as "this method asks nothing by itself", never as "a call never asks": it
