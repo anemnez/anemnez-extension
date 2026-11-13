@@ -65,6 +65,31 @@ fn each_variant_is_refused_where_its_rule_lives() {
     assert_eq!(methods, ["GetURL", "GetUrl"]);
 }
 
+/// CONTRACT.md one-mapping-flattens-a-descriptor and a-flattened-name-is-one-tool, on descriptors
+/// protoc wrote: the good fixture's agent methods are its tools (never `Ping`, which has no anemnez
+/// options), with events last; `CollidingNames`, admitted by the contract's check, has no face.
+#[test]
+fn the_fixture_flattens_and_its_colliding_names_do_not() {
+    use anemnez_extension::mcp::{FlattenRefusal, flatten};
+    let fds = Variant::Good.file_descriptor_set();
+    let good =
+        flatten(&service_of(fds).expect("declared"), &check_descriptor(fds).expect("admitted")).expect("flattens");
+    let names: Vec<&str> = good.iter().map(|t| t.name.as_str()).collect();
+    assert_eq!(names, ["items", "recent", "get", "hold", "run", "wait", "events"]);
+    let long: Vec<&str> = good.iter().filter(|t| t.long).map(|t| t.name.as_str()).collect();
+    assert_eq!(long, ["hold", "run"], "blocks and runs_to_completion are long; Wait owns its budget");
+    let fds = Variant::CollidingNames.file_descriptor_set();
+    let colliding = check_descriptor(fds).expect("admitted");
+    assert_eq!(
+        flatten(&service_of(fds).expect("declared"), &colliding).expect_err("refused"),
+        [FlattenRefusal::NameCollision(
+            "get_url".into(),
+            "/anemnez.fixture.collidingnames.v1.Fixture/GetURL".into(),
+            "/anemnez.fixture.collidingnames.v1.Fixture/GetUrl".into(),
+        )]
+    );
+}
+
 fn with_token<T>(message: T, token: &str) -> tonic::Request<T> {
     let mut request = tonic::Request::new(message);
     request.metadata_mut().insert(anemnez_extension::principal::GRPC_METADATA_KEY, token.parse().expect("ascii"));

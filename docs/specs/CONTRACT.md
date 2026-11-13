@@ -309,3 +309,69 @@ that loosens it stands only with a `PersonsGrant`, a person's signed answer the 
 (Iris), and otherwise the default stands. A `PersonsGrant` is never made from what a Lua or MCP caller
 sends: the mount's own proof (Substrate's, B) holds that a Lua call trying to loosen an Ask is refused.
 
+
+## 7. One flattened face for MCP: `mcp` (B, C, D, E, H, 2026-11-13)
+
+A product writes one contract, and two faces are made from it: Substrate's Lua mount (the rich
+face) and the MCP tools an outside client sees (the flattened face; substrate
+`docs/specs/PRODUCT_BRIDGE.md` "The two faces"). The flattened face is made by one pure function
+here, so Agora, and any product that serves its own MCP face (Prova, Archetect), make the same tools
+from the same descriptor, and a check of a hand-written face is a comparison against this
+function's output.
+
+<!-- claim: one-mapping-flattens-a-descriptor -->
+**One mapping flattens a descriptor into MCP tools.** `mcp::flatten(&ServiceOptions, &[Method])`
+answers one `Tool` per method whose `exposure` face is `Agent` (a product's, an owner's or a hidden
+method is never a tool), then the `events` tool when the service keeps events, or every refusal. A tool's name is `mcp::op_name` of the method's
+name, its snake case (`GetURL` → `get_url`), the same name a Lua mount gives the op; the host
+qualifies it with the namespace (`<contract>__get_url`). Its description is the method's, then each
+example as `caption: args_json`. Its input schema is the request's top-level fields in the proto3
+JSON mapping, with no other key allowed, since a typo must not become a different act (§4): 32-bit
+integers are `integer`, 64-bit ones `integer` or `string`, `bytes` a base64 `string`, an enum its
+name or number, `Timestamp`, `Duration` and `FieldMask` a `string`, a wrapper its scalar, a map (a field whose entry
+the descriptor marks `map_entry`, never guessed from its name: D) an `object`, and any other message an `object` that `encode` checks strictly. A tool also carries what
+the host needs and the schema cannot say: the method's path, its `effect`, its default consent
+(`exposure`), and whether it is long (`blocks` or `runs_to_completion`), which a host bounds by
+progress, never by a fixed call bound. Each contract feature has one flattened shape, built here and carried on the tool (`result`,
+`session`, `long`, listed under `_meta.anemnez`): a `cursor` result is a page tool whose request
+carries the cursor and whose reply the next one; `bound(n)` a list; a `session` an id that `opens`
+answers and `within` and `closes` take as a field of their request; `blocks` and
+`runs_to_completion` one long call.
+A product's flattened face is the same on every host.
+
+<!-- claim: a-flattened-name-is-one-tool -->
+**A flattened name is one tool.** Two offered methods whose names flatten alike (`GetURL` and
+`GetUrl`, or one name in two services) are refused `name-collision`, naming both paths, never
+one picked; and `events` is reserved for the events tool, so a method that would flatten to it
+is refused `reserved-name`. The fixture's `CollidingNames` variant is refused, and every refusal
+is answered, not the first.
+
+<!-- claim: events-flatten-to-one-bounded-read -->
+**Events flatten to one bounded read.** A product whose service keeps events (`events_kept` above
+0) has the `events` tool, and one keeping none has none, since it would answer nothing (D): `{after, kinds?, max?}` in, a batch of events up to the head and the
+cursor to pass next out. It is the flattened face of the product's own `Events` stream, read by
+the host for at most `max` events and a bounded wait, never a second events API, and it is for
+outside clients only: an agent of ours never polls (Stoa delivers). A refusal the stream ends with
+(`cursor-not-mine`, `out-of-range`, `data-loss`, `expired`) is answered by name.
+
+<!-- claim: an-mcp-call-names-one-method -->
+**An MCP call names one method.** `mcp::resolve(&tools, name)` answers the tool a call names, and
+so the path its `arguments` are encoded for by `encode` (§4), which refuses anything but a JSON
+object of the request's fields; a name no tool has is `no-such-tool`. Nothing the client sends
+picks the path.
+
+<!-- claim: an-external-caller-is-parsed-here-and-trusted-only-from-its-peer -->
+**An external caller's stamp is parsed here and trusted only from its peer** (D, H, 2026-11-13).
+Agora stamps every call to one of our servers with who called: always an external agent, the lane
+the client says it works on, the place the kernel proved and the lane's lease (agora
+`AGORA.md#a-caller-through-agora-is-external`). Over MCP it rides `_meta.anemnez.caller`; when
+Agora calls a product's socket itself (the generated face), the same JSON rides the binary metadata
+key `mcp::STAMP_METADATA_KEY` (`anemnez-caller-bin`), so both faces carry one value. `mcp::Stamp`
+is that value, read and written here once. `Stamp::from_metadata` only parses, into an
+`Untrusted<Stamp>`: what a peer sent says nothing until the server knows the peer is Agora's
+daemon, and deciding that needs peer identity, which is not in this crate. So nothing here
+trusts a stamp: `Untrusted::vouched_by_peer` is called only by the closed constructor that read
+the peer at accept (anemnez-service's peer module, with a census that nothing else calls it), and
+from any other peer a call reads `Stamp::unvouched()`, external with no lane. A malformed stamp,
+a lane that is not a `plain_label`, or a lease with no lane reads as no lane too: it fails
+closed, never into a guess. The lane attributes a call and authorizes nothing.

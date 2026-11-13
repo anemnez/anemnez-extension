@@ -12,6 +12,7 @@ pub mod descriptor;
 pub mod exposure;
 pub mod health;
 pub mod label;
+pub mod mcp;
 pub mod options;
 pub mod signed;
 

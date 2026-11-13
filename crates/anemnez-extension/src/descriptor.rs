@@ -53,6 +53,9 @@ pub struct Field {
     pub repeated: bool,
     /// A proto3 `optional` field, whose presence is tracked.
     pub optional: bool,
+    /// A `map<K, V>` field: `repeated` of an entry message the descriptor marks `map_entry`, read
+    /// from that option, never from the entry's name.
+    pub map: bool,
 }
 
 /// A field's type: a scalar, or the full name of an enum or message (`.pkg.Name`).
@@ -110,8 +113,17 @@ fn fields_of(message: Option<&DescriptorProto>) -> Vec<Field> {
             },
             repeated: f.label() == Label::Repeated,
             optional: f.proto3_optional(),
+            map: f.r#type() == Type::Message && is_map_entry(message, f.type_name()),
         })
         .collect()
+}
+
+/// Whether `type_name` is one of `message`'s nested types that the descriptor marks `map_entry`.
+fn is_map_entry(message: &DescriptorProto, type_name: &str) -> bool {
+    let entry = type_name.rsplit('.').next().unwrap_or_default();
+    let parent = type_name.strip_suffix(entry).and_then(|p| p.strip_suffix('.')).unwrap_or_default();
+    parent.rsplit('.').next() == Some(message.name())
+        && message.nested_type.iter().any(|n| n.name() == entry && n.options.as_ref().is_some_and(|o| o.map_entry()))
 }
 
 /// Why a descriptor is refused at connect. Each names the method's path. `#[non_exhaustive]`, so a
@@ -730,6 +742,27 @@ mod tests {
                 .collect(),
             ..Default::default()
         }
+    }
+
+    /// A map field is known by its entry's `map_entry` option, never by its name: a hand-written
+    /// message named `…Entry` is a list of messages (D).
+    #[test]
+    fn a_map_field_is_known_by_its_entrys_map_entry() {
+        let mut request = message(
+            "MakeRequest",
+            &[
+                ("labels", 1, Type::Message, Label::Repeated),
+                ("rows", 2, Type::Message, Label::Repeated),
+                ("name", 3, Type::String, Label::Optional),
+            ],
+        );
+        request.field[0].type_name = Some(".pkg.MakeRequest.LabelsEntry".into());
+        request.field[1].type_name = Some(".pkg.MakeRequest.RowEntry".into());
+        let mut labels = message("LabelsEntry", &[]);
+        labels.options = Some(prost_types::MessageOptions { map_entry: Some(true), ..Default::default() });
+        request.nested_type = vec![labels, message("RowEntry", &[])];
+        let maps: Vec<(String, bool)> = super::fields_of(Some(&request)).into_iter().map(|f| (f.name, f.map)).collect();
+        assert_eq!(maps, [("labels".into(), true), ("rows".into(), false), ("name".into(), false)]);
     }
 
     fn set(methods: Vec<Vec<u8>>) -> Vec<u8> {
