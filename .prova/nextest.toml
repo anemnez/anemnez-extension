@@ -11,8 +11,12 @@
 # fail-fast is OFF so one conduct adopts the COMPLETE picture: each conduct costs a workspace
 # compilation, so an agent burning down red cases must see every failure per run, not the first
 # one followed by cancelled (and therefore unattested) cases.
+#
+# slow-timeout is the hang guard (standards cargo/nextest-bounded-hang): a test that never finishes is
+# ended here, named, after 3 periods of 60 s, rather than holding the gate to the runner's ceiling.
 [profile.prova]
 fail-fast = false
+slow-timeout = { period = "60s", terminate-after = 3 }
 
 [profile.prova.junit]
 path = "junit.xml"
