@@ -27,14 +27,8 @@ pub struct Board {
 impl Board {
     /// A board starting in `STARTING`, publishing to `journal`.
     pub fn new(journal: Journal) -> Board {
-        let reply = pb::HealthReply {
-            state: pb::State::Starting as i32,
-            ..Default::default()
-        };
-        Board {
-            journal,
-            reply: Arc::new(Mutex::new(reply)),
-        }
+        let reply = pb::HealthReply { state: pb::State::Starting as i32, ..Default::default() };
+        Board { journal, reply: Arc::new(Mutex::new(reply)) }
     }
 
     /// Set the extension's own state. Publishes only on a change, answering whether there was one,
@@ -56,13 +50,7 @@ impl Board {
     pub fn set_part(&self, name: &str, state: State, detail: &str) -> bool {
         let now = self.journal.clock().now_wall().unix_millis();
         let mut reply = self.reply();
-        if !upsert(
-            &mut reply.parts,
-            name,
-            proto_state(state) as i32,
-            detail,
-            now,
-        ) {
+        if !upsert(&mut reply.parts, name, proto_state(state) as i32, detail, now) {
             return false;
         }
         self.publish(&mut reply);
@@ -93,13 +81,7 @@ impl Board {
         let mut changed = false;
         let mut named = Vec::new();
         for (name, state, detail) in parts {
-            changed |= upsert(
-                &mut reply.parts,
-                name,
-                proto_state(state) as i32,
-                detail,
-                now,
-            );
+            changed |= upsert(&mut reply.parts, name, proto_state(state) as i32, detail, now);
             named.push(name);
         }
         let before = reply.parts.len();
@@ -114,10 +96,7 @@ impl Board {
     /// Say what a restart would cost now (`None`: name the product only). Publishes only on a change,
     /// answering whether there was one, so a product may set it on every recompute.
     pub fn set_restart_cost(&self, cost: Option<&anemnez_extension::health::RestartCost>) -> bool {
-        let want = cost.map(|c| pb::RestartCost {
-            line: c.line.clone(),
-            secs: c.secs,
-        });
+        let want = cost.map(|c| pb::RestartCost { line: c.line.clone(), secs: c.secs });
         let mut reply = self.reply();
         if reply.restart_cost == want {
             return false;
@@ -173,12 +152,7 @@ fn upsert(parts: &mut Vec<pb::Part>, name: &str, state: i32, detail: &str, now: 
             true
         }
         None => {
-            parts.push(pb::Part {
-                name: name.to_owned(),
-                state,
-                detail: detail.to_owned(),
-                since: now,
-            });
+            parts.push(pb::Part { name: name.to_owned(), state, detail: detail.to_owned(), since: now });
             true
         }
     }
@@ -218,10 +192,7 @@ mod tests {
         assert!(!board.set(State::Serving, ""));
         assert!(!board.set_part("runtimes/llama", State::Serving, "2 instances"));
         assert_eq!(journal.head(), head, "nothing published for no change");
-        assert!(
-            board.set_part("runtimes/llama", State::Serving, "3 instances"),
-            "a detail is a change"
-        );
+        assert!(board.set_part("runtimes/llama", State::Serving, "3 instances"), "a detail is a change");
         assert_ne!(journal.head(), head);
     }
 
@@ -229,23 +200,14 @@ mod tests {
     #[test]
     fn a_restart_cost_is_said_once_per_change_and_can_be_taken_back() {
         let (board, journal) = board();
-        let cost = anemnez_extension::health::RestartCost {
-            line: "qwen-35b warm".into(),
-            secs: Some(40),
-        };
+        let cost = anemnez_extension::health::RestartCost { line: "qwen-35b warm".into(), secs: Some(40) };
         assert!(board.set_restart_cost(Some(&cost)));
         let got = board.get().restart_cost.expect("said");
         assert_eq!((got.line.as_str(), got.secs), ("qwen-35b warm", Some(40)));
         let head = journal.head();
-        assert!(
-            !board.set_restart_cost(Some(&cost)),
-            "the same cost again is no change"
-        );
+        assert!(!board.set_restart_cost(Some(&cost)), "the same cost again is no change");
         assert_eq!(journal.head(), head);
-        assert!(
-            board.set_restart_cost(None),
-            "absent again: the product's name only"
-        );
+        assert!(board.set_restart_cost(None), "absent again: the product's name only");
         assert_eq!(board.get().restart_cost, None);
     }
 
@@ -272,30 +234,17 @@ mod tests {
         board.set_part("runtimes/llama", State::Serving, "");
         board.set_part("runtimes/qwen", State::Serving, "");
         let head = journal.head();
-        assert!(board.sync_parts([
-            ("runtimes/qwen", State::Degraded, "slow"),
-            ("runtimes/phi", State::Starting, "")
-        ]));
+        assert!(board.sync_parts([("runtimes/qwen", State::Degraded, "slow"), ("runtimes/phi", State::Starting, "")]));
         let after_one = journal.head();
         assert_eq!(
-            after_one
-                .rsplit_once(':')
-                .map(|(_, s)| s.parse::<u64>().unwrap_or(0)),
-            head.rsplit_once(':')
-                .map(|(_, s)| s.parse::<u64>().unwrap_or(0) + 1),
+            after_one.rsplit_once(':').map(|(_, s)| s.parse::<u64>().unwrap_or(0)),
+            head.rsplit_once(':').map(|(_, s)| s.parse::<u64>().unwrap_or(0) + 1),
             "one event for the whole sync"
         );
         let mut names: Vec<_> = board.get().parts.into_iter().map(|p| p.name).collect();
         names.sort();
         assert_eq!(names, ["runtimes/phi", "runtimes/qwen"]);
-        assert!(!board.sync_parts([
-            ("runtimes/qwen", State::Degraded, "slow"),
-            ("runtimes/phi", State::Starting, "")
-        ]));
-        assert_eq!(
-            journal.head(),
-            after_one,
-            "the same set again publishes nothing"
-        );
+        assert!(!board.sync_parts([("runtimes/qwen", State::Degraded, "slow"), ("runtimes/phi", State::Starting, "")]));
+        assert_eq!(journal.head(), after_one, "the same set again publishes nothing");
     }
 }

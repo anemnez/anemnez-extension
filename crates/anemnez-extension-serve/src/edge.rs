@@ -45,16 +45,14 @@ impl FileNonces {
     pub fn open(dir: &Path, clock: Clock) -> io::Result<FileNonces> {
         let mut store = Store::open(dir, clock)?;
         let (jobs, queue) = mpsc::channel::<Job>();
-        std::thread::Builder::new()
-            .name("nonces-writer".into())
-            .spawn(move || {
-                // Ends when the last sender goes, that is, when the FileNonces is dropped.
-                while let Ok(first) = queue.recv() {
-                    let mut batch = vec![first];
-                    batch.extend(queue.try_iter());
-                    store.commit(batch);
-                }
-            })?;
+        std::thread::Builder::new().name("nonces-writer".into()).spawn(move || {
+            // Ends when the last sender goes, that is, when the FileNonces is dropped.
+            while let Ok(first) = queue.recv() {
+                let mut batch = vec![first];
+                batch.extend(queue.try_iter());
+                store.commit(batch);
+            }
+        })?;
         Ok(FileNonces { jobs })
     }
 }
@@ -63,12 +61,7 @@ impl FileNonces {
 impl Nonces for FileNonces {
     async fn record(&self, issuer: &str, nonce: [u8; 16], until_ms: i64) -> Result<(), Refusal> {
         let (answer, answered) = oneshot::channel();
-        let job = Job {
-            issuer: issuer.to_owned(),
-            nonce,
-            until_ms,
-            answer,
-        };
+        let job = Job { issuer: issuer.to_owned(), nonce, until_ms, answer };
         // A writer that has gone cannot record: refuse, never admit an unrecorded nonce.
         self.jobs.send(job).map_err(|_| Refusal::Replay)?;
         answered.await.unwrap_or(Err(Refusal::Replay))
@@ -133,10 +126,7 @@ impl Store {
             answers.push((job.answer, Ok(())));
         }
         if !out.is_empty() {
-            let written = self
-                .file
-                .write_all(out.as_bytes())
-                .and_then(|()| full_sync(&self.file));
+            let written = self.file.write_all(out.as_bytes()).and_then(|()| full_sync(&self.file));
             self.syncs += 1;
             self.lines += out.lines().count();
             if written.is_err() {
@@ -163,11 +153,7 @@ impl Store {
         self.held.retain(|_, until| *until >= now);
         let tmp = self.path.with_extension("log.tmp");
         let mut out = File::create(&tmp)?;
-        let body: String = self
-            .held
-            .iter()
-            .map(|(key, until)| line(key, *until))
-            .collect();
+        let body: String = self.held.iter().map(|(key, until)| line(key, *until)).collect();
         out.write_all(body.as_bytes())?;
         full_sync(&out)?;
         std::fs::rename(&tmp, &self.path)?;
@@ -215,26 +201,11 @@ fn unhex(text: &str) -> Option<Vec<u8>> {
     if !text.len().is_multiple_of(2) {
         return None;
     }
-    (0..text.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(text.get(i..i + 2)?, 16).ok())
-        .collect()
+    (0..text.len()).step_by(2).map(|i| u8::from_str_radix(text.get(i..i + 2)?, 16).ok()).collect()
 }
 
 #[cfg(test)]
-pub(crate) fn job(
-    issuer: &str,
-    nonce: u8,
-    until_ms: i64,
-) -> (Job, oneshot::Receiver<Result<(), Refusal>>) {
+pub(crate) fn job(issuer: &str, nonce: u8, until_ms: i64) -> (Job, oneshot::Receiver<Result<(), Refusal>>) {
     let (answer, answered) = oneshot::channel();
-    (
-        Job {
-            issuer: issuer.into(),
-            nonce: [nonce; 16],
-            until_ms,
-            answer,
-        },
-        answered,
-    )
+    (Job { issuer: issuer.into(), nonce: [nonce; 16], until_ms, answer }, answered)
 }

@@ -78,10 +78,7 @@ impl Calls {
     /// [`CallRefusal::UnknownMethod`].
     pub fn method(&self, path: &str) -> Result<MethodDescriptor, CallRefusal> {
         let unknown = || CallRefusal::UnknownMethod(format!("no method {path} in the descriptor"));
-        let (service, method) = path
-            .strip_prefix('/')
-            .and_then(|p| p.split_once('/'))
-            .ok_or_else(unknown)?;
+        let (service, method) = path.strip_prefix('/').and_then(|p| p.split_once('/')).ok_or_else(unknown)?;
         self.pool
             .get_service_by_name(service)
             .and_then(|s| s.methods().find(|m| m.name() == method))
@@ -99,8 +96,7 @@ impl Calls {
         let mut json = serde_json::Deserializer::from_str(args_json);
         let message = DynamicMessage::deserialize(method.input(), &mut json)
             .map_err(|e| CallRefusal::ArgsMismatch(format!("{} for {path}", e)))?;
-        json.end()
-            .map_err(|e| CallRefusal::ArgsMismatch(e.to_string()))?;
+        json.end().map_err(|e| CallRefusal::ArgsMismatch(e.to_string()))?;
         Ok(message.encode_to_vec())
     }
 
@@ -111,11 +107,9 @@ impl Calls {
     /// [`CallRefusal::UnknownMethod`] or [`CallRefusal::ReplyMismatch`].
     pub fn decode(&self, path: &str, reply: &[u8]) -> Result<serde_json::Value, CallRefusal> {
         let method = self.method(path)?;
-        let message = DynamicMessage::decode(method.output(), reply)
-            .map_err(|e| CallRefusal::ReplyMismatch(e.to_string()))?;
-        let options = SerializeOptions::new()
-            .use_proto_field_name(true)
-            .skip_default_fields(false);
+        let message =
+            DynamicMessage::decode(method.output(), reply).map_err(|e| CallRefusal::ReplyMismatch(e.to_string()))?;
+        let options = SerializeOptions::new().use_proto_field_name(true).skip_default_fields(false);
         message
             .serialize_with_options(serde_json::value::Serializer, &options)
             .map_err(|e| CallRefusal::ReplyMismatch(e.to_string()))
@@ -133,21 +127,13 @@ pub async fn unary(
     request: Vec<u8>,
     metadata: tonic::metadata::MetadataMap,
 ) -> Result<Vec<u8>, Box<tonic::Status>> {
-    let path: http::uri::PathAndQuery = path.parse().map_err(|_| {
-        Box::new(tonic::Status::invalid_argument(format!(
-            "{path} is not a method path"
-        )))
-    })?;
+    let path: http::uri::PathAndQuery =
+        path.parse().map_err(|_| Box::new(tonic::Status::invalid_argument(format!("{path} is not a method path"))))?;
     let mut grpc = tonic::client::Grpc::new(channel);
-    grpc.ready()
-        .await
-        .map_err(|e| Box::new(tonic::Status::unavailable(e.to_string())))?;
+    grpc.ready().await.map_err(|e| Box::new(tonic::Status::unavailable(e.to_string())))?;
     let mut call = tonic::Request::new(request);
     *call.metadata_mut() = metadata;
-    grpc.unary(call, path, Raw)
-        .await
-        .map(tonic::Response::into_inner)
-        .map_err(Box::new)
+    grpc.unary(call, path, Raw).await.map(tonic::Response::into_inner).map_err(Box::new)
 }
 
 /// A codec that sends and receives a message's bytes untouched.
@@ -173,11 +159,7 @@ impl tonic::codec::Encoder for Raw {
     type Item = Vec<u8>;
     type Error = tonic::Status;
 
-    fn encode(
-        &mut self,
-        item: Vec<u8>,
-        dst: &mut tonic::codec::EncodeBuf<'_>,
-    ) -> Result<(), tonic::Status> {
+    fn encode(&mut self, item: Vec<u8>, dst: &mut tonic::codec::EncodeBuf<'_>) -> Result<(), tonic::Status> {
         dst.put_slice(&item);
         Ok(())
     }
@@ -187,10 +169,7 @@ impl tonic::codec::Decoder for Raw {
     type Item = Vec<u8>;
     type Error = tonic::Status;
 
-    fn decode(
-        &mut self,
-        src: &mut tonic::codec::DecodeBuf<'_>,
-    ) -> Result<Option<Vec<u8>>, tonic::Status> {
+    fn decode(&mut self, src: &mut tonic::codec::DecodeBuf<'_>) -> Result<Option<Vec<u8>>, tonic::Status> {
         let n = src.remaining();
         Ok(Some(src.copy_to_bytes(n).to_vec()))
     }

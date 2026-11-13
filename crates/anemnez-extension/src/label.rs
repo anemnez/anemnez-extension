@@ -85,12 +85,7 @@ impl std::fmt::Display for LabelRefusal {
             | LabelRefusal::Bidi(c)
             | LabelRefusal::Ignorable(c)
             | LabelRefusal::Space(c)
-            | LabelRefusal::Separator(c) => write!(
-                f,
-                "{}: U+{:04X} (Unicode {UNICODE})",
-                self.name(),
-                u32::from(*c)
-            ),
+            | LabelRefusal::Separator(c) => write!(f, "{}: U+{:04X} (Unicode {UNICODE})", self.name(), u32::from(*c)),
         }
     }
 }

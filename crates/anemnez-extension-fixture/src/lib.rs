@@ -156,36 +156,23 @@ pub async fn serve(dir: &Path, clock: Clock, variant: Variant) -> std::io::Resul
     let board = Board::new(journal.clone());
     board.set(State::Serving, "");
     let verifier = Verifier::new(
-        format!(
-            "{}@{}/{INSTANCE_ID}",
-            variant.contract(),
-            major(variant.version())
-        ),
+        format!("{}@{}/{INSTANCE_ID}", variant.contract(), major(variant.version())),
         clock.clone(),
         Arc::new(NoKeysYet),
         Arc::new(MemoryNonces::new(clock.clone())),
     );
-    let fixture = Fixture {
-        journal: journal.clone(),
-        clock,
-    };
+    let fixture = Fixture { journal: journal.clone(), clock };
     let router = tonic::transport::Server::builder()
-        .layer(DigestLayer::for_paths([
-            anemnez_extension_serve::journal::EVENTS_METHOD,
-        ]))
+        .layer(DigestLayer::for_paths([anemnez_extension_serve::journal::EVENTS_METHOD]))
         .add_service(pb::fixture_server::FixtureServer::new(fixture))
-        .add_service(
-            anemnez_extension_serve::pb::describe_server::DescribeServer::new(Describe::new(
-                variant.file_descriptor_set().to_vec(),
-            )),
-        )
+        .add_service(anemnez_extension_serve::pb::describe_server::DescribeServer::new(Describe::new(
+            variant.file_descriptor_set().to_vec(),
+        )))
         .add_service(anemnez_extension_serve::pb::health_server::HealthServer::new(board))
-        .add_service(
-            anemnez_extension_serve::pb::events_server::EventsServer::new(EventsService::new(
-                journal.clone(),
-                verifier,
-            )),
-        );
+        .add_service(anemnez_extension_serve::pb::events_server::EventsServer::new(EventsService::new(
+            journal.clone(),
+            verifier,
+        )));
     let incoming = tokio_stream::wrappers::UnixListenerStream::new(listener);
     let server = tokio::spawn(async move {
         let _ = router.serve_with_incoming(incoming).await;
@@ -223,10 +210,7 @@ const ITEMS: usize = 12;
 const PAGE: usize = 5;
 
 fn item(i: usize) -> pb::Item {
-    pb::Item {
-        id: format!("i{i:02}"),
-        name: format!("item {i}"),
-    }
+    pb::Item { id: format!("i{i:02}"), name: format!("item {i}") }
 }
 
 struct Fixture {
@@ -252,16 +236,10 @@ impl pb::fixture_server::Fixture for Fixture {
     ) -> Result<tonic::Response<pb::ItemsReply>, tonic::Status> {
         let start: usize = match request.get_ref().cursor.as_str() {
             "" => 0,
-            c => c
-                .parse()
-                .map_err(|_| tonic::Status::invalid_argument("cursor"))?,
+            c => c.parse().map_err(|_| tonic::Status::invalid_argument("cursor"))?,
         };
         let end = (start + PAGE).min(ITEMS);
-        let next = if end < ITEMS {
-            end.to_string()
-        } else {
-            String::new()
-        };
+        let next = if end < ITEMS { end.to_string() } else { String::new() };
         let items = (start..end).map(item).collect();
         Ok(reply(&request, pb::ItemsReply { items, next }))
     }
@@ -274,10 +252,7 @@ impl pb::fixture_server::Fixture for Fixture {
         Ok(reply(&request, pb::RecentReply { items }))
     }
 
-    async fn get(
-        &self,
-        request: tonic::Request<pb::GetRequest>,
-    ) -> Result<tonic::Response<pb::Item>, tonic::Status> {
+    async fn get(&self, request: tonic::Request<pb::GetRequest>) -> Result<tonic::Response<pb::Item>, tonic::Status> {
         let found = (0..ITEMS).map(item).find(|i| i.id == request.get_ref().id);
         let found = found.ok_or_else(|| tonic::Status::not_found("no such item"))?;
         Ok(reply(&request, found))
@@ -289,9 +264,7 @@ impl pb::fixture_server::Fixture for Fixture {
     ) -> Result<tonic::Response<pb::HoldReply>, tonic::Status> {
         let repo = request.get_ref().repo.clone();
         if repo.is_empty() {
-            return Err(tonic::Status::invalid_argument(
-                anemnez_extension::refusal::NO_KEY,
-            ));
+            return Err(tonic::Status::invalid_argument(anemnez_extension::refusal::NO_KEY));
         }
         let cursor = self.journal.publish("held", repo.clone().into_bytes());
         Ok(reply(&request, pb::HoldReply { repo, cursor }))

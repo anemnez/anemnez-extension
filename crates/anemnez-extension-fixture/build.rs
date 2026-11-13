@@ -10,21 +10,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     tonic_build::configure()
         .file_descriptor_set_path(out.join("good.fds"))
         .compile_protos(&[own.join("anemnez/fixture/v1/good.proto")], &includes)?;
-    for variant in [
-        "wrong_major",
-        "unbounded",
-        "person_act_allow",
-        "colliding_names",
-        "reserved_name",
-    ] {
+    for variant in ["wrong_major", "unbounded", "person_act_allow", "colliding_names", "reserved_name"] {
         tonic_build::configure()
             .build_server(false)
             .build_client(false)
             .file_descriptor_set_path(out.join(format!("{variant}.fds")))
-            .compile_protos(
-                &[own.join(format!("anemnez/fixture/v1/{variant}.proto"))],
-                &includes,
-            )?;
+            .compile_protos(&[own.join(format!("anemnez/fixture/v1/{variant}.proto"))], &includes)?;
     }
     Ok(())
 }

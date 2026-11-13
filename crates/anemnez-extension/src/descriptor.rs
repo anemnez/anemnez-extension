@@ -13,8 +13,7 @@ use prost::Message;
 use prost_types::{DescriptorProto, FileDescriptorProto, FileDescriptorSet};
 
 use crate::options::{
-    Callers, Effect, MethodOptions, Permission, Presence, ResultShape, Route, RouteKey, Session,
-    check_route_key,
+    Callers, Effect, MethodOptions, Permission, Presence, ResultShape, Route, RouteKey, Session, check_route_key,
 };
 
 /// The extension field number of `anemnez_method` on `google.protobuf.MethodOptions`.
@@ -223,8 +222,7 @@ impl std::error::Error for DescriptorRefusal {}
 pub fn check_descriptor(file_descriptor_set: &[u8]) -> Result<Vec<Method>, Vec<DescriptorRefusal>> {
     let set = FileDescriptorSet::decode(file_descriptor_set)
         .map_err(|e| vec![DescriptorRefusal::Malformed(e.to_string())])?;
-    let raw_files = repeated(file_descriptor_set, 1)
-        .map_err(|why| vec![DescriptorRefusal::Malformed(why.into())])?;
+    let raw_files = repeated(file_descriptor_set, 1).map_err(|why| vec![DescriptorRefusal::Malformed(why.into())])?;
     let mut methods = Vec::new();
     let mut refused = Vec::new();
     if raw_files.len() != set.file.len() {
@@ -232,10 +230,8 @@ pub fn check_descriptor(file_descriptor_set: &[u8]) -> Result<Vec<Method>, Vec<D
     }
     for (file, raw_file) in set.file.iter().zip(raw_files) {
         for (service, raw_service) in services_of(file, raw_file).map_err(|r| vec![r])? {
-            let raw_methods = repeated(raw_service, 2)
-                .ok()
-                .filter(|raw| raw.len() == service.method.len())
-                .ok_or_else(|| {
+            let raw_methods =
+                repeated(raw_service, 2).ok().filter(|raw| raw.len() == service.method.len()).ok_or_else(|| {
                     vec![DescriptorRefusal::Malformed(format!(
                         "{}: the methods of {} don't read raw",
                         file.name(),
@@ -243,13 +239,7 @@ pub fn check_descriptor(file_descriptor_set: &[u8]) -> Result<Vec<Method>, Vec<D
                     ))]
                 })?;
             for (method, raw_method) in service.method.iter().zip(raw_methods) {
-                let path = format!(
-                    "/{}{}{}/{}",
-                    file.package(),
-                    dot(file.package()),
-                    service.name(),
-                    method.name()
-                );
+                let path = format!("/{}{}{}/{}", file.package(), dot(file.package()), service.name(), method.name());
                 let bytes = match method_options(raw_method) {
                     Ok(Some(bytes)) => bytes,
                     Ok(None) => continue,
@@ -276,11 +266,7 @@ pub fn check_descriptor(file_descriptor_set: &[u8]) -> Result<Vec<Method>, Vec<D
             }
         }
     }
-    if refused.is_empty() {
-        Ok(methods)
-    } else {
-        Err(refused)
-    }
+    if refused.is_empty() { Ok(methods) } else { Err(refused) }
 }
 
 fn dot(package: &str) -> &'static str {
@@ -294,18 +280,9 @@ fn check_method(
     output: Option<&DescriptorProto>,
 ) -> Result<(MethodOptions, Option<RouteKey>), Vec<DescriptorRefusal>> {
     let p = || path.to_owned();
-    let raw = wire::MethodOptions::decode(bytes)
-        .map_err(|_| vec![DescriptorRefusal::OptionsMalformed(p())])?;
+    let raw = wire::MethodOptions::decode(bytes).map_err(|_| vec![DescriptorRefusal::OptionsMalformed(p())])?;
     let mut refused = Vec::new();
-    let Parsed {
-        callers,
-        permission,
-        effect,
-        presence,
-        session,
-        result,
-        route,
-    } = parse(&raw);
+    let Parsed { callers, permission, effect, presence, session, result, route } = parse(&raw);
     if callers.is_none() {
         refused.push(DescriptorRefusal::CallersMissing(p()));
     }
@@ -324,11 +301,8 @@ fn check_method(
     if presence.is_none() {
         refused.push(DescriptorRefusal::PresenceMissing(p()));
     }
-    let collection = output.is_some_and(|o| {
-        o.field
-            .iter()
-            .any(|f| f.label() == prost_types::field_descriptor_proto::Label::Repeated)
-    });
+    let collection = output
+        .is_some_and(|o| o.field.iter().any(|f| f.label() == prost_types::field_descriptor_proto::Label::Repeated));
     if collection && result == Some(ResultShape::One) {
         refused.push(DescriptorRefusal::UnboundedCollection(p()));
     }
@@ -351,31 +325,27 @@ fn check_method(
         }
     }
     match (callers, permission, result, effect, presence) {
-        (Some(callers), Some(permission), Some(result), Some(effect), Some(presence))
-            if refused.is_empty() =>
-        {
-            Ok((
-                MethodOptions {
-                    description: raw.description,
-                    result,
-                    effect,
-                    route,
-                    person_act: raw.person_act,
-                    presence,
-                    permission,
-                    callers,
-                    session,
-                    blocks: raw.blocks,
-                    runs_to_completion: raw.runs_to_completion,
-                    examples: raw
-                        .examples
-                        .into_iter()
-                        .map(|e| crate::options::Example::new(e.args_json, e.caption))
-                        .collect(),
-                },
-                route_key,
-            ))
-        }
+        (Some(callers), Some(permission), Some(result), Some(effect), Some(presence)) if refused.is_empty() => Ok((
+            MethodOptions {
+                description: raw.description,
+                result,
+                effect,
+                route,
+                person_act: raw.person_act,
+                presence,
+                permission,
+                callers,
+                session,
+                blocks: raw.blocks,
+                runs_to_completion: raw.runs_to_completion,
+                examples: raw
+                    .examples
+                    .into_iter()
+                    .map(|e| crate::options::Example::new(e.args_json, e.caption))
+                    .collect(),
+            },
+            route_key,
+        )),
         _ => Err(refused),
     }
 }
@@ -431,22 +401,11 @@ fn parse(raw: &wire::MethodOptions) -> Parsed {
     };
     let route = match raw.route.clone().and_then(|r| r.to) {
         Some(wire::To::Leader(group)) => Route::Leader(group),
-        Some(wire::To::Keyed(k)) => Route::Keyed {
-            group: k.group,
-            key: k.key,
-        },
+        Some(wire::To::Keyed(k)) => Route::Keyed { group: k.group, key: k.key },
         Some(wire::To::Any(_)) => Route::Any,
         Some(wire::To::LocalFirst(_)) | None => Route::LocalFirst,
     };
-    Parsed {
-        callers,
-        permission,
-        effect,
-        presence,
-        session,
-        result,
-        route,
-    }
+    Parsed { callers, permission, effect, presence, session, result, route }
 }
 
 /// Whether an example's `args_json` is a JSON object whose keys are all top-level fields of the
@@ -469,11 +428,8 @@ fn example_fits(args_json: &str, input: Option<&DescriptorProto>) -> Result<(), 
 fn find_message<'a>(set: &'a FileDescriptorSet, type_name: &str) -> Option<&'a DescriptorProto> {
     let name = type_name.strip_prefix('.')?;
     set.file.iter().find_map(|file: &FileDescriptorProto| {
-        let rest = if file.package().is_empty() {
-            Some(name)
-        } else {
-            name.strip_prefix(file.package())?.strip_prefix('.')
-        }?;
+        let rest =
+            if file.package().is_empty() { Some(name) } else { name.strip_prefix(file.package())?.strip_prefix('.') }?;
         let mut parts = rest.split('.');
         let outer = parts.next()?;
         let mut message = file.message_type.iter().find(|m| m.name() == outer)?;
@@ -493,25 +449,17 @@ fn find_message<'a>(set: &'a FileDescriptorSet, type_name: &str) -> Option<&'a D
 /// `service-options-missing` when no service carries the option, `service-options-twice` when two
 /// do, and `service-options-malformed`, `contract-missing`, `version-missing` or
 /// `cursor-scope-missing` for one that says too little.
-pub fn service_of(
-    file_descriptor_set: &[u8],
-) -> Result<crate::options::ServiceOptions, DescriptorRefusal> {
-    let set = FileDescriptorSet::decode(file_descriptor_set)
-        .map_err(|e| DescriptorRefusal::Malformed(e.to_string()))?;
-    let raw_files =
-        repeated(file_descriptor_set, 1).map_err(|why| DescriptorRefusal::Malformed(why.into()))?;
+pub fn service_of(file_descriptor_set: &[u8]) -> Result<crate::options::ServiceOptions, DescriptorRefusal> {
+    let set =
+        FileDescriptorSet::decode(file_descriptor_set).map_err(|e| DescriptorRefusal::Malformed(e.to_string()))?;
+    let raw_files = repeated(file_descriptor_set, 1).map_err(|why| DescriptorRefusal::Malformed(why.into()))?;
     if raw_files.len() != set.file.len() {
         return Err(files_mismatch(set.file.len(), raw_files.len()));
     }
     let mut found: Option<(String, Vec<u8>)> = None;
     for (file, raw_file) in set.file.iter().zip(raw_files) {
         for (service, raw_service) in services_of(file, raw_file)? {
-            let name = format!(
-                "{}{}{}",
-                file.package(),
-                dot(file.package()),
-                service.name()
-            );
+            let name = format!("{}{}{}", file.package(), dot(file.package()), service.name());
             let Some(bytes) = extension(raw_service, 3, SERVICE_OPTIONS_FIELD)
                 .map_err(|_| DescriptorRefusal::ServiceOptionsMalformed(name.clone()))?
             else {
@@ -560,11 +508,7 @@ fn services_of<'a>(
     let malformed = |why: String| DescriptorRefusal::Malformed(format!("{}: {why}", file.name()));
     let raw = repeated(raw_file, 6).map_err(|why| malformed(why.to_string()))?;
     if raw.len() != file.service.len() {
-        return Err(malformed(format!(
-            "{} services decoded, {} read raw",
-            file.service.len(),
-            raw.len()
-        )));
+        return Err(malformed(format!("{} services decoded, {} read raw", file.service.len(), raw.len())));
     }
     Ok(file.service.iter().zip(raw).collect())
 }
@@ -756,12 +700,7 @@ mod tests {
         out
     }
 
-    fn method(
-        name: &str,
-        input: &str,
-        output: &str,
-        options: Option<&wire::MethodOptions>,
-    ) -> Vec<u8> {
+    fn method(name: &str, input: &str, output: &str, options: Option<&wire::MethodOptions>) -> Vec<u8> {
         let mut bytes = MethodDescriptorProto {
             name: Some(name.into()),
             input_type: Some(input.into()),
@@ -793,11 +732,7 @@ mod tests {
     }
 
     fn set(methods: Vec<Vec<u8>>) -> Vec<u8> {
-        let mut service = ServiceDescriptorProto {
-            name: Some("Herald".into()),
-            ..Default::default()
-        }
-        .encode_to_vec();
+        let mut service = ServiceDescriptorProto { name: Some("Herald".into()), ..Default::default() }.encode_to_vec();
         for m in methods {
             service.extend(ld(2, &m));
         }
@@ -807,16 +742,10 @@ mod tests {
             message_type: vec![
                 message(
                     "LandRequest",
-                    &[
-                        ("train", 1, Type::String, Label::Optional),
-                        ("repo", 3, Type::String, Label::Optional),
-                    ],
+                    &[("train", 1, Type::String, Label::Optional), ("repo", 3, Type::String, Label::Optional)],
                 ),
                 message("LandReply", &[]),
-                message(
-                    "QueueReply",
-                    &[("trains", 1, Type::String, Label::Repeated)],
-                ),
+                message("QueueReply", &[("trains", 1, Type::String, Label::Repeated)]),
             ],
             ..Default::default()
         }
@@ -834,11 +763,8 @@ mod tests {
         }
         .encode_to_vec();
         for (name, options) in entries {
-            let mut service = ServiceDescriptorProto {
-                name: Some((*name).into()),
-                ..Default::default()
-            }
-            .encode_to_vec();
+            let mut service =
+                ServiceDescriptorProto { name: Some((*name).into()), ..Default::default() }.encode_to_vec();
             if let Some(o) = options {
                 service.extend(ld(3, &ld(SERVICE_OPTIONS_FIELD, &o.encode_to_vec())));
             }
@@ -872,10 +798,7 @@ mod tests {
     /// never a silent truncation answered as service-options-missing.
     #[test]
     fn a_service_list_that_does_not_match_is_malformed() {
-        let service = |name: &str| ServiceDescriptorProto {
-            name: Some(name.into()),
-            ..Default::default()
-        };
+        let service = |name: &str| ServiceDescriptorProto { name: Some(name.into()), ..Default::default() };
         let file = FileDescriptorProto {
             name: Some("herald.proto".into()),
             service: vec![service("Herald"), service("Admin")],
@@ -898,17 +821,9 @@ mod tests {
             ..Default::default()
         }
         .encode_to_vec();
-        let mut service = ServiceDescriptorProto {
-            name: Some("Herald".into()),
-            ..Default::default()
-        }
-        .encode_to_vec();
+        let mut service = ServiceDescriptorProto { name: Some("Herald".into()), ..Default::default() }.encode_to_vec();
         let mut varint = Vec::new();
-        prost::encoding::encode_key(
-            SERVICE_OPTIONS_FIELD,
-            prost::encoding::WireType::Varint,
-            &mut varint,
-        );
+        prost::encoding::encode_key(SERVICE_OPTIONS_FIELD, prost::encoding::WireType::Varint, &mut varint);
         varint.push(1);
         service.extend(ld(3, &varint));
         file.extend(ld(6, &service));
@@ -922,77 +837,40 @@ mod tests {
     /// never 'not offered'.
     #[test]
     fn an_unreadable_method_option_is_malformed_not_unoffered() {
-        let mut land = method(
-            "Land",
-            ".herald.v2.LandRequest",
-            ".herald.v2.LandReply",
-            None,
-        );
+        let mut land = method("Land", ".herald.v2.LandRequest", ".herald.v2.LandReply", None);
         let mut varint = Vec::new();
-        prost::encoding::encode_key(
-            METHOD_OPTIONS_FIELD,
-            prost::encoding::WireType::Varint,
-            &mut varint,
-        );
+        prost::encoding::encode_key(METHOD_OPTIONS_FIELD, prost::encoding::WireType::Varint, &mut varint);
         varint.push(1);
         land.extend(ld(4, &varint));
         let refused = check_descriptor(&set(vec![land])).expect_err("refused");
-        assert_eq!(
-            refused,
-            vec![DescriptorRefusal::OptionsMalformed(
-                "/herald.v2.Herald/Land".into()
-            )]
-        );
+        assert_eq!(refused, vec![DescriptorRefusal::OptionsMalformed("/herald.v2.Herald/Land".into())]);
     }
 
     /// Every refusal names what is wrong: none declares, two declare, or one says too little.
     #[test]
     fn service_of_refuses_by_name() {
-        let name = |r: Result<crate::options::ServiceOptions, DescriptorRefusal>| {
-            r.expect_err("refused").name()
-        };
+        let name = |r: Result<crate::options::ServiceOptions, DescriptorRefusal>| r.expect_err("refused").name();
+        assert_eq!(name(service_of(&services(&[("Herald", None)]))), "service-options-missing");
         assert_eq!(
-            name(service_of(&services(&[("Herald", None)]))),
-            "service-options-missing"
-        );
-        assert_eq!(
-            service_of(&services(&[
-                ("Herald", Some(&herald())),
-                ("Other", Some(&herald()))
-            ]))
-            .expect_err("refused"),
-            DescriptorRefusal::ServiceOptionsTwice(
-                "herald.v2.Herald".into(),
-                "herald.v2.Other".into()
-            )
+            service_of(&services(&[("Herald", Some(&herald())), ("Other", Some(&herald()))])).expect_err("refused"),
+            DescriptorRefusal::ServiceOptionsTwice("herald.v2.Herald".into(), "herald.v2.Other".into())
         );
         let mut nameless = herald();
         nameless.contract.clear();
-        assert_eq!(
-            name(service_of(&services(&[("Herald", Some(&nameless))]))),
-            "contract-missing"
-        );
+        assert_eq!(name(service_of(&services(&[("Herald", Some(&nameless))]))), "contract-missing");
         let mut unversioned = herald();
         unversioned.version.clear();
-        assert_eq!(
-            name(service_of(&services(&[("Herald", Some(&unversioned))]))),
-            "version-missing"
-        );
+        assert_eq!(name(service_of(&services(&[("Herald", Some(&unversioned))]))), "version-missing");
         let mut scopeless = herald();
         scopeless.cursor_scope = 0;
-        assert_eq!(
-            name(service_of(&services(&[("Herald", Some(&scopeless))]))),
-            "cursor-scope-missing"
-        );
+        assert_eq!(name(service_of(&services(&[("Herald", Some(&scopeless))]))), "cursor-scope-missing");
         assert_eq!(name(service_of(b"not a descriptor")), "malformed");
     }
 
     fn good() -> wire::MethodOptions {
         wire::MethodOptions {
             description: "Land a train on its repo's main.".into(),
-            result: Some(wire::Result {
-                shape: Some(wire::Shape::One(wire::Empty {})),
-            }),
+            result: Some(wire::Result { shape: Some(wire::Shape::One(wire::Empty {})) }),
             effect: 2,
             route: None,
             person_act: false,
@@ -1012,87 +890,35 @@ mod tests {
     fn a_good_descriptor_answers_every_offered_method() {
         let mut land = good();
         land.blocks = true;
-        land.examples = vec![wire::WireExample {
-            args_json: r#"{"repo": "agora"}"#.into(),
-            caption: "Land agora".into(),
-        }];
+        land.examples =
+            vec![wire::WireExample { args_json: r#"{"repo": "agora"}"#.into(), caption: "Land agora".into() }];
         land.route = Some(wire::Route {
-            to: Some(wire::To::Keyed(wire::Leader {
-                group: "herald-repo".into(),
-                key: "repo".into(),
-            })),
+            to: Some(wire::To::Keyed(wire::Leader { group: "herald-repo".into(), key: "repo".into() })),
         });
         let mut queue = good();
         queue.effect = 1;
-        queue.result = Some(wire::Result {
-            shape: Some(wire::Shape::Cursor(wire::Empty {})),
-        });
-        queue.route = Some(wire::Route {
-            to: Some(wire::To::Any(wire::Empty {})),
-        });
+        queue.result = Some(wire::Result { shape: Some(wire::Shape::Cursor(wire::Empty {})) });
+        queue.route = Some(wire::Route { to: Some(wire::To::Any(wire::Empty {})) });
         let bytes = set(vec![
-            method(
-                "Land",
-                ".herald.v2.LandRequest",
-                ".herald.v2.LandReply",
-                Some(&land),
-            ),
-            method(
-                "Queue",
-                ".herald.v2.LandRequest",
-                ".herald.v2.QueueReply",
-                Some(&queue),
-            ),
-            method(
-                "Internal",
-                ".herald.v2.LandRequest",
-                ".herald.v2.LandReply",
-                None,
-            ),
+            method("Land", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&land)),
+            method("Queue", ".herald.v2.LandRequest", ".herald.v2.QueueReply", Some(&queue)),
+            method("Internal", ".herald.v2.LandRequest", ".herald.v2.LandReply", None),
         ]);
         let methods = check_descriptor(&bytes).expect("admitted");
         let paths: Vec<_> = methods.iter().map(|m| m.path.as_str()).collect();
-        assert_eq!(
-            paths,
-            ["/herald.v2.Herald/Land", "/herald.v2.Herald/Queue"],
-            "Internal has no face"
-        );
-        let input: Vec<_> = methods[0]
-            .input
-            .iter()
-            .map(|f| (f.name.as_str(), f.number, f.kind.clone(), f.repeated))
-            .collect();
+        assert_eq!(paths, ["/herald.v2.Herald/Land", "/herald.v2.Herald/Queue"], "Internal has no face");
+        let input: Vec<_> =
+            methods[0].input.iter().map(|f| (f.name.as_str(), f.number, f.kind.clone(), f.repeated)).collect();
         assert_eq!(
             input,
-            [
-                ("train", 1, FieldKind::String, false),
-                ("repo", 3, FieldKind::String, false)
-            ],
+            [("train", 1, FieldKind::String, false), ("repo", 3, FieldKind::String, false)],
             "the request's fields come back, so no bridge re-parses the descriptor"
         );
         assert_eq!(methods[0].input_type, ".herald.v2.LandRequest");
-        assert_eq!(
-            methods[0].route_key,
-            Some(RouteKey {
-                name: "repo".into(),
-                number: 3
-            })
-        );
-        assert_eq!(
-            methods[0].options.route,
-            Route::Keyed {
-                group: "herald-repo".into(),
-                key: "repo".into()
-            }
-        );
+        assert_eq!(methods[0].route_key, Some(RouteKey { name: "repo".into(), number: 3 }));
+        assert_eq!(methods[0].options.route, Route::Keyed { group: "herald-repo".into(), key: "repo".into() });
         assert!(methods[0].options.blocks && !methods[0].options.runs_to_completion);
-        assert_eq!(
-            methods[0].options.examples,
-            [crate::options::Example::new(
-                r#"{"repo": "agora"}"#,
-                "Land agora"
-            )]
-        );
+        assert_eq!(methods[0].options.examples, [crate::options::Example::new(r#"{"repo": "agora"}"#, "Land agora")]);
         assert_eq!(methods[1].options.result, ResultShape::Cursor);
         assert_eq!(methods[1].options.route, Route::Any);
     }
@@ -1106,63 +932,22 @@ mod tests {
         person.permission = 1;
         let mut keyed = good();
         keyed.route = Some(wire::Route {
-            to: Some(wire::To::Keyed(wire::Leader {
-                group: "herald-repo".into(),
-                key: "nope".into(),
-            })),
+            to: Some(wire::To::Keyed(wire::Leader { group: "herald-repo".into(), key: "nope".into() })),
         });
         let mut lost = keyed.clone();
-        lost.route = Some(wire::Route {
-            to: Some(wire::To::Keyed(wire::Leader {
-                group: "g".into(),
-                key: "repo".into(),
-            })),
-        });
+        lost.route =
+            Some(wire::Route { to: Some(wire::To::Keyed(wire::Leader { group: "g".into(), key: "repo".into() })) });
         let bytes = set(vec![
-            method(
-                "Bare",
-                ".herald.v2.LandRequest",
-                ".herald.v2.LandReply",
-                Some(&bare),
-            ),
-            method(
-                "Person",
-                ".herald.v2.LandRequest",
-                ".herald.v2.LandReply",
-                Some(&person),
-            ),
-            method(
-                "Keyed",
-                ".herald.v2.LandRequest",
-                ".herald.v2.LandReply",
-                Some(&keyed),
-            ),
-            method(
-                "Queue",
-                ".herald.v2.LandRequest",
-                ".herald.v2.QueueReply",
-                Some(&good()),
-            ),
-            method(
-                "Lost",
-                ".herald.v2.Missing",
-                ".herald.v2.LandReply",
-                Some(&lost),
-            ),
+            method("Bare", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&bare)),
+            method("Person", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&person)),
+            method("Keyed", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&keyed)),
+            method("Queue", ".herald.v2.LandRequest", ".herald.v2.QueueReply", Some(&good())),
+            method("Lost", ".herald.v2.Missing", ".herald.v2.LandReply", Some(&lost)),
         ]);
         let refused = check_descriptor(&bytes).expect_err("refused");
         let named: Vec<(&str, String)> = refused
             .iter()
-            .map(|r| {
-                (
-                    r.name(),
-                    r.to_string()
-                        .split(':')
-                        .next()
-                        .unwrap_or_default()
-                        .to_owned(),
-                )
-            })
+            .map(|r| (r.name(), r.to_string().split(':').next().unwrap_or_default().to_owned()))
             .collect();
         let want = [
             ("callers-missing", "/herald.v2.Herald/Bare"),
@@ -1191,10 +976,7 @@ mod tests {
     #[test]
     fn a_nested_or_later_input_type_is_found() {
         let mut outer = message("Outer", &[]);
-        outer.nested_type.push(message(
-            "Inner",
-            &[("repo", 7, Type::String, Label::Optional)],
-        ));
+        outer.nested_type.push(message("Inner", &[("repo", 7, Type::String, Label::Optional)]));
         let set = FileDescriptorSet {
             file: vec![FileDescriptorProto {
                 package: Some("p.v1".into()),
@@ -1202,19 +984,9 @@ mod tests {
                 ..Default::default()
             }],
         };
-        assert_eq!(
-            find_message(&set, ".p.v1.First").map(DescriptorProto::name),
-            Some("First")
-        );
-        assert_eq!(
-            find_message(&set, ".p.v1.Outer.Inner").map(DescriptorProto::name),
-            Some("Inner")
-        );
-        assert_eq!(
-            find_message(&set, ".p.v1.Inner"),
-            None,
-            "a nested type is not top-level"
-        );
+        assert_eq!(find_message(&set, ".p.v1.First").map(DescriptorProto::name), Some("First"));
+        assert_eq!(find_message(&set, ".p.v1.Outer.Inner").map(DescriptorProto::name), Some("Inner"));
+        assert_eq!(find_message(&set, ".p.v1.Inner"), None, "a nested type is not top-level");
         assert_eq!(find_message(&set, ".q.v1.First"), None, "another package");
     }
 
@@ -1222,10 +994,7 @@ mod tests {
     /// example-mismatch by name; the full type check is the bridge's.
     #[test]
     fn an_example_that_is_not_the_requests_fields_is_refused() {
-        let example = |args: &str| wire::WireExample {
-            args_json: args.into(),
-            caption: String::new(),
-        };
+        let example = |args: &str| wire::WireExample { args_json: args.into(), caption: String::new() };
         let mut unknown = good();
         unknown.examples = vec![example(r#"{"repo": "agora", "nope": 1}"#)];
         let mut not_object = good();
@@ -1233,38 +1002,14 @@ mod tests {
         let mut not_json = good();
         not_json.examples = vec![example("herald.land{repo = 'agora'}")];
         let bytes = set(vec![
-            method(
-                "Unknown",
-                ".herald.v2.LandRequest",
-                ".herald.v2.LandReply",
-                Some(&unknown),
-            ),
-            method(
-                "NotObject",
-                ".herald.v2.LandRequest",
-                ".herald.v2.LandReply",
-                Some(&not_object),
-            ),
-            method(
-                "NotJson",
-                ".herald.v2.LandRequest",
-                ".herald.v2.LandReply",
-                Some(&not_json),
-            ),
+            method("Unknown", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&unknown)),
+            method("NotObject", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&not_object)),
+            method("NotJson", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&not_json)),
         ]);
         let refused = check_descriptor(&bytes).expect_err("refused");
         let found: Vec<String> = refused.iter().map(ToString::to_string).collect();
-        assert_eq!(
-            refused
-                .iter()
-                .map(DescriptorRefusal::name)
-                .collect::<Vec<_>>(),
-            ["example-mismatch"; 3]
-        );
-        assert!(
-            found[0].contains("'nope' is not a field of LandRequest"),
-            "{found:?}"
-        );
+        assert_eq!(refused.iter().map(DescriptorRefusal::name).collect::<Vec<_>>(), ["example-mismatch"; 3]);
+        assert!(found[0].contains("'nope' is not a field of LandRequest"), "{found:?}");
         assert!(found[1].contains("not a JSON object"), "{found:?}");
         assert!(found[2].contains("not JSON"), "{found:?}");
     }

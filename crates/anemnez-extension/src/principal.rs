@@ -111,10 +111,7 @@ impl Refusal {
     /// nothing about the token was altered or reused (PRINCIPAL_TOKEN §4).
     #[must_use]
     pub const fn retryable(&self) -> bool {
-        matches!(
-            self,
-            Self::NotForYou | Self::UnknownKey | Self::Expired | Self::NotYetValid
-        )
+        matches!(self, Self::NotForYou | Self::UnknownKey | Self::Expired | Self::NotYetValid)
     }
 }
 
@@ -175,10 +172,7 @@ impl Claims {
 #[must_use]
 pub fn key_id(public_key: &[u8]) -> String {
     use sha2::Digest as _;
-    sha2::Sha256::digest(public_key)[..16]
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
+    sha2::Sha256::digest(public_key)[..16].iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// The body digest of a gRPC call: SHA-256 of the request message bytes exactly as sent.
@@ -202,9 +196,7 @@ pub fn mint(claims: &Claims, seed: &[u8; 32]) -> Result<String, Refusal> {
         .checked_sub(claims.issued_ms)
         .ok_or_else(|| Refusal::Malformed("expires before issued".into()))?;
     if life_ms > MAX_TTL_MS {
-        return Err(Refusal::Malformed(format!(
-            "a {life_ms} ms life is over MAX_TTL"
-        )));
+        return Err(Refusal::Malformed(format!("a {life_ms} ms life is over MAX_TTL")));
     }
     let parts = claims.parts();
     let sig = signed::sign(DOMAIN, Alg::Ed25519, &parts, seed)?;
@@ -212,10 +204,7 @@ pub fn mint(claims: &Claims, seed: &[u8; 32]) -> Result<String, Refusal> {
     framed.extend_from_slice(&frame(&[Part::Bytes(&sig)])?);
     let token = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(framed);
     if token.len() > MAX_ENCODED {
-        return Err(Refusal::Malformed(format!(
-            "{} encoded bytes is over {MAX_ENCODED}",
-            token.len()
-        )));
+        return Err(Refusal::Malformed(format!("{} encoded bytes is over {MAX_ENCODED}", token.len())));
     }
     Ok(token)
 }
@@ -232,9 +221,7 @@ pub fn plausible(field: &str, ms: u64) -> Result<u64, Refusal> {
     if PLAUSIBLE_MS.contains(&ms) {
         Ok(ms)
     } else {
-        Err(Refusal::Malformed(format!(
-            "{field} {ms} is not a Unix millisecond between 2020 and 2100"
-        )))
+        Err(Refusal::Malformed(format!("{field} {ms} is not a Unix millisecond between 2020 and 2100")))
     }
 }
 
@@ -250,10 +237,7 @@ fn frame(parts: &[Part<'_>]) -> Result<Vec<u8>, Refusal> {
 /// [`Refusal::Malformed`], naming what is wrong.
 pub fn decode(token: &str) -> Result<Token, Refusal> {
     if token.len() > MAX_ENCODED {
-        return Err(Refusal::Malformed(format!(
-            "{} encoded bytes is over {MAX_ENCODED}",
-            token.len()
-        )));
+        return Err(Refusal::Malformed(format!("{} encoded bytes is over {MAX_ENCODED}", token.len())));
     }
     let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
         .decode(token)
@@ -261,10 +245,7 @@ pub fn decode(token: &str) -> Result<Token, Refusal> {
     let mut fields = Fields(&bytes);
     let v = fields.fixed::<1>("v")?;
     if v[0] != VERSION {
-        return Err(Refusal::Malformed(format!(
-            "version {} is not {VERSION}",
-            v[0]
-        )));
+        return Err(Refusal::Malformed(format!("version {} is not {VERSION}", v[0])));
     }
     let claims = Claims {
         issuer: fields.string("issuer")?,
@@ -274,22 +255,13 @@ pub fn decode(token: &str) -> Result<Token, Refusal> {
         audience: fields.string("audience")?,
         method: fields.string("method")?,
         body: fields.fixed::<32>("body")?,
-        issued_ms: plausible(
-            "issued_ms",
-            u64::from_be_bytes(fields.fixed::<8>("issued_ms")?),
-        )?,
-        expires_ms: plausible(
-            "expires_ms",
-            u64::from_be_bytes(fields.fixed::<8>("expires_ms")?),
-        )?,
+        issued_ms: plausible("issued_ms", u64::from_be_bytes(fields.fixed::<8>("issued_ms")?))?,
+        expires_ms: plausible("expires_ms", u64::from_be_bytes(fields.fixed::<8>("expires_ms")?))?,
         nonce: fields.fixed::<16>("nonce")?,
     };
     let sig = fields.fixed::<64>("sig")?;
     if !fields.0.is_empty() {
-        return Err(Refusal::Malformed(format!(
-            "{} bytes after the signature",
-            fields.0.len()
-        )));
+        return Err(Refusal::Malformed(format!("{} bytes after the signature", fields.0.len())));
     }
     Ok(Token { claims, sig })
 }
@@ -312,14 +284,11 @@ impl<'a> Fields<'a> {
 
     fn fixed<const N: usize>(&mut self, name: &str) -> Result<[u8; N], Refusal> {
         let field = self.next(name)?;
-        field
-            .try_into()
-            .map_err(|_| Refusal::Malformed(format!("{name} is {} bytes, not {N}", field.len())))
+        field.try_into().map_err(|_| Refusal::Malformed(format!("{name} is {} bytes, not {N}", field.len())))
     }
 
     fn string(&mut self, name: &str) -> Result<String, Refusal> {
-        String::from_utf8(self.next(name)?.to_vec())
-            .map_err(|_| Refusal::Malformed(format!("{name} is not UTF-8")))
+        String::from_utf8(self.next(name)?.to_vec()).map_err(|_| Refusal::Malformed(format!("{name} is not UTF-8")))
     }
 }
 
@@ -352,13 +321,7 @@ impl Token {
         if key_id(public_key) != self.claims.key_id {
             return Err(Refusal::BadSignature);
         }
-        signed::verify(
-            DOMAIN,
-            Alg::Ed25519,
-            &self.claims.parts(),
-            &self.sig,
-            public_key,
-        )?;
+        signed::verify(DOMAIN, Alg::Ed25519, &self.claims.parts(), &self.sig, public_key)?;
         Ok(())
     }
 
@@ -366,10 +329,7 @@ impl Token {
     #[must_use]
     pub fn digest(token: &str) -> String {
         use sha2::Digest as _;
-        sha2::Sha256::digest(token.as_bytes())
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect()
+        sha2::Sha256::digest(token.as_bytes()).iter().map(|b| format!("{b:02x}")).collect()
     }
 }
 
@@ -405,28 +365,17 @@ impl KeyRecord {
     /// # Errors
     /// [`Refusal::UnknownKey`] when no key may.
     pub fn key_for(&self, key_id: &str, issued_ms: u64) -> Result<&[u8], Refusal> {
-        let key = self
-            .keys
-            .iter()
-            .find(|k| k.key_id == key_id)
-            .ok_or(Refusal::UnknownKey)?;
+        let key = self.keys.iter().find(|k| k.key_id == key_id).ok_or(Refusal::UnknownKey)?;
         // A unit slip fails loudly (D): a time outside 2020 to 2100 in milliseconds is a record written
         // in the wrong unit, and the record is refused rather than compared off by a thousand.
         let times = [Some(key.made_at_ms), key.retired_at_ms, key.revoked_at_ms];
-        if times
-            .into_iter()
-            .flatten()
-            .any(|t| !PLAUSIBLE_MS.contains(&t))
-        {
+        if times.into_iter().flatten().any(|t| !PLAUSIBLE_MS.contains(&t)) {
             return Err(Refusal::Unattested);
         }
         if key.alg != "ed25519" || key.revoked_at_ms.is_some() {
             return Err(Refusal::UnknownKey);
         }
-        if key
-            .retired_at_ms
-            .is_some_and(|retired| issued_ms >= retired)
-        {
+        if key.retired_at_ms.is_some_and(|retired| issued_ms >= retired) {
             return Err(Refusal::UnknownKey);
         }
         Ok(&key.key)
@@ -480,9 +429,7 @@ mod tests {
         assert_eq!(parsed.claims, claims());
         let body = grpc_body(b"request");
         parsed.admit(&expect(&body)).unwrap();
-        parsed
-            .verify(&signed::public_key(Alg::Ed25519, &SEED))
-            .unwrap();
+        parsed.verify(&signed::public_key(Alg::Ed25519, &SEED)).unwrap();
     }
 
     /// The token's bytes are the signed message's fields: domain and alg, then exactly these.
@@ -490,9 +437,7 @@ mod tests {
     fn the_token_frames_its_fields_as_the_signed_message_does() {
         let c = claims();
         let token = mint(&c, &SEED).unwrap();
-        let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .decode(&token)
-            .unwrap();
+        let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(&token).unwrap();
         let message = signed::message(DOMAIN, Alg::Ed25519, &c.parts()).unwrap();
         let head = signed::message(DOMAIN, Alg::Ed25519, &[]).unwrap().len();
         assert_eq!(&bytes[..message.len() - head], &message[head..]);
@@ -502,27 +447,15 @@ mod tests {
     fn each_step_refuses_by_its_own_name() {
         let body = grpc_body(b"request");
         let token = decode(&mint(&claims(), &SEED).unwrap()).unwrap();
-        let other = Expect {
-            audience: "herald@2/01a1-other",
-            ..expect(&body)
-        };
+        let other = Expect { audience: "herald@2/01a1-other", ..expect(&body) };
         assert_eq!(token.admit(&other), Err(Refusal::NotForYou));
-        let other = Expect {
-            method: "/herald.v2.Herald/Land",
-            ..expect(&body)
-        };
+        let other = Expect { method: "/herald.v2.Herald/Land", ..expect(&body) };
         assert_eq!(token.admit(&other), Err(Refusal::CallMismatch));
         let lifted = grpc_body(b"another request");
         assert_eq!(token.admit(&expect(&lifted)), Err(Refusal::CallMismatch));
-        let early = Expect {
-            now_ms: expect(&body).now_ms - 31_000,
-            ..expect(&body)
-        };
+        let early = Expect { now_ms: expect(&body).now_ms - 31_000, ..expect(&body) };
         assert_eq!(token.admit(&early), Err(Refusal::NotYetValid));
-        let late = Expect {
-            now_ms: expect(&body).now_ms + 331_000,
-            ..expect(&body)
-        };
+        let late = Expect { now_ms: expect(&body).now_ms + 331_000, ..expect(&body) };
         assert_eq!(token.admit(&late), Err(Refusal::Expired));
         let stranger = signed::public_key(Alg::Ed25519, &[4; 32]);
         assert_eq!(token.verify(&stranger), Err(Refusal::BadSignature));
@@ -559,9 +492,7 @@ mod tests {
         let mut secs = claims();
         secs.issued_ms = NOW_MS / 1_000;
         secs.expires_ms = NOW_MS / 1_000 + 300;
-        assert!(
-            matches!(mint(&secs, &SEED), Err(Refusal::Malformed(why)) if why.contains("issued_ms"))
-        );
+        assert!(matches!(mint(&secs, &SEED), Err(Refusal::Malformed(why)) if why.contains("issued_ms")));
         assert!(plausible("x", NOW_MS).is_ok());
         assert!(plausible("x", NOW_MS * 1_000).is_err(), "microseconds too");
     }
@@ -585,15 +516,9 @@ mod tests {
     #[test]
     fn key_for_applies_retired_versus_revoked() {
         assert!(record(None, None).key_for("k1", NOW_MS).is_ok());
-        assert_eq!(
-            record(None, None).key_for("k2", NOW_MS),
-            Err(Refusal::UnknownKey)
-        );
+        assert_eq!(record(None, None).key_for("k2", NOW_MS), Err(Refusal::UnknownKey));
         let revoked = record(None, Some(NOW_MS));
-        assert_eq!(
-            revoked.key_for("k1", NOW_MS - 3_600_000),
-            Err(Refusal::UnknownKey)
-        );
+        assert_eq!(revoked.key_for("k1", NOW_MS - 3_600_000), Err(Refusal::UnknownKey));
         let retired = record(Some(NOW_MS), None);
         assert!(retired.key_for("k1", NOW_MS - 1).is_ok());
         assert_eq!(retired.key_for("k1", NOW_MS), Err(Refusal::UnknownKey));
@@ -614,14 +539,7 @@ mod tests {
             Refusal::BadSignature,
             Refusal::Replay,
         ];
-        let retry: Vec<_> = all
-            .iter()
-            .filter(|r| r.retryable())
-            .map(Refusal::name)
-            .collect();
-        assert_eq!(
-            retry,
-            ["not-for-you", "not-yet-valid", "expired", "unknown-key"]
-        );
+        let retry: Vec<_> = all.iter().filter(|r| r.retryable()).map(Refusal::name).collect();
+        assert_eq!(retry, ["not-for-you", "not-yet-valid", "expired", "unknown-key"]);
     }
 }

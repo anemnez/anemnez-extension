@@ -27,9 +27,7 @@ pub use digest::{DigestLayer, RequestDigest};
 pub use edge::FileNonces;
 pub use health::Board;
 pub use journal::{EventsService, Journal, Refusal, Subscription};
-pub use principal::{
-    Absent, Admitted, KeyRecord, Keys, MemoryNonces, Nonces, PublishedKey, Verifier,
-};
+pub use principal::{Absent, Admitted, KeyRecord, Keys, MemoryNonces, Nonces, PublishedKey, Verifier};
 
 /// The contract's gRPC types and services, compiled from the kernel crate's protos.
 #[allow(clippy::all, missing_docs)]
