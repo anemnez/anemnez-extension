@@ -9,7 +9,7 @@ publish.workspace = true
 
 [dependencies]
 anemnez-extension.workspace = true
-anemnez-extension-serve = { path = "../anemnez-extension-serve", version = "0.4.3", registry = "artichoke" }
+anemnez-extension-serve = { path = "../anemnez-extension-serve", version = "0.5.0", registry = "artichoke" }
 anemnez-clock.workspace = true
 tonic.workspace = true
 prost.workspace = true

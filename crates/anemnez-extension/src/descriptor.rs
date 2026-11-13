@@ -24,6 +24,7 @@ pub const SERVICE_OPTIONS_FIELD: u32 = 51702;
 
 /// One offered method, as the descriptor declares it.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Method {
     /// `/<package>.<Service>/<Method>`, the path a call and a token name.
     pub path: String,
