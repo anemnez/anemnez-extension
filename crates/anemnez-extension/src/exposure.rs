@@ -7,6 +7,7 @@ use crate::options::{Callers, MethodOptions, Permission, Presence};
 
 /// Whether an agent face (MCP tools, a Lua namespace) offers a method.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Face {
     /// Offered to an agent: an MCP tool, a Lua function.
     Agent,
@@ -17,6 +18,7 @@ pub enum Face {
 
 /// What an agent face makes of a method.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Exposure {
     pub face: Face,
     /// The method's DEFAULT consent: what a call asks when nothing of the caller's own says more. A
