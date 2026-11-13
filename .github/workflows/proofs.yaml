@@ -21,6 +21,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # The suite resolves `project-standards` from a private org repo; this rewrites the org's SSH
+      # URLs onto a token so the same pin works here and on a developer's machine.
+      - uses: anemnez/prova-project-standards/.github/actions/anemnez-git-auth@v1
+        with:
+          token: ${{ secrets.ANEMNEZ_CI_TOKEN }}
       - uses: Swatinem/rust-cache@v2
 
       # The black-box suite + the fast gates, under the ci profile — whose `must_run = ["cargo"]`
@@ -35,6 +41,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # The suite resolves `project-standards` from a private org repo; this rewrites the org's SSH
+      # URLs onto a token so the same pin works here and on a developer's machine.
+      - uses: anemnez/prova-project-standards/.github/actions/anemnez-git-auth@v1
+        with:
+          token: ${{ secrets.ANEMNEZ_CI_TOKEN }}
       - uses: Swatinem/rust-cache@v2
 
       # jscpd powers the duplication ratchet. It is a `requires` world fact, not a `must_run`, so
@@ -54,6 +66,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # The suite resolves `project-standards` from a private org repo; this rewrites the org's SSH
+      # URLs onto a token so the same pin works here and on a developer's machine.
+      - uses: anemnez/prova-project-standards/.github/actions/anemnez-git-auth@v1
+        with:
+          token: ${{ secrets.ANEMNEZ_CI_TOKEN }}
       - uses: Swatinem/rust-cache@v2
 
       # The ut leg's deputy. The profile `must_run`s it, so a runner without it FAILS loudly

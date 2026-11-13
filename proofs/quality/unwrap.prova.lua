@@ -24,11 +24,13 @@
 
 local restrict = prova.fixture("clippy_restrict", Scope.File, function()
 	local r = shell.run(
-		{ "cargo", "clippy", "--workspace", "--lib", "--bins", "--all-features", "--",
+		{ "cargo", "clippy", "--workspace", "--all-features", "--",
 			"-W", "clippy::unwrap_used", "-W", "clippy::expect_used",
 			"-W", "clippy::too_many_lines" },
 		{ cwd = prova.root, merge_stderr = true }
 	)
+	-- A clippy that fails counts nothing: say so, never read its error as zero (standards v2.6).
+	if r.code ~= 0 then error("cargo clippy failed (exit " .. tostring(r.code) .. "):\n" .. (r.stdout or "")) end
 	return r.stdout or ""
 end)
 
