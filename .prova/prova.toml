@@ -86,7 +86,7 @@ must_run = ["cargo"]
 # The org's project standards, enforced as proofs (proofs/standards.prova.lua). Pinned to the
 # current release tag over the SSH URL, as anemnez-service and Agora have it.
 [dependencies]
-project-standards = { git = "ssh://git@github.com/anemnez/prova-project-standards.git", tag = "v2.16" }
+project-standards = { git = "ssh://git@github.com/anemnez/prova-project-standards.git", tag = "v2.24" }
 
 # Declare the prova this suite needs, and an older binary says so up front instead of failing
 # mid-run on a feature it does not have. Write `>=`: the value is a semver RANGE, so a bare

@@ -358,13 +358,31 @@ integers are `integer`, 64-bit ones `integer` or `string`, `bytes` a base64 `str
 name or number, `Timestamp`, `Duration` and `FieldMask` a `string`, a wrapper its scalar, a map (a field whose entry
 the descriptor marks `map_entry`, never guessed from its name: D) an `object`, and any other message an `object` that `encode` checks strictly. A tool also carries what
 the host needs and the schema cannot say: the method's path, its `effect`, its default consent
-(`exposure`), and whether it is long (`blocks` or `runs_to_completion`), which a host bounds by
-progress, never by a fixed call bound. Each contract feature has one flattened shape, built here and carried on the tool (`result`,
+(`exposure`), and whether it is long (`blocks` or `runs_to_completion`): work that can outlast a
+turn, which the face answers with a job, never a wait (house rule 14). Each contract feature has one flattened shape, built here and carried on the tool (`result`,
 `session`, `long`, listed under `_meta.anemnez`): a `cursor` result is a page tool whose request
 carries the cursor and whose reply the next one; `bound(n)` a list; a `session` an id that `opens`
 answers and `within` and `closes` take as a field of their request; `blocks` and
-`runs_to_completion` one long call.
+`runs_to_completion` a job (below).
 A product's flattened face is the same on every host.
+
+<!-- claim: long-work-flattens-to-a-job-and-an-event -->
+**Long work flattens to a job and an event** (house rule 14; D, H, 2026-11-14). A `long` method's
+MCP tool returns at once with a named job: `{job, method}`, the job naming that one call. Its outcome
+(the reply, or a refusal by name) reaches the calling lane exactly once, as an event: a Stoa post to
+that lane, through the events bridge (A, m/11156). **The lane is the caller the host authenticated
+for the call, recorded with the job, and the outcome goes only there** (D). For Agora, that is the
+lane on its stamp, vouched by that lane's lease on this host (`leased`, not lapsed), never an
+argument, a field of the tool's input, or a lane the client merely claims. Otherwise a call could
+route a job's reply into another lane's room. A long call with no vouched lane gets no job, and is
+refused `long-needs-a-lane`. No MCP client waits on a verb whose own work can
+outlast a turn, polls for it, or keeps a call open to learn it. The host owns the job as a machine
+(rule 1), and its bounds are events (rule 4). A host still holds a short, bounded wait inside one
+call, such as a server between builds (R9's bound), because that is rule 4's, not long work.
+**Retiring:** the face first written here answered a long method with one call bounded by its
+progress. That call retires: step 1 is this change, the spec. Step 2 is the job shape built in the
+mapping and its host, with the progress-bounded long call removed. No host generates a long tool
+yet, so nothing waits on it today. Ends 2026-12-15 (owner H).
 
 <!-- claim: a-flattened-name-is-one-tool -->
 **A flattened name is one tool.** Two offered methods whose names flatten alike (`GetURL` and

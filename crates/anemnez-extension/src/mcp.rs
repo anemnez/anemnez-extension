@@ -39,7 +39,8 @@ pub struct Tool {
     pub effect: Effect,
     /// The method's default consent (`exposure`).
     pub consent: Permission,
-    /// `blocks` or `runs_to_completion`: the host bounds it by progress, never by a fixed call bound.
+    /// `blocks` or `runs_to_completion`: work that can outlast a turn, answered with a job and its outcome
+    /// as an event, never a wait (CONTRACT.md `#long-work-flattens-to-a-job-and-an-event`).
     pub long: bool,
     /// The method's result: a `cursor` result is a page tool, whose request carries the cursor and
     /// whose reply the next one.
