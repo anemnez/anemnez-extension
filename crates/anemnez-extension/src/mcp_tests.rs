@@ -249,21 +249,21 @@ fn an_external_caller_is_parsed_here_and_trusted_only_from_its_peer() {
         "leased": true,
         "lease": 7,
     });
-    let stamp = Stamp::from_json(&agoras).vouched_by_peer();
+    let stamp = Stamp::from_json(&agoras).0;
     let want = Stamp::new(Some("H".into()), Some("/Users/x/repo".into()), Some(StampLease::new(7, false)));
     assert_eq!(stamp, want);
     assert_eq!(stamp.to_json(), agoras, "one value on both faces");
-    assert_eq!(Stamp::from_metadata(&want.to_metadata()).vouched_by_peer(), want);
+    assert_eq!(Stamp::from_metadata(&want.to_metadata()).0, want);
     let lapsed = Stamp::new(Some("H".into()), None, Some(StampLease::new(9, true)));
     assert_eq!(
         lapsed.to_json(),
         json!({ "class": "external", "place": { "proven": false }, "lane": "H", "lease_lapsed": true, "lease": 9 })
     );
-    assert_eq!(Stamp::from_json(&lapsed.to_json()).vouched_by_peer(), lapsed);
+    assert_eq!(Stamp::from_json(&lapsed.to_json()).0, lapsed);
 
     let none = Stamp::unvouched();
     assert_eq!(none.to_json(), json!({ "class": "external", "place": { "proven": false } }));
-    let reads = |v: serde_json::Value| Stamp::from_json(&v).vouched_by_peer();
+    let reads = |v: serde_json::Value| Stamp::from_json(&v).0;
     for (why, value) in [
         ("not external", json!({ "class": "user", "lane": "H" })),
         ("no class", json!({ "lane": "H" })),
@@ -285,6 +285,6 @@ fn an_external_caller_is_parsed_here_and_trusted_only_from_its_peer() {
         None,
         "an unproven place"
     );
-    assert_eq!(Stamp::from_metadata(b"not json").vouched_by_peer(), Stamp::unvouched());
+    assert_eq!(Stamp::from_metadata(b"not json").0, Stamp::unvouched());
     assert_eq!(super::STAMP_METADATA_KEY, "anemnez-caller-bin");
 }
