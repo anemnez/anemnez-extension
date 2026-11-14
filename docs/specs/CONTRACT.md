@@ -27,6 +27,15 @@ descriptor is that proto's `FileDescriptorSet`, plus the options below written o
 served by the product itself: `anemnez.extension.v1.Describe/Get` on the instance socket, beside
 `Lifecycle`. There is no second IDL to keep in step, and the descriptor cannot drift from the build.
 
+<!-- claim: one-describe-reply-for-every-product -->
+**One `Describe` reply for every product** (D, E, L, H, 2026-11-14). The reply carries the
+descriptor and its digest: SHA-256 of the encoded `FileDescriptorSet`, in lowercase hex, which a
+caller compares so that it re-fetches only when the descriptor changes. It is made by one pure
+function in this crate, `describe::reply`. The serving face, every product that serves `Describe`
+itself (Herald; Prova and Archetect, which take this crate from git) and every reader all use that
+one rule. A product mounts it with a three-line adapter onto its own generated `Describe` service.
+`describe::DescribeReply` is the proto's message, field for field, and a parity test holds it there.
+
 <!-- claim: a-contract-is-named-and-versioned -->
 **Each contract a product offers is named and versioned in its manifest**:
 `"contracts": { "herald": "2.3.0" }` (semver; a caller requires a range, `herald ^2`). An instance
