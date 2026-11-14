@@ -11,6 +11,8 @@
 //!   caller hands those same bytes to the principal token's body digest and to [`unary`], never
 //!   re-encoding, so the digest is over exactly what the product receives.
 
+pub mod events;
+
 use bytes::{Buf, BufMut};
 use prost::Message;
 use prost_reflect::{DescriptorPool, DynamicMessage, MethodDescriptor, SerializeOptions};
