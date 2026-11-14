@@ -139,6 +139,8 @@ fn the_events_call_messages_are_the_protos() {
     };
     assert_eq!(field("CallRequest"), ["bytes request"]);
     assert_eq!(field("CallReply"), ["bytes reply"]);
+    assert_eq!(field("WatchRequest"), ["bytes request"]);
+    assert_eq!(field("WatchFrame"), ["bytes frame"]);
     use prost::Message;
     let bytes = crate::describe::CallRequest { request: vec![9] }.encode_to_vec();
     assert_eq!(bytes, [0x0a, 1, 9], "request is field 1");

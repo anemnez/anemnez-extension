@@ -122,6 +122,23 @@ product's events, the `Events(after)` stream and `Call`, and the serving face ke
 `Call` is added and the Journal refuses it by name. Step 2 moves each product's events and the
 serving face onto the log, and removes `Events(after)` and the Journal. Ends 2026-12-15 (owner H).
 
+<!-- claim: a-products-events-are-pushed-through-one-watch -->
+**A product's events are pushed through one watch** (A, D, H, 2026-11-14; house rule 14: no long
+polls). `Events/Watch(WatchRequest{request}) -> stream WatchFrame{frame}` is the same face's push:
+the request is one `hydramq_events::wire::watch_request` (a position, at most `max` events a frame,
+and a heartbeat), and each frame one of the producer's `wire::watch` frames (events, a heartbeat
+after each quiet beat, or the end), carried opaquely, as `Call`'s bytes are. The producer drives its
+`wire::watch` on a thread of its own (it waits on the log's clock, never on a runtime worker) into a
+bounded channel, so a slow consumer stalls only its own stream. A consumer reads with
+`hydramq_events::wire::Watcher::new(EventsFrames::open(channel, clock, &request, bound).await?, from,
+beat)`: each pull is bounded on its injected clock and answers a frame, silence or the end, and
+silence past the heartbeat plus the hop margin is the producer gone, named, never a hang. The
+watcher's `at()` is the cursor a consumer commits once it has acted. A Journal refuses it
+`events-call-unserved`, as it refuses `Call`, and it retires on the same row. A consumer is told that
+apart, typed, never as an Unclear it would retry: the client answers an unserved `Watch` with
+`Refused::ByProducer` named `watch-unserved`, and an unserved `Call` with `events-call-unserved`, so a
+consumer such as Stoa's bridge says once that this product does not serve it and reads another way (D).
+
 <!-- claim: health-is-state-with-parts -->
 **Health is state, with parts, and events after it.** `Health/Get` answers `{state, parts, as_of}`:
 `state` one of `STARTING`, `SERVING`, `DEGRADED`, `FAILING`, `DRAINING`, `DRAINED`, `UNKNOWN`; `parts`

@@ -53,6 +53,21 @@ pub struct CallReply {
     pub reply: Vec<u8>,
 }
 
+/// `anemnez.extension.v1.WatchRequest`: one `hydramq_events::wire::watch_request`, carried opaquely
+/// (CONTRACT.md `#a-products-events-are-pushed-through-one-watch`).
+#[derive(Clone, PartialEq, Eq, Message)]
+pub struct WatchRequest {
+    #[prost(bytes = "vec", tag = "1")]
+    pub request: Vec<u8>,
+}
+
+/// `anemnez.extension.v1.WatchFrame`: one frame of the producer's `hydramq_events::wire::watch`.
+#[derive(Clone, PartialEq, Eq, Message)]
+pub struct WatchFrame {
+    #[prost(bytes = "vec", tag = "1")]
+    pub frame: Vec<u8>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

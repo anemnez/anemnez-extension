@@ -13,6 +13,21 @@ service Events {
   // `wire` messages, carried opaquely. Nothing in the contract parses them. A product whose events
   // are not on that log yet refuses it with `events-call-unserved`.
   rpc Call(CallRequest) returns (CallReply);
+  // The same log, pushed (#a-products-events-are-pushed-through-one-watch): `request` is one
+  // `hydramq_events::wire` watch request, and each frame one of the producer's `wire::watch`
+  // frames (events, a heartbeat, or the end), carried opaquely. Refused `events-call-unserved`
+  // like Call by a product whose events are not on that log yet.
+  rpc Watch(WatchRequest) returns (stream WatchFrame);
+}
+
+message WatchRequest {
+  // One `hydramq_events::wire::watch_request`.
+  bytes request = 1;
+}
+
+message WatchFrame {
+  // One frame of the producer's `hydramq_events::wire::watch`.
+  bytes frame = 1;
 }
 
 message CallRequest {

@@ -23,7 +23,7 @@ dependencies = [
 
 [[package]]
 name = "anemnez-extension"
-version = "0.6.1"
+version = "0.7.0"
 dependencies = [
  "base64",
  "ed25519-dalek",
@@ -37,7 +37,7 @@ dependencies = [
 
 [[package]]
 name = "anemnez-extension-client"
-version = "0.6.1"
+version = "0.7.0"
 dependencies = [
  "anemnez-clock",
  "anemnez-extension",
@@ -59,7 +59,7 @@ dependencies = [
 
 [[package]]
 name = "anemnez-extension-fixture"
-version = "0.6.1"
+version = "0.7.0"
 dependencies = [
  "anemnez-clock",
  "anemnez-extension",
@@ -77,7 +77,7 @@ dependencies = [
 
 [[package]]
 name = "anemnez-extension-serve"
-version = "0.6.1"
+version = "0.7.0"
 dependencies = [
  "anemnez-clock",
  "anemnez-extension",
@@ -632,15 +632,15 @@ checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
 
 [[package]]
 name = "hydramq-cursor"
-version = "0.4.81+b3c8c895e747"
+version = "0.4.83+a560fc247e34"
 source = "sparse+http://127.0.0.1:7787/crates/index/"
-checksum = "5150946358eaa3db58c297ef610169174b62ce9d6105a97d4f00f2a32732f06b"
+checksum = "c11e83223c10e54d84f2927920b7dc949ab6bf75d00f6d187e1b4bf53effdcb7"
 
 [[package]]
 name = "hydramq-cursors"
-version = "0.4.81+b3c8c895e747"
+version = "0.4.83+a560fc247e34"
 source = "sparse+http://127.0.0.1:7787/crates/index/"
-checksum = "f1a22bcb22b9c037b9a8d3977c6a86ac6544b7bea416ebb8b22507b10838d985"
+checksum = "d649a314ddb14f9740cd3420a49fabec019bb2e96a6f5531a7bb0afaf235a06a"
 dependencies = [
  "hydramq-cursor",
  "hydramq-log",
@@ -649,9 +649,9 @@ dependencies = [
 
 [[package]]
 name = "hydramq-events"
-version = "0.4.81+b3c8c895e747"
+version = "0.4.83+a560fc247e34"
 source = "sparse+http://127.0.0.1:7787/crates/index/"
-checksum = "dd8bab8279939dc3fb30e9deda0d7a36cb63176dfd39328fa103cafff5dd0bf5"
+checksum = "ee8bdf1f516f0e926548e8c3174e6859d6e13671d5ced2da5f9a27f04adbd44d"
 dependencies = [
  "anemnez-clock",
  "hydramq-cursor",
@@ -663,9 +663,9 @@ dependencies = [
 
 [[package]]
 name = "hydramq-log"
-version = "0.4.81+b3c8c895e747"
+version = "0.4.83+a560fc247e34"
 source = "sparse+http://127.0.0.1:7787/crates/index/"
-checksum = "f5c42b29ad09893ebb991f186449372e860e5c42fc5ec4d15852bd30bada889f"
+checksum = "8e6d48eafcb8392ddbc8df8f0bc2123e44f3757f27d29bc37c317394d1b8861a"
 dependencies = [
  "anemnez-clock",
  "anemnez-layout",
@@ -678,21 +678,21 @@ dependencies = [
 
 [[package]]
 name = "hydramq-log-kernel"
-version = "0.4.81+b3c8c895e747"
+version = "0.4.83+a560fc247e34"
 source = "sparse+http://127.0.0.1:7787/crates/index/"
-checksum = "b98da3cf311e57d0d66ae84f294d187ea64d78577f7c9d1d1c5c7e02b45a5561"
+checksum = "9bacb03987437284d874dee06bdfd909f875aa281da8bf9705dbe031d1398941"
 
 [[package]]
 name = "hydramq-message"
-version = "0.4.81+b3c8c895e747"
+version = "0.4.83+a560fc247e34"
 source = "sparse+http://127.0.0.1:7787/crates/index/"
-checksum = "8681f248fb42047fcca425cd6cb2257fb7cac530ad240f08b8b2cf44585742ad"
+checksum = "504322d88988b948457c4dbf963b94ea18415027f2fb6e158ed6626baa0534e7"
 
 [[package]]
 name = "hydramq-queue"
-version = "0.4.81+b3c8c895e747"
+version = "0.4.83+a560fc247e34"
 source = "sparse+http://127.0.0.1:7787/crates/index/"
-checksum = "511e25520c1cb51e19e5aa6c9f705ba4b22bf65e61a16685876c2c2db583d6e4"
+checksum = "1a86bbcc9dbe28740629770b378f5dbd9eda32b46039b0e9e82c76b4857da712"
 dependencies = [
  "anemnez-clock",
  "hydramq-cursor",
@@ -700,9 +700,9 @@ dependencies = [
 
 [[package]]
 name = "hydramq-topics"
-version = "0.4.81+b3c8c895e747"
+version = "0.4.83+a560fc247e34"
 source = "sparse+http://127.0.0.1:7787/crates/index/"
-checksum = "1bd23d4e7ba304fd3f8757b703eb039bfd6d07d5095a69ab98abff4606de17d2"
+checksum = "c138082e8e5b347692de1b1977ec2125c950fa9b3d10b6170c35b1cc427aea80"
 dependencies = [
  "anemnez-clock",
  "anemnez-layout",

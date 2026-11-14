@@ -402,3 +402,18 @@ async fn a_journals_events_call_is_refused_by_name() {
     assert_eq!(refused.code(), tonic::Code::Unimplemented);
     assert!(refused.message().starts_with(anemnez_extension::refusal::EVENTS_CALL_UNSERVED), "{}", refused.message());
 }
+
+/// a-products-events-are-pushed-through-one-watch: a Journal refuses `Events/Watch` by the same name as
+/// `Call`, never opening a stream it cannot feed.
+#[tokio::test]
+async fn a_journals_events_watch_is_refused_by_name() {
+    use pb::events_server::Events as _;
+    let (journal, manual) = journal(8);
+    let service = crate::journal::EventsService::new(journal, crate::principal_tests::verifier(&manual, false));
+    let refused = match service.watch(tonic::Request::new(pb::WatchRequest { request: vec![1] })).await {
+        Err(status) => status,
+        Ok(_) => panic!("a Journal opened a watch"),
+    };
+    assert_eq!(refused.code(), tonic::Code::Unimplemented);
+    assert!(refused.message().starts_with(anemnez_extension::refusal::EVENTS_CALL_UNSERVED), "{}", refused.message());
+}
