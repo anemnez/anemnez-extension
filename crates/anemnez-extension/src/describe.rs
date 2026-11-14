@@ -38,6 +38,21 @@ impl DescribeReply {
     }
 }
 
+/// `anemnez.extension.v1.CallRequest`: one `hydramq_events::wire` request, carried opaquely (CONTRACT.md
+/// `#a-products-events-are-read-through-one-call`).
+#[derive(Clone, PartialEq, Eq, Message)]
+pub struct CallRequest {
+    #[prost(bytes = "vec", tag = "1")]
+    pub request: Vec<u8>,
+}
+
+/// `anemnez.extension.v1.CallReply`: the producer's `hydramq_events::wire::serve` answer.
+#[derive(Clone, PartialEq, Eq, Message)]
+pub struct CallReply {
+    #[prost(bytes = "vec", tag = "1")]
+    pub reply: Vec<u8>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

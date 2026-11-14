@@ -13,16 +13,17 @@ dependencies = [
 
 [[package]]
 name = "anemnez-clock"
-version = "0.1.4+debc7453ec62"
+version = "0.1.15+3ed93558f1b7"
 source = "sparse+http://127.0.0.1:7787/crates/index/"
-checksum = "8fe5712560602151af173ab40548529bd4f5259b8824cf0603f053745492443c"
+checksum = "35572d66c640b01cb848524b5d7d3c412b98f7ce317b71e15c1dd05bd443a46c"
 dependencies = [
+ "libc",
  "tokio",
 ]
 
 [[package]]
 name = "anemnez-extension"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "base64",
  "ed25519-dalek",
@@ -36,24 +37,29 @@ dependencies = [
 
 [[package]]
 name = "anemnez-extension-client"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anemnez-clock",
  "anemnez-extension",
  "anemnez-extension-fixture",
+ "anemnez-extension-serve",
  "bytes",
  "http",
+ "hydramq-events",
+ "hyper-util",
  "prost",
  "prost-reflect",
  "serde_json",
  "tempfile",
  "tokio",
+ "tokio-stream",
  "tonic",
+ "tower 0.5.3",
 ]
 
 [[package]]
 name = "anemnez-extension-fixture"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anemnez-clock",
  "anemnez-extension",
@@ -71,7 +77,7 @@ dependencies = [
 
 [[package]]
 name = "anemnez-extension-serve"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anemnez-clock",
  "anemnez-extension",
@@ -92,6 +98,21 @@ dependencies = [
  "tower-layer",
  "tower-service",
 ]
+
+[[package]]
+name = "anemnez-layout"
+version = "0.1.79+8d1e24bfa9a2"
+source = "sparse+http://127.0.0.1:7787/crates/index/"
+checksum = "df5a1491562f61126cc3e8ad33e36024b130ee6d4d6bc1b4962706c884978e05"
+dependencies = [
+ "anemnez-sim-io",
+]
+
+[[package]]
+name = "anemnez-sim-io"
+version = "0.1.72+83a2190b6478"
+source = "sparse+http://127.0.0.1:7787/crates/index/"
+checksum = "a964321f3dd71fd4741e8fe8c431a556b71c54713dc70f32fde9bb99dbf855d9"
 
 [[package]]
 name = "anyhow"
@@ -398,7 +419,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -608,6 +629,89 @@ name = "httpdate"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
+
+[[package]]
+name = "hydramq-cursor"
+version = "0.4.81+b3c8c895e747"
+source = "sparse+http://127.0.0.1:7787/crates/index/"
+checksum = "5150946358eaa3db58c297ef610169174b62ce9d6105a97d4f00f2a32732f06b"
+
+[[package]]
+name = "hydramq-cursors"
+version = "0.4.81+b3c8c895e747"
+source = "sparse+http://127.0.0.1:7787/crates/index/"
+checksum = "f1a22bcb22b9c037b9a8d3977c6a86ac6544b7bea416ebb8b22507b10838d985"
+dependencies = [
+ "hydramq-cursor",
+ "hydramq-log",
+ "hydramq-message",
+]
+
+[[package]]
+name = "hydramq-events"
+version = "0.4.81+b3c8c895e747"
+source = "sparse+http://127.0.0.1:7787/crates/index/"
+checksum = "dd8bab8279939dc3fb30e9deda0d7a36cb63176dfd39328fa103cafff5dd0bf5"
+dependencies = [
+ "anemnez-clock",
+ "hydramq-cursor",
+ "hydramq-cursors",
+ "hydramq-log",
+ "hydramq-message",
+ "hydramq-topics",
+]
+
+[[package]]
+name = "hydramq-log"
+version = "0.4.81+b3c8c895e747"
+source = "sparse+http://127.0.0.1:7787/crates/index/"
+checksum = "f5c42b29ad09893ebb991f186449372e860e5c42fc5ec4d15852bd30bada889f"
+dependencies = [
+ "anemnez-clock",
+ "anemnez-layout",
+ "anemnez-sim-io",
+ "hydramq-log-kernel",
+ "hydramq-message",
+ "libc",
+ "tokio",
+]
+
+[[package]]
+name = "hydramq-log-kernel"
+version = "0.4.81+b3c8c895e747"
+source = "sparse+http://127.0.0.1:7787/crates/index/"
+checksum = "b98da3cf311e57d0d66ae84f294d187ea64d78577f7c9d1d1c5c7e02b45a5561"
+
+[[package]]
+name = "hydramq-message"
+version = "0.4.81+b3c8c895e747"
+source = "sparse+http://127.0.0.1:7787/crates/index/"
+checksum = "8681f248fb42047fcca425cd6cb2257fb7cac530ad240f08b8b2cf44585742ad"
+
+[[package]]
+name = "hydramq-queue"
+version = "0.4.81+b3c8c895e747"
+source = "sparse+http://127.0.0.1:7787/crates/index/"
+checksum = "511e25520c1cb51e19e5aa6c9f705ba4b22bf65e61a16685876c2c2db583d6e4"
+dependencies = [
+ "anemnez-clock",
+ "hydramq-cursor",
+]
+
+[[package]]
+name = "hydramq-topics"
+version = "0.4.81+b3c8c895e747"
+source = "sparse+http://127.0.0.1:7787/crates/index/"
+checksum = "1bd23d4e7ba304fd3f8757b703eb039bfd6d07d5095a69ab98abff4606de17d2"
+dependencies = [
+ "anemnez-clock",
+ "anemnez-layout",
+ "hydramq-cursor",
+ "hydramq-cursors",
+ "hydramq-log",
+ "hydramq-message",
+ "hydramq-queue",
+]
 
 [[package]]
 name = "hyper"
@@ -1047,7 +1151,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1236,7 +1340,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

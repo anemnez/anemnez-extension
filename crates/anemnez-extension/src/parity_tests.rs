@@ -127,3 +127,19 @@ fn the_describe_reply_is_the_protos() {
     let bytes = reply.to_bytes();
     assert_eq!((bytes[0], bytes[3]), (0x0a, 0x12), "file_descriptor_set is 1, digest is 2");
 }
+
+/// `describe::CallRequest` and `CallReply` are the proto's messages, each one bytes field numbered 1.
+#[test]
+fn the_events_call_messages_are_the_protos() {
+    let field = |message: &str| -> Vec<String> {
+        assignments(protos::EVENTS, "message", message)
+            .into_iter()
+            .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
+            .collect()
+    };
+    assert_eq!(field("CallRequest"), ["bytes request"]);
+    assert_eq!(field("CallReply"), ["bytes reply"]);
+    use prost::Message;
+    let bytes = crate::describe::CallRequest { request: vec![9] }.encode_to_vec();
+    assert_eq!(bytes, [0x0a, 1, 9], "request is field 1");
+}

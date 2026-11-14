@@ -111,8 +111,10 @@ position or at its last value per subject. Its served face is bytes (`hydramq_ev
 this contract is its gRPC transport, defined once: `Events/Call(CallRequest{request}) ->
 CallReply{reply}` carries one `wire` request and its answer, opaquely. This crate never parses them
 and never depends on hydramq-events, so the open kernel still builds from git alone. A producer
-answers with `hydramq_events::wire::serve` on its blocking pool. A consumer reads through the
-client crate's async adapter onto `wire`'s Remote, on its own injected clock. A product whose events
+answers with `hydramq_events::wire::serve` on its blocking pool. A consumer reads with
+`AsyncRemote::new(anemnez_extension_client::events::EventsCall::new(channel, clock))`: the client
+crate's adapter, bounded on the consumer's own injected clock, so it writes nothing of its own. The
+two messages are `describe::CallRequest` and `CallReply` in this crate, held to the proto. A product whose events
 are not on that log yet refuses the call `events-call-unserved`, as the serving face's Journal does.
 **Retiring:** until every product reads and writes through `Call`, a consumer has two ways to read a
 product's events, the `Events(after)` stream and `Call`, and the serving face keeps a second log, its
