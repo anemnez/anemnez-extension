@@ -21,6 +21,11 @@
 #
 # The establishing pass itself reports red (a metric with no floor passes nothing — that is the
 # refusal to green-wash) while it writes the floors; the run after it is the green ratchet.
+# Every process a proof spawns (a deputed nextest, jj, git) writes the run's own config and Fabric
+# roots and commits as a fixed identity, never the person's (standards prova-suite/isolated, v2.16).
+[isolation]
+env = { XDG_CONFIG_HOME = "{run}/xdg", ANEMNEZ_FABRIC_ROOT = "{run}/fabric", GIT_AUTHOR_NAME = "prova", GIT_AUTHOR_EMAIL = "prova@anemnez.invalid", GIT_COMMITTER_NAME = "prova", GIT_COMMITTER_EMAIL = "prova@anemnez.invalid", JJ_USER = "prova", JJ_EMAIL = "prova@anemnez.invalid" }
+
 [run]
 proofs   = ["proofs"]           # directory-name patterns; your proof suites live in the open
 packages = ".prova/packages"    # this project's own packages; `require("<dir>")` reaches each one
@@ -81,7 +86,7 @@ must_run = ["cargo"]
 # The org's project standards, enforced as proofs (proofs/standards.prova.lua). Pinned to the
 # current release tag over the SSH URL, as anemnez-service and Agora have it.
 [dependencies]
-project-standards = { git = "ssh://git@github.com/anemnez/prova-project-standards.git", tag = "v2.12" }
+project-standards = { git = "ssh://git@github.com/anemnez/prova-project-standards.git", tag = "v2.16" }
 
 # Declare the prova this suite needs, and an older binary says so up front instead of failing
 # mid-run on a feature it does not have. Write `>=`: the value is a semver RANGE, so a bare
