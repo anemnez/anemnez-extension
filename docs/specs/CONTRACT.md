@@ -369,9 +369,12 @@ A product's flattened face is the same on every host.
 <!-- claim: long-work-flattens-to-a-job-and-an-event -->
 **Long work flattens to a job and an event** (house rule 14; D, H, 2026-11-14). A `long` method's
 MCP tool returns at once with a named job: `{job, method}`, the job naming that one call. Its outcome
-(the reply, or a refusal by name) reaches the calling lane exactly once, as an event: a Stoa post to
-that lane, through the events bridge (A, m/11156). **The lane is the caller the host authenticated
-for the call, recorded with the job, and the outcome goes only there** (D). For Agora, that is the
+(the reply, or a refusal by name) is an event on the host's own event log (`hydramq-events`):
+subject `job/<id>`, kind `outcome`, with the recorded lane in its body. Stoa's bridge, when present,
+tells it to that lane exactly once, keyed by (producer, log, offset), and Substrate's runtime can
+consume it directly. The host never posts to Stoa itself and names no consumer (fabric EVENTS.md §1
+rule 8; A, m/11156). **The lane is the caller the host authenticated
+for the call, recorded with the job, and the outcome is told only there** (D). For Agora, that is the
 lane on its stamp, vouched by that lane's lease on this host (`leased`, not lapsed), never an
 argument, a field of the tool's input, or a lane the client merely claims. Otherwise a call could
 route a job's reply into another lane's room. A long call with no vouched lane gets no job, and is
