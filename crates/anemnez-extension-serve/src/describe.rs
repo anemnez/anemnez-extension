@@ -3,9 +3,8 @@
 //!
 //! The descriptor is the extension's own `FileDescriptorSet`, as its build emits it
 //! (`tonic_build::configure().file_descriptor_set_path(..)`), with its SHA-256 so a caller
-//! re-fetches only when it changes.
-
-use sha2::{Digest, Sha256};
+//! re-fetches only when it changes. The reply is the kernel's `describe::reply`, so this face and
+//! every product serving Describe itself answer alike (CONTRACT.md `#one-describe-reply-for-every-product`).
 
 use crate::pb;
 
@@ -18,8 +17,8 @@ pub struct Describe {
 impl Describe {
     /// The service for an encoded `FileDescriptorSet`.
     pub fn new(file_descriptor_set: Vec<u8>) -> Describe {
-        let digest = Sha256::digest(&file_descriptor_set).iter().map(|b| format!("{b:02x}")).collect();
-        Describe { reply: pb::DescribeReply { file_descriptor_set, digest } }
+        let reply = anemnez_extension::describe::reply(file_descriptor_set);
+        Describe { reply: pb::DescribeReply { file_descriptor_set: reply.file_descriptor_set, digest: reply.digest } }
     }
 
     /// The descriptor's SHA-256, lowercase hex.
