@@ -389,3 +389,16 @@ fn the_descriptor_check_reads_the_protos_own_encoding() {
     want.examples = vec![Example::new(r#"{"train": "train/h-x"}"#, "Land one")];
     assert_eq!(methods[0].options, want);
 }
+
+/// a-products-events-are-read-through-one-call: a Journal is not the one face's log, so `Events/Call`
+/// is refused by its name, never answered as if it were.
+#[tokio::test]
+async fn a_journals_events_call_is_refused_by_name() {
+    use pb::events_server::Events as _;
+    let (journal, manual) = journal(8);
+    let service = crate::journal::EventsService::new(journal, crate::principal_tests::verifier(&manual, false));
+    let refused =
+        service.call(tonic::Request::new(pb::CallRequest { request: vec![1, 2, 3] })).await.expect_err("refused");
+    assert_eq!(refused.code(), tonic::Code::Unimplemented);
+    assert!(refused.message().starts_with(anemnez_extension::refusal::EVENTS_CALL_UNSERVED), "{}", refused.message());
+}

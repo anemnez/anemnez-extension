@@ -104,6 +104,22 @@ that token's expiry with a retryable `expired`; the subscriber re-mints and resu
 caller subscribes to the products it is granted; across hosts the stream rides Fabric's stream brokering
 (fabric SWARM.md `#fabric-brokers-streams-not-protocols`).
 
+<!-- claim: a-products-events-are-read-through-one-call -->
+**A product's events are read through one call** (D, A, H, 2026-11-14). The face every product's
+events go through is `hydramq-events` (fabric EVENTS.md §6a): a keyed log per producer, read from a
+position or at its last value per subject. Its served face is bytes (`hydramq_events::wire`), and
+this contract is its gRPC transport, defined once: `Events/Call(CallRequest{request}) ->
+CallReply{reply}` carries one `wire` request and its answer, opaquely. This crate never parses them
+and never depends on hydramq-events, so the open kernel still builds from git alone. A producer
+answers with `hydramq_events::wire::serve` on its blocking pool. A consumer reads through the
+client crate's async adapter onto `wire`'s Remote, on its own injected clock. A product whose events
+are not on that log yet refuses the call `events-call-unserved`, as the serving face's Journal does.
+**Retiring:** until every product reads and writes through `Call`, a consumer has two ways to read a
+product's events, the `Events(after)` stream and `Call`, and the serving face keeps a second log, its
+`Journal`. Both retire onto `Call` and the producer's hydramq-events log. Step 1 is this release:
+`Call` is added and the Journal refuses it by name. Step 2 moves each product's events and the
+serving face onto the log, and removes `Events(after)` and the Journal. Ends 2026-12-15 (owner H).
+
 <!-- claim: health-is-state-with-parts -->
 **Health is state, with parts, and events after it.** `Health/Get` answers `{state, parts, as_of}`:
 `state` one of `STARTING`, `SERVING`, `DEGRADED`, `FAILING`, `DRAINING`, `DRAINED`, `UNKNOWN`; `parts`
