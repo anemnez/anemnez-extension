@@ -57,6 +57,9 @@ pub mod protos {
 
 /// Named refusals a caller acts on (CONTRACT.md `#a-product-pushes-events-as-a-stream-it-serves`).
 pub mod refusal {
+    /// `Events/Call` on a product whose events are not on its hydramq-events log yet: read them with
+    /// `Events/Events` until it moves (CONTRACT.md `#a-products-events-are-read-through-one-call`).
+    pub const EVENTS_CALL_UNSERVED: &str = "events-call-unserved";
     /// An instance-scoped cursor presented to another instance: subscribe afresh, and surface the gap.
     pub const CURSOR_NOT_MINE: &str = "cursor-not-mine";
     /// The stream's principal token ran out: re-mint, and resume from the last cursor.

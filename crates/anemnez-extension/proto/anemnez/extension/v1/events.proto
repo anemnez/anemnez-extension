@@ -8,6 +8,21 @@ service Events {
   // Ends with a retryable `expired` at the caller's principal token's expiry, and refuses an
   // instance-scoped cursor issued elsewhere with `cursor-not-mine`.
   rpc Events(EventsRequest) returns (stream Event);
+  // The product's event log, through the one face (docs/specs/CONTRACT.md,
+  // #a-products-events-are-read-through-one-call): `request` and `reply` are hydramq-events'
+  // `wire` messages, carried opaquely. Nothing in the contract parses them. A product whose events
+  // are not on that log yet refuses it with `events-call-unserved`.
+  rpc Call(CallRequest) returns (CallReply);
+}
+
+message CallRequest {
+  // One `hydramq_events::wire` request (read, or latest).
+  bytes request = 1;
+}
+
+message CallReply {
+  // The producer's `hydramq_events::wire::serve` answer, a refusal included.
+  bytes reply = 1;
 }
 
 message EventsRequest {

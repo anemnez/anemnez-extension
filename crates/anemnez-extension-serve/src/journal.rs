@@ -306,4 +306,16 @@ impl pb::events_server::Events for EventsService {
         let sub = self.journal.subscribe(&after, kinds, expires).map_err(|r| r.status())?;
         Ok(tonic::Response::new(Box::pin(sub.into_grpc_stream())))
     }
+
+    /// A Journal is not the one face's log, so the face's call is refused by name; the Journal retires
+    /// onto it (CONTRACT.md `#a-products-events-are-read-through-one-call`).
+    async fn call(
+        &self,
+        _request: tonic::Request<pb::CallRequest>,
+    ) -> Result<tonic::Response<pb::CallReply>, tonic::Status> {
+        let name = anemnez_extension::refusal::EVENTS_CALL_UNSERVED;
+        Err(tonic::Status::unimplemented(format!(
+            "{name}: this product's events are its Journal's, read through Events/Events until it moves onto hydramq-events"
+        )))
+    }
 }
