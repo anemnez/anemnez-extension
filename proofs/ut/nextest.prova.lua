@@ -111,5 +111,7 @@ spoken_for("one-mapping-flattens-a-descriptor (fixture)", "fixture_tests::the_fi
 spoken_for("a-flattened-name-is-one-tool", "mcp::tests::a_flattened_name_is_one_tool")
 spoken_for("events-flatten-to-one-bounded-read", "mcp::tests::events_flatten_to_one_bounded_read")
 spoken_for("an-mcp-call-names-one-method", "mcp::tests::an_mcp_call_names_one_method")
+spoken_for("one-describe-reply-for-every-product", "describe::tests::one_describe_reply_for_every_product")
+spoken_for("one-describe-reply-for-every-product (parity)", "parity_tests::the_describe_reply_is_the_protos")
 spoken_for("one-mapping-flattens-a-descriptor (map_entry)", "descriptor::tests::a_map_field_is_known_by_its_entrys_map_entry")
 spoken_for("an-external-caller-is-parsed-here-and-trusted-only-from-its-peer", "mcp::tests::an_external_caller_is_parsed_here_and_trusted_only_from_its_peer")

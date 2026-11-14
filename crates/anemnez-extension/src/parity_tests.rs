@@ -114,3 +114,16 @@ fn health_and_restart_cost_carry_the_protos_fields() {
     theirs.sort();
     assert_eq!(ours, theirs, "HealthReply");
 }
+
+/// `describe::DescribeReply` is the proto's message, field for field and number for number.
+#[test]
+fn the_describe_reply_is_the_protos() {
+    let fields: Vec<String> = assignments(protos::OPTIONS, "message", "DescribeReply")
+        .into_iter()
+        .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
+        .collect();
+    assert_eq!(fields, ["bytes file_descriptor_set", "string digest"]);
+    let reply = crate::describe::reply(vec![7]);
+    let bytes = reply.to_bytes();
+    assert_eq!((bytes[0], bytes[3]), (0x0a, 0x12), "file_descriptor_set is 1, digest is 2");
+}
