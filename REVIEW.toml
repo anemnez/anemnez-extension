@@ -1,0 +1,9 @@
+# Who may approve a train's head (standards repo/review-declared; E m/10346, m/10350).
+schema = 1
+steward = "H"
+
+# The steward never approves their own train, so every path names who else may: D (the contract's
+# architect) or E (standards, and Prova and Archetect, which take this crate from git).
+[[paths]]
+glob = "**"
+reviewers = ["D", "E"]
