@@ -116,5 +116,8 @@ spoken_for("one-describe-reply-for-every-product (parity)", "parity_tests::the_d
 spoken_for("a-products-events-are-read-through-one-call", "serve_tests::a_journals_events_call_is_refused_by_name")
 spoken_for("a-products-events-are-read-through-one-call (round trip)", "events::tests::a_consumer_reads_a_producers_events_through_one_call")
 spoken_for("a-products-events-are-read-through-one-call (parity)", "parity_tests::the_events_call_messages_are_the_protos")
+spoken_for("a-products-events-are-pushed-through-one-watch", "events::tests::a_consumer_is_pushed_a_producers_events_through_one_watch")
+spoken_for("a-products-events-are-pushed-through-one-watch (journal)", "serve_tests::a_journals_events_watch_is_refused_by_name")
+spoken_for("a-products-events-are-pushed-through-one-watch (unserved)", "events::tests::an_unserved_watch_or_call_is_refused_by_name_not_unclear")
 spoken_for("one-mapping-flattens-a-descriptor (map_entry)", "descriptor::tests::a_map_field_is_known_by_its_entrys_map_entry")
 spoken_for("an-external-caller-is-parsed-here-and-trusted-only-from-its-peer", "mcp::tests::an_external_caller_is_parsed_here_and_trusted_only_from_its_peer")

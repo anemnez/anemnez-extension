@@ -57,8 +57,12 @@ pub mod protos {
 
 /// Named refusals a caller acts on (CONTRACT.md `#a-product-pushes-events-as-a-stream-it-serves`).
 pub mod refusal {
-    /// `Events/Call` on a product whose events are not on its hydramq-events log yet: read them with
-    /// `Events/Events` until it moves (CONTRACT.md `#a-products-events-are-read-through-one-call`).
+    /// What a consumer is told, typed, when a product's `Events/Watch` is unserved (an older producer, or
+    /// a Journal): it reads with `Events/Call` instead, never retrying an Unclear (D).
+    pub const WATCH_UNSERVED: &str = "watch-unserved";
+    /// `Events/Call` or `Events/Watch` on a product whose events are not on its hydramq-events log yet:
+    /// read them with `Events/Events` until it moves (CONTRACT.md
+    /// `#a-products-events-are-read-through-one-call`).
     pub const EVENTS_CALL_UNSERVED: &str = "events-call-unserved";
     /// An instance-scoped cursor presented to another instance: subscribe afresh, and surface the gap.
     pub const CURSOR_NOT_MINE: &str = "cursor-not-mine";

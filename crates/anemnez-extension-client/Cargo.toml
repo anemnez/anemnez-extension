@@ -20,12 +20,12 @@ http.workspace = true
 
 [dev-dependencies]
 anemnez-extension = { workspace = true }
-anemnez-extension-fixture = { path = "../anemnez-extension-fixture", version = "0.6.1", registry = "artichoke" }
+anemnez-extension-fixture = { path = "../anemnez-extension-fixture", version = "0.7.0", registry = "artichoke" }
 anemnez-clock.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net"] }
 tempfile.workspace = true
 # The events round trip's producer: a contract Events service whose Call is the face's serve.
-anemnez-extension-serve = { path = "../anemnez-extension-serve", version = "0.6.1", registry = "artichoke" }
+anemnez-extension-serve = { path = "../anemnez-extension-serve", version = "0.7.0", registry = "artichoke" }
 tokio-stream.workspace = true
 hyper-util.workspace = true
 tower.workspace = true

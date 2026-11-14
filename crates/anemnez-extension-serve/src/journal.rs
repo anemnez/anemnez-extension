@@ -309,6 +309,19 @@ impl pb::events_server::Events for EventsService {
 
     /// A Journal is not the one face's log, so the face's call is refused by name; the Journal retires
     /// onto it (CONTRACT.md `#a-products-events-are-read-through-one-call`).
+    type WatchStream = std::pin::Pin<Box<dyn Stream<Item = Result<pb::WatchFrame, tonic::Status>> + Send + 'static>>;
+
+    /// Refused as `call` is, for the same reason.
+    async fn watch(
+        &self,
+        _request: tonic::Request<pb::WatchRequest>,
+    ) -> Result<tonic::Response<Self::WatchStream>, tonic::Status> {
+        let name = anemnez_extension::refusal::EVENTS_CALL_UNSERVED;
+        Err(tonic::Status::unimplemented(format!(
+            "{name}: this product's events are its Journal's, read through Events/Events until it moves onto hydramq-events"
+        )))
+    }
+
     async fn call(
         &self,
         _request: tonic::Request<pb::CallRequest>,
