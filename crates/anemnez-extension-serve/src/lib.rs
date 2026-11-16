@@ -15,6 +15,7 @@
 //!
 //! [`Clock`]: anemnez_clock::Clock
 
+pub mod accepted;
 pub mod describe;
 pub mod digest;
 pub mod edge;
@@ -22,6 +23,7 @@ pub mod health;
 pub mod journal;
 pub mod principal;
 
+pub use accepted::{Accepted, Judged, judged};
 pub use describe::Describe;
 pub use digest::{DigestLayer, RequestDigest};
 pub use edge::FileNonces;
@@ -36,6 +38,8 @@ pub mod pb {
     tonic::include_proto!("anemnez.extension.v1");
 }
 
+#[cfg(test)]
+mod accepted_tests;
 #[cfg(test)]
 mod edge_tests;
 #[cfg(test)]

@@ -493,12 +493,14 @@ anemnez-extension-serve, so a product with no API plane builds without it, and -
 on anemnez-service (the graph stays acyclic). The `anemnez-product` archetype renders it (E), so a new
 product starts compliant. No product binds a product socket with a raw `bind_socket` of its own.
 
+<!-- claim: the-judged-peer-is-on-every-request -->
 The boundary between the two halves (K, D, M, 2026-11-16): `Peer`, `Code`, `Role` and `Verdict` are plain data in this
 crate (`anemnez_extension::peer`), since both halves already depend on it. Each plane's policy is a function from
 `&Peer` to `Verdict::Admit(Role)` or `Verdict::Refuse(name)`, where `Role` is `Fabricd`, `Agora` or `Other`
 (`#[non_exhaustive]`). The connection type, `Accepted { io, peer, role }`, lives in -serve beside `serve()`, its one
-reader. It implements tonic's `Connected` with `ConnectInfo = (Peer, Role)`, so tonic puts both on every request
-with no code path to forget. -serve's router acts on the `Role` the accept decided and never holds the trust table
+reader. It implements tonic's `Connected` with `ConnectInfo = Judged { peer, role }`, so tonic puts both on every
+request with no code path to forget; a router reads it with `judged(&request)`, and a request that came in on any
+other connection reads `None`, an unjudged peer, which a router refuses wherever a judged one is needed. -serve's router acts on the `Role` the accept decided and never holds the trust table
 or matches a team or identifier itself. The peer token is read **once, at accept**, and kept with the connection:
 macOS answers LOCAL_PEERTOKEN for whoever holds the socket's peer pid when it is asked, so `pidversion` guards
 against a reused pid, and nothing reads the token again per request. A peer whose code identity couldn't be read
