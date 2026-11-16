@@ -586,10 +586,10 @@ product. A sans-IO kernel, the product's host does the I/O:
 | State | Means | Leaves on |
 |---|---|---|
 | `Serving` | both planes open | fabricd's `Drain` accepted → `ApiDraining` |
-| `ApiDraining { in_hand, deadline }` | the window is what fabricd's deadline leaves once everything after it is set aside (invariant 6); the API plane refuses new calls `draining` (UNAVAILABLE, retryable: the caller goes to another instance); in-flight calls run to their end; each open `Events` stream gets its last frames and then `end` | `in_hand` reaches 0 → `ApiClosed`; `deadline` passes → `Cancelling` |
-| `Cancelling { in_hand, cancel_deadline }` | every call still in hand has its work cancelled at its next cancellation point, not only its reply; its caller is told `drain-window-passed`, an *unanswered* outcome (Unclear: it may or may not have applied, rule 5), never "failed"; the overrun is named in Health. `cancel_deadline` is `cancel_within` (short) past entry, on `Host` | the last cancelled call's work has stopped → `ApiClosed`; `cancel_deadline` passes → `WorkStuck` |
-| `WorkStuck { calls }` | work that never reached a cancellation point (a blocking syscall, a hung child) still runs; the machine never answers `DRAINED`, and Health names each call whose work didn't stop | its work stops → `ApiClosed`; otherwise fabricd's own stop bound ends the process as a **forced** stop, recorded as such in fabricd's record (`forced: work didn't stop: <calls>`), never as a clean drain |
-| `Handing { deadline }` | entered from the API closing, instead of `ApiClosed`, when the product declares a pre-close hand-off (a resign through the shared Holder, rule 6; a flush): the machine starts it and waits, bounded by `handing_within` on `Host` (D m/13557) | it is done → `ApiClosed`; it is Unclear (a resign unanswered: the lease's own expiry bounds it) or `deadline` passes → `ApiClosed` with the hand-off unfinished, and Health's `DRAINED` names why, `hand-off unfinished: <why>` |
+| `ApiDraining { in_hand, deadline }` | the window is what fabricd's deadline leaves once everything after it is set aside (invariant 6); the API plane refuses new calls `draining` (UNAVAILABLE, retryable: the caller goes to another instance); in-flight calls run to their end; each open `Events` stream gets its last frames and then `end` | `in_hand` reaches 0 → `ApiClosed` (`Handing` when a hand-off is declared); `deadline` passes → `Cancelling` |
+| `Cancelling { in_hand, cancel_deadline }` | every call still in hand has its work cancelled at its next cancellation point, not only its reply; its caller is told `drain-window-passed`, an *unanswered* outcome (Unclear: it may or may not have applied, rule 5), never "failed"; the overrun is named in Health. `cancel_deadline` is `cancel_within` (short) past entry, on `Host`, and never later than fabricd's deadline less the reply margin (invariant 6) | the last cancelled call's work has stopped → `ApiClosed` (`Handing` when a hand-off is declared); `cancel_deadline` passes → `WorkStuck` |
+| `WorkStuck { calls }` | work that never reached a cancellation point (a blocking syscall, a hung child) still runs; the machine never answers `DRAINED`, and Health names each call whose work didn't stop | its work stops → `ApiClosed` (`Handing` when a hand-off is declared); otherwise fabricd's own stop bound ends the process as a **forced** stop, recorded as such in fabricd's record (`forced: work didn't stop: <calls>`), never as a clean drain |
+| `Handing { deadline }` | a product that declares a pre-close hand-off (a resign through the shared Holder, rule 6; a flush) enters it instead of `ApiClosed`, by each of the three edges that empty the API plane: from `ApiDraining`, `Cancelling` or `WorkStuck`. The API listener closes on entering it, so nothing a call started runs while it waits. The machine starts the hand-off and waits, bounded by `handing_within` past entry on `Host`, never later than fabricd's deadline less the reply margin (D m/13557, K m/13574) | it is done → `ApiClosed`; it is Unclear (a resign unanswered: the lease's own expiry bounds it) or `deadline` passes → `ApiClosed` with the hand-off unfinished, and Health's `DRAINED` names why, `hand-off unfinished: <why>` |
 | `ApiClosed` | the API listener is closed, and nothing a call started still runs; control still answers | the machine answers `DRAINED` to a Health read, moving to `ControlDrained` in that answer → `ControlDrained` |
 | `ControlDrained` | fabricd may stop the process | the control listener closes (terminal) |
 
@@ -598,7 +598,11 @@ Events in: `DrainAccepted { within }`, `CallStarted`, `CallEnded`, `StreamEnded`
 work and tell each caller Unclear by name, start the hand-off, answer `DRAINED`, close control. The kernel returns its deadline, read on the `Host` clock, since a laptop may sleep through a drain (rule 3). The window is
 `min(drain_window_secs, fabricd's deadline − (cancel_within + handing_within + reply margin))`: fabricd's deadline is the
 outer bound, and everything the product does after the window must fit inside it (nested bounds, rule 4; D m/13557).
-With no deadline named, the window is `drain_window_secs`. Invariants:
+`DrainAccepted`'s `within` is fabricd's deadline as a span from acceptance, read on `Host` (`DrainRequest.deadline_secs`);
+with none named (0), the window is `drain_window_secs`. A deadline at or under `cancel_within + handing_within + reply
+margin` leaves no window: the calls in hand go straight to `Cancelling`, and the Drain's answer says so by name,
+"fabricd's deadline leaves this product no drain window" (D m/13571), so a fabricd bound too short for the product is
+seen as a configuration fact, never as calls cancelled for no reason. Invariants:
 
 1. Control never closes while the API plane holds a call or a stream.
 2. Health says `DRAINED` only in `ControlDrained`, so fabricd never stops a product that has work in
@@ -611,7 +615,8 @@ With no deadline named, the window is `drain_window_secs`. Invariants:
    Every state that waits has a deadline (`deadline`, `cancel_deadline`, the hand-off's
    `deadline`, then fabricd's stop bound), so no drain holds for ever (rule 4).
 6. No deadline the machine returns is later than fabricd's own (D m/13557), so the machine answers before fabricd's
-   stop, and a forced stop happens only when work really is stuck.
+   stop, and a forced stop happens only when work really is stuck. It holds by construction, not only when there is
+   room (K m/13574): every deadline the machine sets is `min(its own bound, fabricd's deadline − reply margin)`.
 
 ### 8.4 Enforcement (E)
 
@@ -641,7 +646,10 @@ With no deadline named, the window is `drain_window_secs`. Invariants:
      not-DRAINED, Health names the call, and the stop that follows is recorded forced, by name;
    - a declared hand-off runs after the API plane closes and before `DRAINED`; one left unanswered past its
      bound still drains, and `DRAINED` names it unfinished;
-   - no deadline the drain machine keeps is later than fabricd's own.
+   - no deadline the drain machine keeps is later than fabricd's own, including for a Drain whose deadline is
+     shorter than `cancel_within + handing_within`;
+   - a Drain whose deadline leaves no window is answered "fabricd's deadline leaves this product no drain window",
+     and its calls in hand are cancelled and told Unclear at once.
 3. **The archetype** (`anemnez-product`) renders the constructor and the package's wiring (E's owed tag).
 4. **Themis** asks at plan and review: which plane, who is judged at accept, and which grant decides
    the call. The answers are recorded in the hearing (E words the question).
