@@ -18,6 +18,7 @@
 use std::sync::Arc;
 
 use anemnez_extension::describe::{MethodShown, Seen};
+use anemnez_extension::descriptor::DescriptorRefusal;
 use anemnez_extension::peer::Role;
 
 use crate::{judged, pb};
@@ -34,7 +35,8 @@ pub const NOT_STATED: &str = "not stated by the product";
 pub struct Describe {
     reply: pb::DescribeReply,
     shown: Option<Shown>,
-    /// The descriptor's offered methods, in its order. A descriptor `check_descriptor` refuses offers none.
+    /// The admitted descriptor's offered methods, in its order: set by [`Describe::per_caller`], which refuses a
+    /// descriptor `check_descriptor` doesn't admit.
     offered: Arc<Vec<String>>,
 }
 
@@ -42,22 +44,25 @@ impl Describe {
     /// The service for an encoded `FileDescriptorSet`, answering every caller alike (an empty `shown`).
     pub fn new(file_descriptor_set: Vec<u8>) -> Describe {
         let reply = anemnez_extension::describe::reply(file_descriptor_set);
-        let offered = anemnez_extension::descriptor::check_descriptor(&reply.file_descriptor_set)
-            .map(|methods| methods.into_iter().map(|m| m.path).collect())
-            .unwrap_or_default();
         let reply = pb::DescribeReply {
             file_descriptor_set: reply.file_descriptor_set,
             digest: reply.digest,
             shown: Vec::new(),
         };
-        Describe { reply, shown: None, offered: Arc::new(offered) }
+        Describe { reply, shown: None, offered: Arc::new(Vec::new()) }
     }
 
-    /// The same service, answering each caller what `shown` says it is shown. fabricd's peer is never asked
-    /// about: it gets the list empty.
-    #[must_use]
-    pub fn per_caller(self, shown: Shown) -> Describe {
-        Describe { shown: Some(shown), ..self }
+    /// The same service, answering each caller what `shown` says it is shown, made whole over the descriptor's
+    /// offered methods. fabricd's peer is never asked about: it gets the list empty.
+    ///
+    /// # Errors
+    /// The descriptor's refusals, when `check_descriptor` doesn't admit it: a per-caller answer is made whole
+    /// over the offered methods, so one with no admitted descriptor would come out empty and read as "show
+    /// everything" (D m/15110). It is refused here instead, never defaulted.
+    pub fn per_caller(self, shown: Shown) -> Result<Describe, Vec<DescriptorRefusal>> {
+        let methods = anemnez_extension::descriptor::check_descriptor(&self.reply.file_descriptor_set)?;
+        let offered = Arc::new(methods.into_iter().map(|m| m.path).collect());
+        Ok(Describe { shown: Some(shown), offered, ..self })
     }
 
     /// The descriptor's SHA-256, lowercase hex.
