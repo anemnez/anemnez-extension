@@ -58,6 +58,7 @@ outside a caller's range is refused at connect with both versions named, never c
 | `blocks` | bool, default false | a call that does not finish at once parks the calling mind's execute (Substrate RUNTIME S2c) rather than answering Pending |
 | `runs_to_completion` | bool, default false | bounded only by its own end, like `process.run`, so the caller's deadline is not charged for it. A request carrying a wait-budget field (`timeout_ms` and its kin) owns its budget without this; the bridge derives that, so it is never stated twice (C). Independent of `blocks` (D) |
 | `examples` | `Example{args_json, caption}`, repeated (field 13; 12 is reserved) | worked calls, for a caller's help: each the request as a JSON argument object, which a bridge type-checks against the method's parameters and renders its own way (Lua for Substrate, JSON for Agora's MCP face: B, D); `check_descriptor` refuses `example-mismatch` when it isn't a JSON object of the request's top-level fields |
+| `ask_within_secs` | `optional uint32` (field 14), seconds | how long a call may hold an Ask open (§8.1 `an-ask-is-bounded-in-the-call`): absent reads as 45, never 0; a method that never asks says 0; past 120 `check_descriptor` refuses `ask-bound-over-cap` with the value. `MethodOptions::ask_within()` reads it, so no bridge applies the default itself |
 
 <!-- claim: a-keyed-route-names-a-string-field -->
 **A keyed route names one string field of the call** (B, D, H, 2026-11-07). `leader(group, key)`
@@ -77,7 +78,7 @@ takes the encoded `FileDescriptorSet` that `Describe/Get` serves and answers eit
 method (path, parsed `MethodOptions`, a keyed route's field, and the request's top-level fields with
 name, number, kind and repeated, from which a bridge builds the op's parameters: B, C) or EVERY refusal, each named with its
 method: `callers-missing`, `permission-missing`, `person-act-allowed`, `result-missing`,
-`unbounded-collection` (an output with a repeated field declared `one`), `effect-missing`,
+`unbounded-collection` (an output with a repeated field declared `one`), `effect-missing`, `ask-bound-over-cap`,
 `presence-missing`, `description-missing`, `route-key`, `input-unknown`, `options-malformed`. A
 method with no anemnez options is not offered, so nothing gets a face by omission. Substrate's Lua
 mount, Agora's MCP face and the conformance proof all call it. What is a bridge's own (a Lua
@@ -120,7 +121,7 @@ are not on that log yet refuses the call `events-call-unserved`, as the serving 
 product's events, the `Events(after)` stream and `Call`, and the serving face keeps a second log, its
 `Journal`. Both retire onto `Call` and the producer's hydramq-events log. Step 1 is this release:
 `Call` is added and the Journal refuses it by name. Step 2 moves each product's events and the
-serving face onto the log, and removes `Events(after)` and the Journal. Ends 2026-12-15 (owner H).
+serving face onto the log, and removes `Events(after)` and the Journal. Ends 2026-12-15 (owner K, from H).
 
 <!-- claim: a-products-events-are-pushed-through-one-watch -->
 **A product's events are pushed through one watch** (A, D, H, 2026-11-14; house rule 14: no long
@@ -402,7 +403,7 @@ call, such as a server between builds (R9's bound), because that is rule 4's, no
 **Retiring:** the face first written here answered a long method with one call bounded by its
 progress. That call retires: step 1 is this change, the spec. Step 2 is the job shape built in the
 mapping and its host, with the progress-bounded long call removed. No host generates a long tool
-yet, so nothing waits on it today. Ends 2026-12-15 (owner H).
+yet, so nothing waits on it today. Ends 2026-12-15 (owner K, from H).
 
 <!-- claim: a-flattened-name-is-one-tool -->
 **A flattened name is one tool.** Two offered methods whose names flatten alike (`GetURL` and
@@ -454,11 +455,23 @@ that the product itself decides on.
 
 | | Control plane | API plane |
 |---|---|---|
-| Socket | the instance socket (`{run}/<product>.sock`, fabric's) | one socket named by an `access` entry (`{grpc, <contract>, socket, {run}/<name>.sock}`), discovered through Fabric (PRODUCT.md `access`) |
+| Socket | the instance socket (`{run}/<product>.sock`, fabric's) | the one `access` entry that declares `"plane": "api"` (`{grpc, <contract>, socket, {run}/<name>-api.sock, plane = api}`), discovered through Fabric and read by `discover::Instance::api_plane()` alone (below) |
 | Serves | `Lifecycle` (Health, Drain), migrate | `Describe`, the product's own calls (its descriptor), `Events` (Call, Watch), and a read-only twin of `Health` |
 | Admits at accept | **fabricd alone** | the product's own policy (below); fabricd for `Describe` only |
 | Decides per call | nothing more: fabricd is the only peer | the product's engine, every call (anemnez-consent against `iris/grant`) |
 | Reached by | fabricd on this host | local callers, Agora's generated face (§7), Substrate's native mount, and `Fabric.Dial` |
+
+<!-- claim: one-reader-finds-the-api-plane -->
+**One declared field marks the API plane, and one function finds it** (B m/13726, K m/13728, D m/13732).
+An `access` entry says `"plane": "api"` (additive: absent means it isn't an API plane, so no existing entry
+changes meaning, and the contract number doesn't move). A product has at most one. The manifest check
+refuses two, `two-api-planes`, and an `api` entry that isn't kind grpc via a socket,
+`api-plane-not-a-socket`. anemnez-service's `discover::Instance::api_plane() -> Option<&Access>` is the
+one reader: fabricd's Describe read (J), Agora's faces host (I), Substrate's native mount (B) and
+`product::planes`, which binds the API socket from the same entry, all call it, and none matches on a
+name. A product with none stays dumb, said by name. The field travels the wire: `plane` is on
+discover.proto's `Access`, and fabricd's declared and discovered copies relay it (readers first), so a
+row reads `api_plane()` back from another host's discovery.
 
 `access` never names the control socket. The descriptor describes the API plane alone, so a method
 needs no "plane" option: everything `check_descriptor` offers is served on the API plane, and the
@@ -597,7 +610,7 @@ descriptor SHA is caller-independent. A functional call from fabricd's peer is r
 Describe read (built against the API plane from the start, H) and Substrate's native mount move to
 the API plane. **Step 2:** the control socket drops `Describe`. A product adopting §8 for the first
 time (Minion) serves it on the API plane alone from the start. Every other product's step 2 ends
-2027-01-15 (owner H), once each reader dials the API plane: fabricd's SHA read (D, with J), Agora's
+2027-01-15 (owner K, from H), once each reader dials the API plane: fabricd's SHA read (D, with J), Agora's
 Describe read (H) and Substrate's native mount (B).
 
 ### 8.3 The drain machine: control outlives API

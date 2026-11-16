@@ -157,6 +157,8 @@ pub enum DescriptorRefusal {
     OptionsMalformed(String),
     /// An example's `args_json` is not a JSON object of the request's top-level fields, and why.
     ExampleMismatch(String, String),
+    /// `ask_within_secs` past the standard's cap ([`crate::options::ASK_WITHIN_CAP_SECS`]), with the value.
+    AskBoundOverCap(String, u32),
     /// No service in the descriptor carries `anemnez_service`: it says nothing of what it serves.
     ServiceOptionsMissing,
     /// Two services carry `anemnez_service` (both named): a descriptor serves one contract.
@@ -188,6 +190,7 @@ impl DescriptorRefusal {
             Self::InputUnknown(_) => "input-unknown",
             Self::OptionsMalformed(_) => "options-malformed",
             Self::ExampleMismatch(..) => "example-mismatch",
+            Self::AskBoundOverCap(..) => "ask-bound-over-cap",
             Self::ServiceOptionsMissing => "service-options-missing",
             Self::ServiceOptionsTwice(..) => "service-options-twice",
             Self::ServiceOptionsMalformed(_) => "service-options-malformed",
@@ -204,6 +207,11 @@ impl std::fmt::Display for DescriptorRefusal {
             Self::Malformed(why) => write!(f, "malformed descriptor: {why}"),
             Self::RouteKey(path, why) => write!(f, "{path}: {why}"),
             Self::ExampleMismatch(path, why) => write!(f, "{path}: example-mismatch: {why}"),
+            Self::AskBoundOverCap(path, secs) => write!(
+                f,
+                "{path}: ask-bound-over-cap: ask_within_secs {secs} is past the cap of {}",
+                crate::options::ASK_WITHIN_CAP_SECS
+            ),
             Self::ServiceOptionsMissing => f.write_str(self.name()),
             Self::ServiceOptionsTwice(first, second) => {
                 write!(f, "{}: {first} and {second}", self.name())
@@ -327,6 +335,9 @@ fn check_method(
             refused.push(DescriptorRefusal::ExampleMismatch(p(), why));
         }
     }
+    if let Some(secs) = raw.ask_within_secs.filter(|&s| s > crate::options::ASK_WITHIN_CAP_SECS) {
+        refused.push(DescriptorRefusal::AskBoundOverCap(p(), secs));
+    }
     let mut route_key = None;
     if let Route::Keyed { key, .. } = &route {
         match input {
@@ -356,6 +367,7 @@ fn check_method(
                     .into_iter()
                     .map(|e| crate::options::Example::new(e.args_json, e.caption))
                     .collect(),
+                ask_within_secs: raw.ask_within_secs,
             },
             route_key,
         )),
@@ -616,6 +628,8 @@ mod wire {
         pub runs_to_completion: bool,
         #[prost(message, repeated, tag = "13")]
         pub examples: Vec<WireExample>,
+        #[prost(uint32, optional, tag = "14")]
+        pub ask_within_secs: Option<u32>,
     }
 
     #[derive(Clone, PartialEq, prost::Message)]
@@ -915,7 +929,33 @@ mod tests {
             blocks: false,
             runs_to_completion: false,
             examples: Vec::new(),
+            ask_within_secs: None,
         }
+    }
+
+    /// an-ask-is-bounded-in-the-call: absent reads 45 and never 0, an explicit 0 stays 0 (it never asks),
+    /// the cap is admitted, and one past it refuses the descriptor by name.
+    #[test]
+    fn an_ask_bound_reads_45_when_absent_and_is_capped_at_120() {
+        let mut never = good();
+        never.ask_within_secs = Some(0);
+        let mut capped = good();
+        capped.ask_within_secs = Some(crate::options::ASK_WITHIN_CAP_SECS);
+        let bytes = set(vec![
+            method("Absent", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&good())),
+            method("Never", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&never)),
+            method("Capped", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&capped)),
+        ]);
+        let methods = check_descriptor(&bytes).expect("admitted");
+        let bounds: Vec<_> = methods.iter().map(|m| (m.options.ask_within_secs, m.options.ask_within())).collect();
+        assert_eq!(bounds, [(None, 45), (Some(0), 0), (Some(120), 120)]);
+
+        let mut over = good();
+        over.ask_within_secs = Some(crate::options::ASK_WITHIN_CAP_SECS + 1);
+        let bytes = set(vec![method("Over", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&over))]);
+        let refused = check_descriptor(&bytes).expect_err("past the cap");
+        assert_eq!(refused.iter().map(DescriptorRefusal::name).collect::<Vec<_>>(), ["ask-bound-over-cap"]);
+        assert!(refused[0].to_string().contains("121"), "the value is said: {}", refused[0]);
     }
 
     /// every-bridge-refuses-a-descriptor-alike: a good descriptor answers every offered method with

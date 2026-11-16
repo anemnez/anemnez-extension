@@ -221,7 +221,18 @@ pub struct MethodOptions {
     /// Worked calls, for a caller's help.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub examples: Vec<Example>,
+    /// How long a call may hold an Ask open, as the descriptor states it: `None` when absent, which
+    /// [`MethodOptions::ask_within`] reads as [`ASK_WITHIN_DEFAULT_SECS`]; `Some(0)` for a method that
+    /// never asks (CONTRACT.md §8.1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ask_within_secs: Option<u32>,
 }
+
+/// What an absent `ask_within_secs` reads as: Claude Code's hook hold, the longest a person-facing call
+/// waits today (I m/13420). Never 0, which means "never asks" and must be said.
+pub const ASK_WITHIN_DEFAULT_SECS: u32 = 45;
+/// The standard's cap on `ask_within_secs` (E); a descriptor stating more is refused `ask-bound-over-cap`.
+pub const ASK_WITHIN_CAP_SECS: u32 = 120;
 
 impl MethodOptions {
     /// A method's options from the six every method states; the rest take their defaults (route
@@ -247,7 +258,15 @@ impl MethodOptions {
             blocks: false,
             runs_to_completion: false,
             examples: Vec::new(),
+            ask_within_secs: None,
         }
+    }
+
+    /// How long a call of this method may hold an Ask open, in seconds: as stated, or
+    /// [`ASK_WITHIN_DEFAULT_SECS`] when absent. 0 means it never asks. A caller's own per-call bound must
+    /// exceed this plus its margin (nested bounds, rule 4).
+    pub fn ask_within(&self) -> u32 {
+        self.ask_within_secs.unwrap_or(ASK_WITHIN_DEFAULT_SECS)
     }
 }
 
