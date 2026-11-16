@@ -587,12 +587,13 @@ product. A sans-IO kernel, the product's host does the I/O:
 |---|---|---|
 | `Serving` | both planes open | fabricd's `Drain` accepted → `ApiDraining` |
 | `ApiDraining { in_hand, deadline }` | the API plane refuses new calls `draining` (UNAVAILABLE, retryable: the caller goes to another instance); in-flight calls run to their end; each open `Events` stream gets its last frames and then `end` | `in_hand` reaches 0 → `ApiClosed`; `deadline` passes → `Cancelling` |
-| `Cancelling { in_hand }` | every call still in hand has its work cancelled at its next cancellation point, not only its reply; its caller is told `drain-window-passed`, an *unanswered* outcome (Unclear: it may or may not have applied, rule 5), never "failed"; the overrun is named in Health | the last cancelled call's work has stopped → `ApiClosed` |
+| `Cancelling { in_hand, cancel_deadline }` | every call still in hand has its work cancelled at its next cancellation point, not only its reply; its caller is told `drain-window-passed`, an *unanswered* outcome (Unclear: it may or may not have applied, rule 5), never "failed"; the overrun is named in Health. `cancel_deadline` is `cancel_within` (short) past entry, on `Host` | the last cancelled call's work has stopped → `ApiClosed`; `cancel_deadline` passes → `WorkStuck` |
+| `WorkStuck { calls }` | work that never reached a cancellation point (a blocking syscall, a hung child) still runs; the machine never answers `DRAINED`, and Health names each call whose work didn't stop | its work stops → `ApiClosed`; otherwise fabricd's own stop bound ends the process as a **forced** stop, recorded as such in fabricd's record (`forced: work didn't stop: <calls>`), never as a clean drain |
 | `ApiClosed` | the API listener is closed, and nothing a call started still runs; control still answers | the machine answers `DRAINED` to a Health read, moving to `ControlDrained` in that answer → `ControlDrained` |
 | `ControlDrained` | fabricd may stop the process | the control listener closes (terminal) |
 
 Events in: `DrainAccepted { window }`, `CallStarted`, `CallEnded`, `StreamEnded`, `DeadlinePassed`,
-`WorkStopped`, `HealthRead`. Actions out: refuse, close the API listener, cancel the remaining calls'
+`WorkStopped`, `CancelDeadlinePassed`, `HealthRead`. Actions out: refuse, close the API listener, cancel the remaining calls'
 work and tell each caller Unclear by name, answer `DRAINED`, close control. The kernel returns its deadline, `drain_window_secs` past acceptance, read
 on the `Host` clock, since a laptop may sleep through a drain (rule 3). Invariants:
 
@@ -602,8 +603,10 @@ on the `Host` clock, since a laptop may sleep through a drain (rule 3). Invarian
 3. After `Serving`, the API plane admits no new call. The only way back is a new process.
 4. A deadline passing is a named end (`drain-window-passed`, an unanswered outcome), never a silent
    drop, a hang, or a call reported failed.
-5. Nothing a call started still runs in `ControlDrained` (D m/13436), so fabricd's stop never cuts a
-   call's work mid-write.
+5. Nothing a call started still runs in `ControlDrained`, and a stop with work still running is
+   forced, and named (D m/13436, m/13445): fabricd's stop never passes off cut work as a clean drain.
+   Every state that waits has a deadline (`deadline`, `cancel_deadline`, then fabricd's stop bound),
+   so no drain holds for ever (rule 4).
 
 ### 8.4 Enforcement (E)
 
@@ -628,7 +631,9 @@ on the `Host` clock, since a laptop may sleep through a drain (rule 3). Invarian
    - a drain refuses new API calls, finishes those in hand, and reports `DRAINED` only after the API
      plane is closed;
    - a call holding past the drain window is told Unclear, and its effect, read back by value after
-     the stop, is either whole or absent.
+     the stop, is either whole or absent;
+   - work that never reaches a cancellation point holds the machine past `cancel_within`
+     not-DRAINED, Health names the call, and the stop that follows is recorded forced, by name.
 3. **The archetype** (`anemnez-product`) renders the constructor and the package's wiring (E's owed tag).
 4. **Themis** asks at plan and review: which plane, who is judged at accept, and which grant decides
    the call. The answers are recorded in the hearing (E words the question).
