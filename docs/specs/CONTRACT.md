@@ -24,8 +24,8 @@ agent may be granted, mounted at runtime from what the product declares. Agreed 
 <!-- claim: a-product-describes-itself-from-its-idl -->
 **A product describes what it offers from its own IDL, the gRPC proto it already serves.** The
 descriptor is that proto's `FileDescriptorSet`, plus the options below written on its methods, and is
-served by the product itself: `anemnez.extension.v1.Describe/Get` on the instance socket, beside
-`Lifecycle`. There is no second IDL to keep in step, and the descriptor cannot drift from the build.
+served by the product itself: `anemnez.extension.v1.Describe/Get` on its API plane (§8), and on the
+instance socket beside `Lifecycle` until §8's step 2. There is no second IDL to keep in step, and the descriptor cannot drift from the build.
 
 <!-- claim: one-describe-reply-for-every-product -->
 **One `Describe` reply for every product** (D, E, L, H, 2026-11-14). The reply carries the
@@ -440,3 +440,187 @@ the peer at accept (anemnez-service's peer module, with a census that nothing el
 from any other peer a call reads `Stamp::unvouched()`, external with no lane. A malformed stamp,
 a lane that is not a `plain_label`, or a lease with no lane reads as no lane too: it fails
 closed, never into a guess. The lane attributes a call and authorizes nothing.
+
+## 8. Two planes per product (D, H, I, E, K, 2026-11-16)
+
+At the User's ask (K m/13414), ruled by D (m/13418) with H (m/13417, m/13419, m/13421), I
+(m/13416, m/13420) and E (m/13415, enforcement), and D on the grant event and the Ask bound
+(m/13422). One Zero Trust standard that every product complies with: a product serves two sockets,
+each judged at accept by its own policy, and every call on the functional one carries a principal
+that the product itself decides on.
+
+<!-- claim: a-product-serves-two-planes -->
+**A product serves two planes, and only two.**
+
+| | Control plane | API plane |
+|---|---|---|
+| Socket | the instance socket (`{run}/<product>.sock`, fabric's) | one socket named by an `access` entry (`{grpc, <contract>, socket, {run}/<name>.sock}`), discovered through Fabric (PRODUCT.md `access`) |
+| Serves | `Lifecycle` (Health, Drain), migrate | `Describe`, the product's own calls (its descriptor), `Events` (Call, Watch), and a read-only twin of `Health` |
+| Admits at accept | **fabricd alone** | the product's own policy (below); fabricd for `Describe` only |
+| Decides per call | nothing more: fabricd is the only peer | the product's engine, every call (anemnez-consent against `iris/grant`) |
+| Reached by | fabricd on this host | local callers, Agora's generated face (§7), Substrate's native mount, and `Fabric.Dial` |
+
+`access` never names the control socket. The descriptor describes the API plane alone, so a method
+needs no "plane" option: everything `check_descriptor` offers is served on the API plane, and the
+control socket registers `Lifecycle` (and `Describe` until step 2, below) and nothing else.
+
+<!-- claim: control-admits-fabricd-alone -->
+**Control admits fabricd alone** (I m/13416, D m/12966, m/13418). It is judged at accept by code
+identity (anemnez-service `product::peer`), never by a uid or a path. A team-signed CLI is a door,
+not an identity: any agent with a shell can run it, so admitting it on control would let any Bash
+call drain or migrate any product. A CLI's control verbs go through fabricd (`fabric instance drain
+<instance>`), Fabric's guarded path, with Iris kinds for the dangerous ones (IRIS §8.7–8.8). A
+team-signed peer that is not fabricd is refused on control by name, `control-is-fabricd-only`.
+
+<!-- claim: the-api-plane-never-serves-lifecycle -->
+**The API plane never serves Lifecycle, Drain or migrate**, and the control plane never serves a
+functional method. **Health has one source and two readers** (D): fabricd reads it on control, and
+agents and products that check health read the same answer through a read-only twin on the API
+plane. Both are made by one `Board` (§2), so they can't disagree.
+
+<!-- claim: the-constructor-takes-both-accept-policies -->
+**One constructor builds both planes, and it can't be called without both accept policies**
+(D, H). anemnez-service's two-plane constructor (`product::planes`; its exact name is its review's)
+binds each socket through `product::bind_socket`, judges each connection at accept by the policy for
+its plane, and hands the API listener to anemnez-extension-serve's one serving function (H owns it).
+Neither policy has a default, and neither defaults to allow. It is behind a feature on
+anemnez-extension-serve, so a product with no API plane builds without it, and -serve never depends on
+anemnez-service (the graph stays acyclic). The `anemnez-product` archetype renders it (E), so a new
+product starts compliant. No product binds a product socket with a raw `bind_socket` of its own.
+
+### 8.1 Who is admitted, and who decides
+
+<!-- claim: one-decision-per-call-at-the-product -->
+**One decision per call, at the product that owns the resource** (I m/13416, H m/13419, D). On the
+API plane every call is resolved by one engine (anemnez-consent, IRIS §4.4) against `iris/grant`,
+in the product. Agora does not decide as well for our products, since two enforcement points on one
+call disagree or ask twice, and "identical asks share one card" holds only if one place asks. Agora
+keeps deciding for third-party (dumb) servers, which have no plane of their own. A method's
+descriptor default stays a floor (§6).
+
+<!-- claim: every-api-call-has-a-principal -->
+**Every API call carries a principal.** A Substrate-signed principal token (§1) or, from Agora's
+peer only, Agora's stamp (§7 `an-external-caller-is-parsed-here-and-trusted-only-from-its-peer`):
+Agora's stamp is believed only when the API plane's accept read Agora's code identity
+(`product::peer::caller`, the one place). A stamp from any other peer is refused by name, and each
+call records both the peer and the stamp's lane (H m/13080). A door (a team-signed CLI) is admitted
+by its signature, and its call's subject is the harness that drove it, resolved through
+anemnez-consent. A call with no principal is refused, subject only to §2's rollout rule
+(`Keys::admit_absent`).
+
+<!-- claim: a-grant-is-scoped-with-reach -->
+**A grant's scope is (product, the method's capability, resource, principal, reach)** (I). The
+capability comes from the method's descriptor. Reach is `local` or `dial-from <node>`, so a local
+grant never covers a call that came through `Fabric.Dial` (m/12771).
+
+<!-- claim: an-uncovered-principal-is-never-served -->
+**A call whose principal no grant covers is refused or asked, never served** (I), and **an Ask raised
+on the API plane carries the plane's principal, never the stamp's claimed lane** (IRIS
+`a-claimed-lane-grants-nothing`).
+
+<!-- claim: an-ask-is-bounded-in-the-call -->
+**An Ask is bounded inside the call, and the bound is in the descriptor** (I m/13420, H m/13421,
+D m/13422). A method's options gain `ask_within_secs`, an additive field (H's anemnez-extension
+review): how long a call of it may hold an Ask open. An older reader skips it. Absent reads as the
+default, **45** (Claude Code's hook hold, the longest a person-facing call waits today), never 0. A
+method that never asks says **0**. The standard caps it at **120** (E), and `check_descriptor` refuses
+a value past the cap by name, `ask-bound-over-cap`. An unanswered card ends the call `awaiting-consent`,
+never a hang. Nested bounds (rule 4): a caller's own per-call bound must exceed the method's
+`ask_within_secs` plus its margin. Agora checks it by value at mount and refuses a mount that inverts
+them by name (AGORA §5c, the Describe-reading slice).
+
+<!-- claim: refusals-pass-through-by-name -->
+**Refusals pass through by name** (H m/13419). `awaiting-consent`, `not-permitted` and the
+visible-but-denied reasons reach an MCP caller as the product's own codes, never re-worded.
+`mcp::resolve` (§7) carries them once here, so every face gets them.
+
+<!-- claim: describe-answers-per-caller -->
+**Describe answers per caller** (I, IRIS §4.3). The descriptor and its digest (§1) stay
+caller-independent, and fabricd's SHA read is exactly that. Beside them, the API plane's `Describe`
+answers what *this* principal is shown, from the same engine that decides its calls: each method
+`Hidden` or `Shown(presence, permission)`, so a caller sees which methods it may call, which ask, and
+which are refused and why. A visible denied method still can't be called (`a-denied-call-never-raises-an-ask`).
+
+<!-- claim: a-grant-change-is-an-event -->
+**A grant change is an event** (I m/13420, D m/13422, H m/13421). So a per-caller face is cached by
+(descriptor SHA, principal) and re-read only when it changes. Iris publishes `grant.changed
+{principal, capability}` on its own events log whenever it writes a grant, and iris-client's
+`grants_changed()` is that log's pushing watch (§1 `a-products-events-are-pushed-through-one-watch`),
+with its heartbeat bound, its Stopper and a typed Compacted gap. It is never a raw KV
+`watch(prefix)`, which is leaving the client. On a Compacted gap the reader re-reads every face. A
+stale face is only noise, never authority: the product's per-call decision is the authority.
+
+<!-- claim: dial-lands-only-on-the-api-plane -->
+**`Fabric.Dial` lands only on the API plane** (D), checked against the product's own record (its
+`access` entry), never a path compare.
+
+<!-- claim: fabricd-dials-the-api-plane-for-describe-only -->
+**fabricd may dial the API plane for `Describe` only** (H m/13417, D). Its discovery read of the
+descriptor SHA is caller-independent. A functional call from fabricd's peer is refused by name,
+`fabricd-reads-describe-only`.
+
+### 8.2 Describe moves in two steps (rule 8)
+
+<!-- claim: describe-moves-to-the-api-plane-in-two-steps -->
+**Step 1:** for one release a product serves `Describe` on both planes. fabricd's SHA read, Agora's
+Describe read (built against the API plane from the start, H) and Substrate's native mount move to
+the API plane. **Step 2:** the control socket drops `Describe`. A product adopting §8 for the first
+time (Minion) serves it on the API plane alone from the start. Every other product's step 2 ends
+2027-01-15 (owner H), once every reader dials the API plane.
+
+### 8.3 The drain machine: control outlives API
+
+<!-- claim: control-outlives-api-in-a-drain -->
+**In a drain the control plane outlives the API plane** (D). This is one machine, SHARED row 9's
+anemnez-service drain machine (owed there, owner D; today each product has its own copy), never per
+product. A sans-IO kernel, the product's host does the I/O:
+
+| State | Means | Leaves on |
+|---|---|---|
+| `Serving` | both planes open | fabricd's `Drain` accepted → `ApiDraining` |
+| `ApiDraining { in_hand, deadline }` | the API plane refuses new calls `draining` (UNAVAILABLE, retryable: the caller goes to another instance); in-flight calls run to their end; each open `Events` stream gets its last frames and then `end` | `in_hand` reaches 0 → `ApiClosed`; `deadline` passes → `ApiClosed`, with every call still in hand ended `drain-window-passed` and the overrun named in Health |
+| `ApiClosed` | the API listener is closed; control still answers | control reports `DRAINED` through Health → `ControlDrained` |
+| `ControlDrained` | fabricd may stop the process | the control listener closes (terminal) |
+
+Events in: `DrainAccepted { window }`, `CallStarted`, `CallEnded`, `StreamEnded`, `DeadlinePassed`,
+`HealthRead`. Actions out: refuse, close the API listener, end the remaining calls by name, report
+`DRAINED`, close control. The kernel returns its deadline, `drain_window_secs` past acceptance, read
+on the `Host` clock, since a laptop may sleep through a drain (rule 3). Invariants:
+
+1. Control never closes while the API plane holds a call or a stream.
+2. Health says `DRAINED` only in `ControlDrained`, so fabricd never stops a product that has work in
+   hand.
+3. After `Serving`, the API plane admits no new call. The only way back is a new process.
+4. A deadline passing is a named end (`drain-window-passed`), never a silent drop or a hang.
+
+### 8.4 Enforcement (E)
+
+<!-- claim: every-product-is-held-to-two-planes -->
+**Every product is held to §8 by its gate, without a flag day** (E m/13415).
+
+1. **Static rows in `prova-project-standards`**, in every Herald-gated repo from its next tag:
+   `access` never names the instance socket; every descriptor method states `callers`, `permission`
+   and (once H's field lands) `ask_within_secs`, within the cap; the control socket's router registers
+   only `Lifecycle` (and `Describe` until step 2); a product socket is bound only through the two-plane
+   constructor. Each starts as a dated `ends` per repo, then is red by name.
+2. **A shared Prova package, `prova-planes`**, run by each product's own hermetic harness against its
+   own test daemon, never the host's live Fabric (rule 10). One package, plugged in per product as a
+   predicate (rule 2). Rows:
+   - a team-signed non-fabricd peer is refused on control (`control-is-fabricd-only`);
+   - `Lifecycle` and `Drain` are absent from the API plane;
+   - a call with no principal is refused;
+   - a call whose principal no grant covers is refused or asked, never served;
+   - an Ask raised on the API plane carries the plane's principal, not the stamp's claimed lane;
+   - a stamp from a peer that is not Agora is refused;
+   - fabricd's peer gets `Describe` and is refused a functional call;
+   - a drain refuses new API calls, finishes those in hand, and reports `DRAINED` only after the API
+     plane is closed.
+3. **The archetype** (`anemnez-product`) renders the constructor and the package's wiring (E's owed tag).
+4. **Themis** asks at plan and review: which plane, who is judged at accept, and which grant decides
+   the call. The answers are recorded in the hearing (E words the question).
+
+**Adoption order:** Minion first (its control surface is built to §8; its gate proves `prova-planes`
+before any other product's), then Typhon, then Iris (irisd's Raise, Answer and Get move off the
+instance socket). Owed, each with its owner: the constructor (D and H review), -serve's serving
+function and `ask_within_secs` (H), `grant.changed` and `grants_changed()` (I), the static rows,
+`prova-planes`, the archetype and the Themis question (E), and the drain machine (D, SHARED row 9).
