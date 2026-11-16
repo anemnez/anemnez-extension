@@ -1,6 +1,7 @@
-# Who may approve a train's head (standards repo/review-declared; E m/10346, m/10350).
+# Who may approve a train's head (standards repo/review-declared; E m/10346, m/10350). K stewards it
+# since 2026-11-16 (from H, m/13501).
 schema = 1
-steward = "H"
+steward = "K"
 
 # The steward never approves their own train, so every path names who else may: D (the contract's
 # architect) or E (standards, and Prova and Archetect, which take this crate from git).
