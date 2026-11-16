@@ -607,6 +607,13 @@ caller-independent, and fabricd's SHA read is exactly that. Beside them, the API
 answers what *this* principal is shown, from the same engine that decides its calls: each method
 `Hidden` or `Shown(presence, permission)`, so a caller sees which methods it may call, which ask, and
 which are refused and why. A visible denied method still can't be called (`a-denied-call-never-raises-an-ask`).
+On the wire it is additive (K m/13694): `DescribeReply.shown` (field 3) holds one `MethodShown { path, hidden |
+shown { presence, permission }, why }` per offered method, never part of `digest`, and an older reader skips it.
+An empty list means the product doesn't answer per caller, so a reader falls back to the descriptor's own
+defaults, and an entry with no `seen` reads as hidden. -serve's `Describe::per_caller` takes a function from the
+call (its judged peer and principal are on it) to that list, answered by the product's own engine from what it
+already holds. fabricd's peer, which has no principal, always gets the list empty, and the function is never
+asked about it.
 
 <!-- claim: a-grant-change-is-an-event -->
 **A grant change is an event** (I m/13420, H m/13421, D m/13431, m/13436). So a per-caller face is
