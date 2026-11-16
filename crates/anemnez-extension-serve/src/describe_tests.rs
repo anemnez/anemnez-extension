@@ -1,5 +1,6 @@
 //! Describe answers per caller (CONTRACT.md `describe-answers-per-caller`): the product's engine says what each
-//! caller is shown, the digest stays the descriptor's, and fabricd's peer gets nothing per caller.
+//! caller is shown, -serve makes the answer whole, the digest stays the descriptor's, and fabricd's peer gets
+//! nothing per caller.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -8,7 +9,12 @@ use anemnez_extension::describe::MethodShown;
 use anemnez_extension::options::{Permission, Presence};
 use anemnez_extension::peer::{Code, Peer, Role};
 
+use crate::describe::NOT_STATED;
+use crate::serve_tests::land_descriptor;
 use crate::{Accepted, Describe, judged, pb};
+
+/// The one offered method of [`land_descriptor`].
+const LAND: &str = "/h.v1.H/Land";
 
 /// Serve `describe` on a socket whose connections are judged as `role`; answer one Describe call's reply.
 async fn described(describe: Describe, role: Role) -> pb::DescribeReply {
@@ -22,42 +28,54 @@ async fn described(describe: Describe, role: Role) -> pb::DescribeReply {
     client.get(pb::DescribeRequest::default()).await.expect("Describe answers").into_inner()
 }
 
-/// A product's engine that shows a read and hides an act, naming the role it saw; it counts its calls.
-fn engine(asked: &Arc<AtomicUsize>) -> crate::describe::Shown {
+/// A product engine answering `said` for every caller, counting its calls.
+fn engine(asked: &Arc<AtomicUsize>, said: fn(&str) -> Vec<MethodShown>) -> crate::describe::Shown {
     let asked = Arc::clone(asked);
     Arc::new(move |request| {
         asked.fetch_add(1, Ordering::SeqCst);
         let role = judged(request).map(|j| format!("{:?}", j.role)).unwrap_or_default();
-        vec![
-            MethodShown::shown("/p.v1.P/Read", Presence::Full, Permission::Ask, format!("{role}: no grant yet")),
-            MethodShown::hidden("/p.v1.P/Act", format!("{role}: not for this caller")),
-        ]
+        said(&role)
     })
 }
 
-/// The product's engine answers what this caller is shown, from the call it is handed (its judged peer is on
-/// it), and the digest is the descriptor's alone.
-#[tokio::test(flavor = "multi_thread")]
-async fn describe_answers_what_this_caller_is_shown() {
-    let asked = Arc::new(AtomicUsize::new(0));
-    let shared = Describe::new(b"the descriptor".to_vec());
-    let reply = described(shared.clone().per_caller(engine(&asked)), Role::Agora).await;
-    assert_eq!(reply.digest, shared.digest(), "caller-independent");
-    let seen: Vec<(String, bool, String)> = reply
+/// Each entry as (path, shown, why).
+fn seen(reply: &pb::DescribeReply) -> Vec<(String, bool, String)> {
+    reply
         .shown
         .iter()
         .map(|m| (m.path.clone(), matches!(m.seen, Some(pb::method_shown::Seen::Shown(_))), m.why.clone()))
-        .collect();
-    assert_eq!(
-        seen,
-        [
-            ("/p.v1.P/Read".to_string(), true, "Agora: no grant yet".to_string()),
-            ("/p.v1.P/Act".to_string(), false, "Agora: not for this caller".to_string()),
+        .collect()
+}
+
+/// The product's engine answers what this caller is shown, from the call it is handed (its judged peer is on
+/// it), and the digest is the descriptor's alone. An entry for a path the descriptor doesn't offer is dropped.
+#[tokio::test(flavor = "multi_thread")]
+async fn describe_answers_what_this_caller_is_shown() {
+    let asked = Arc::new(AtomicUsize::new(0));
+    let shared = Describe::new(land_descriptor());
+    let said = |role: &str| {
+        vec![
+            MethodShown::hidden("/h.v1.H/NotOffered", "a path the descriptor doesn't offer"),
+            MethodShown::shown(LAND, Presence::Full, Permission::Ask, format!("{role}: no grant yet")),
         ]
-    );
-    let read = &reply.shown[0].seen;
-    assert_eq!(read, &Some(pb::method_shown::Seen::Shown(pb::Shown { presence: 1, permission: 2 })), "FULL, ASK");
+    };
+    let reply = described(shared.clone().per_caller(engine(&asked, said)), Role::Agora).await;
+    assert_eq!(reply.digest, shared.digest(), "caller-independent");
+    assert_eq!(seen(&reply), [(LAND.to_string(), true, "Agora: no grant yet".to_string())]);
+    let land = &reply.shown[0].seen;
+    assert_eq!(land, &Some(pb::method_shown::Seen::Shown(pb::Shown { presence: 1, permission: 2 })), "FULL, ASK");
     assert_eq!(asked.load(Ordering::SeqCst), 1);
+}
+
+/// D m/15074, E m/15072: a per-caller answer is whole. An engine that names nothing (a caller with no grants, or
+/// a bug) yields every offered method hidden, never an empty list, which would read as "not per caller" and show
+/// everything.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_per_caller_answer_naming_nothing_hides_every_offered_method() {
+    let asked = Arc::new(AtomicUsize::new(0));
+    let reply =
+        described(Describe::new(land_descriptor()).per_caller(engine(&asked, |_| Vec::new())), Role::Other).await;
+    assert_eq!(seen(&reply), [(LAND.to_string(), false, NOT_STATED.to_string())]);
 }
 
 /// fabricd's peer has no principal: it gets the descriptor and its digest with nothing per caller, and the
@@ -65,8 +83,8 @@ async fn describe_answers_what_this_caller_is_shown() {
 #[tokio::test(flavor = "multi_thread")]
 async fn fabricd_and_a_product_not_answering_per_caller_get_nothing_per_caller() {
     let asked = Arc::new(AtomicUsize::new(0));
-    let shared = Describe::new(b"the descriptor".to_vec());
-    let fabricd = described(shared.clone().per_caller(engine(&asked)), Role::Fabricd).await;
+    let shared = Describe::new(land_descriptor());
+    let fabricd = described(shared.clone().per_caller(engine(&asked, |_| Vec::new())), Role::Fabricd).await;
     assert_eq!((fabricd.digest.as_str(), fabricd.shown.len()), (shared.digest(), 0));
     assert_eq!(asked.load(Ordering::SeqCst), 0, "the engine is never asked about fabricd");
     let plain = described(shared.clone(), Role::Other).await;
