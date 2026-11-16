@@ -15,6 +15,7 @@ pub mod health;
 pub mod label;
 pub mod mcp;
 pub mod options;
+pub mod peer;
 pub mod signed;
 
 /// The proto files, for a build that compiles them (`prost`, `tonic`) or a tool that reads them.
