@@ -231,17 +231,20 @@ async fn events_channel(
         let server = tonic::transport::Server::builder().add_service(EventsServer::new(service));
         tokio::spawn(server.serve_with_incoming(incoming));
     }
-    let path = socket.clone();
-    let channel = tonic::transport::Endpoint::from_static("http://[::]:50051")
+    (channel_to(socket).await, dir)
+}
+
+/// A channel to a server listening on the Unix socket at `socket`.
+pub(crate) async fn channel_to(socket: std::path::PathBuf) -> tonic::transport::Channel {
+    tonic::transport::Endpoint::from_static("http://[::]:50051")
         .connect_with_connector(tower::service_fn(move |_: tonic::transport::Uri| {
-            let path = path.clone();
+            let path = socket.clone();
             async move {
                 Ok::<_, std::io::Error>(hyper_util::rt::TokioIo::new(tokio::net::UnixStream::connect(path).await?))
             }
         }))
         .await
-        .expect("connects");
-    (channel, dir)
+        .expect("connects")
 }
 
 /// A newer caller's `EventsRequest`: one field this build does not know.
