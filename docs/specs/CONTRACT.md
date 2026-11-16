@@ -493,6 +493,18 @@ anemnez-extension-serve, so a product with no API plane builds without it, and -
 on anemnez-service (the graph stays acyclic). The `anemnez-product` archetype renders it (E), so a new
 product starts compliant. No product binds a product socket with a raw `bind_socket` of its own.
 
+The boundary between the two halves (K, D, M, 2026-11-16): `Peer`, `Code`, `Role` and `Verdict` are plain data in this
+crate (`anemnez_extension::peer`), since both halves already depend on it. Each plane's policy is a function from
+`&Peer` to `Verdict::Admit(Role)` or `Verdict::Refuse(name)`, where `Role` is `Fabricd`, `Agora` or `Other`
+(`#[non_exhaustive]`). The connection type, `Accepted { io, peer, role }`, lives in -serve beside `serve()`, its one
+reader. It implements tonic's `Connected` with `ConnectInfo = (Peer, Role)`, so tonic puts both on every request
+with no code path to forget. -serve's router acts on the `Role` the accept decided and never holds the trust table
+or matches a team or identifier itself. The peer token is read **once, at accept**, and kept with the connection:
+macOS answers LOCAL_PEERTOKEN for whoever holds the socket's peer pid when it is asked, so `pidversion` guards
+against a reused pid, and nothing reads the token again per request. A peer whose code identity couldn't be read
+is admitted only when the plane's policy says so explicitly. Control's policy refuses it by name, `peer's code
+identity unreadable`.
+
 ### 8.1 Who is admitted, and who decides
 
 <!-- claim: one-decision-per-call-at-the-product -->
@@ -632,6 +644,11 @@ seen as a configuration fact, never as calls cancelled for no reason. Invariants
    own test daemon, never the host's live Fabric (rule 10). One package, plugged in per product as a
    predicate (rule 2). Rows:
    - a team-signed non-fabricd peer is refused on control (`control-is-fabricd-only`);
+   - a peer whose code identity is unreadable is refused on control by name (`peer's code identity unreadable`);
+   - on the API plane, a peer whose code identity is unreadable is admitted or refused only as the product's policy
+     says, explicitly, never by a default;
+   - each plane reads the peer token once, at accept: a request on a connection whose peer pid was reused by
+     another process is still judged as the peer that connected;
    - `Lifecycle` and `Drain` are absent from the API plane;
    - a call with no principal is refused;
    - a call whose principal no grant covers is refused or asked, never served;

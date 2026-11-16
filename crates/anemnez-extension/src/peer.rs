@@ -1,0 +1,92 @@
+//! Who is at the other end of a product's socket, judged once at accept (CONTRACT.md §8, §8.1): plain data, so the
+//! two halves that meet there share it without either depending on the other. anemnez-service's `product::planes`
+//! reads the peer and judges it by each plane's policy. anemnez-extension-serve carries the result on every
+//! request and acts on its [`Role`], never judging identity a second time (K, D, M on the direct channel,
+//! 2026-11-16).
+//!
+//! - **Read once, at accept, and kept.** macOS's LOCAL_PEERTOKEN answers for whoever holds the socket's peer pid at
+//!   the moment it is asked, not for the process that connected. So the token is read once, when the connection
+//!   is accepted, and kept with it; `pidversion` tells a reused pid apart. It is never read again per request.
+//! - **An unreadable code identity is a fact, not a default.** [`Peer::code`] is `Err(why)` when the peer's
+//!   signature couldn't be read. A policy admits such a peer only by saying so explicitly; control's refuses it as
+//!   [`CODE_UNREADABLE`].
+
+/// A control-plane peer that is not fabricd, refused by name (CONTRACT.md `control-admits-fabricd-alone`).
+pub const CONTROL_IS_FABRICD_ONLY: &str = "control-is-fabricd-only";
+/// A peer whose code identity couldn't be read, refused by name wherever a policy needs it.
+pub const CODE_UNREADABLE: &str = "peer's code identity unreadable";
+
+/// A process's code identity, as its signature says it: what the trust table judges.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Code {
+    /// The signing identifier (`ai.anemnez.fabricd`, say).
+    pub identifier: String,
+    /// The signing team.
+    pub team: String,
+}
+
+/// The peer of one accepted connection, read once at accept.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Peer {
+    pub pid: i32,
+    /// Tells a reused pid apart: a peer is the pair, never the pid alone.
+    pub pidversion: i32,
+    /// Its code identity, or why that couldn't be read.
+    pub code: Result<Code, String>,
+}
+
+/// What the accept judged the peer to be. -serve's router acts on it alone: fabricd reads `Describe` only, a
+/// caller's stamp is believed only from Agora, and any other peer that carries a stamp is refused. More roles
+/// may come, so a match on it keeps an arm for the rest, read as [`Role::Other`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Role {
+    /// The host's fabricd.
+    Fabricd,
+    /// The host's Agora: its stamp names the caller it vouches for.
+    Agora,
+    /// Any other admitted peer: a local caller, a team-signed door.
+    Other,
+}
+
+/// A plane's policy's judgment of one connection at accept.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Verdict {
+    /// Let it in, as this role.
+    Admit(Role),
+    /// Close it, saying why by name.
+    Refuse(&'static str),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn peer(pid: i32, pidversion: i32) -> Peer {
+        Peer { pid, pidversion, code: Ok(Code { identifier: "ai.anemnez.fabricd".into(), team: "TEAM1".into() }) }
+    }
+
+    /// A reused pid is another peer: identity is the pid and its version together.
+    #[test]
+    fn a_reused_pid_is_another_peer() {
+        assert_eq!(peer(41, 7), peer(41, 7));
+        assert_ne!(peer(41, 7), peer(41, 8), "same pid, a later process");
+    }
+
+    /// An unreadable code identity is carried with its reason, and is never equal to any readable one.
+    #[test]
+    fn an_unreadable_code_identity_is_carried_with_why() {
+        let unread = Peer { pid: 41, pidversion: 7, code: Err("no signature".into()) };
+        assert_ne!(unread, peer(41, 7));
+        assert_eq!(unread.code.as_ref().unwrap_err(), "no signature");
+    }
+
+    /// The names a refusal carries are the contract's, word for word.
+    #[test]
+    fn refusals_are_named_as_the_contract_names_them() {
+        let contract = include_str!("../../../docs/specs/CONTRACT.md");
+        for name in [CONTROL_IS_FABRICD_ONLY, CODE_UNREADABLE] {
+            assert!(contract.contains(name), "CONTRACT.md never names {name:?}");
+        }
+    }
+}
