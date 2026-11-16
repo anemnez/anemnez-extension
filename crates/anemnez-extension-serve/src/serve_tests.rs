@@ -345,10 +345,9 @@ fn only_one_uncompressed_frame_is_digested() {
     assert_eq!(crate::digest::digest_frame(&[]), None, "empty");
 }
 
-/// The kernel's hand-written options decoder reads exactly what the proto's generated code writes:
-/// options encoded with `pb::MethodOptions` (from options.proto) parse to the same values.
-#[test]
-fn the_descriptor_check_reads_the_protos_own_encoding() {
+/// An admitted descriptor of one method, `/h.v1.H/Land`, its options encoded by the proto's generated code: for the
+/// rows that need a real descriptor (a released fixture would be a second copy of -serve).
+pub(crate) fn land_descriptor() -> Vec<u8> {
     fn ld(field: u32, bytes: &[u8]) -> Vec<u8> {
         let mut out = Vec::new();
         prost::encoding::encode_key(field, prost::encoding::WireType::LengthDelimited, &mut out);
@@ -399,8 +398,14 @@ fn the_descriptor_check_reads_the_protos_own_encoding() {
     }
     .encode_to_vec();
     file.extend(ld(6, &service));
+    ld(1, &file)
+}
 
-    let methods = anemnez_extension::descriptor::check_descriptor(&ld(1, &file)).expect("admitted");
+/// The kernel's hand-written options decoder reads exactly what the proto's generated code writes:
+/// options encoded with `pb::MethodOptions` (from options.proto) parse to the same values.
+#[test]
+fn the_descriptor_check_reads_the_protos_own_encoding() {
+    let methods = anemnez_extension::descriptor::check_descriptor(&land_descriptor()).expect("admitted");
     use anemnez_extension::options::*;
     assert_eq!(methods.len(), 1);
     assert_eq!(methods[0].path, "/h.v1.H/Land");

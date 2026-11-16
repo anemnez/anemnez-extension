@@ -100,6 +100,7 @@ spoken_for("one-function-serves-the-api-plane (bounded stop)", "serve_fn_tests::
 spoken_for("one-function-serves-the-api-plane (reserved)", "serve_fn_tests::a_reserved_or_twice_named_product_service_is_refused_by_name")
 spoken_for("describe-answers-per-caller", "describe_tests::describe_answers_what_this_caller_is_shown")
 spoken_for("describe-answers-per-caller (fabricd)", "describe_tests::fabricd_and_a_product_not_answering_per_caller_get_nothing_per_caller")
+spoken_for("describe-answers-per-caller (whole)", "describe_tests::a_per_caller_answer_naming_nothing_hides_every_offered_method")
 spoken_for("describe-answers-per-caller (wire)", "describe::tests::what_a_caller_is_shown_rides_beside_the_digest_never_in_it")
 spoken_for("describe-answers-per-caller (parity)", "parity_tests::the_method_shown_messages_are_the_protos")
 spoken_for("fabricd-dials-the-api-plane-for-describe-only", "plane_tests::fabricd_reads_describe_only")

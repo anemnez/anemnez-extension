@@ -612,8 +612,11 @@ shown { presence, permission }, why }` per offered method, never part of `digest
 An empty list means the product doesn't answer per caller, so a reader falls back to the descriptor's own
 defaults, and an entry with no `seen` reads as hidden. -serve's `Describe::per_caller` takes a function from the
 call (its judged peer and principal are on it) to that list, answered by the product's own engine from what it
-already holds. fabricd's peer, which has no principal, always gets the list empty, and the function is never
-asked about it.
+already holds. -serve makes the answer whole (D m/15074, E m/15072): one entry per offered method, in the
+descriptor's order, a method the function didn't name going out hidden, "not stated by the product", and an
+entry for a path not offered dropped. So a per-caller reply is empty only when nothing is offered, and empty
+never stands for "show everything". fabricd's peer, which has no principal, always gets the list empty, and the
+function is never asked about it.
 
 <!-- claim: a-grant-change-is-an-event -->
 **A grant change is an event** (I m/13420, H m/13421, D m/13431, m/13436). So a per-caller face is

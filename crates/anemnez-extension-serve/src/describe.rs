@@ -8,8 +8,12 @@
 //! every product serving Describe itself answer alike (CONTRACT.md `#one-describe-reply-for-every-product`).
 //!
 //! A product that answers per caller hands [`Describe::per_caller`] a function from the call to what that caller
-//! is shown, decided by its own engine. -serve never decides it. The digest stays the descriptor's alone, and
-//! fabricd's peer, which has no principal, always gets the list empty, without the function being asked.
+//! is shown, decided by its own engine. -serve never decides it, but it makes the answer whole: one entry per
+//! offered method, in the descriptor's order, any method the function didn't name going out hidden
+//! ([`NOT_STATED`]) and any entry for a path the descriptor doesn't offer dropped. So a per-caller reply is empty
+//! only when nothing is offered, and empty never stands for "show everything" (D m/15074, E m/15072). The digest
+//! stays the descriptor's alone, and fabricd's peer, which has no principal, always gets the list empty, without
+//! the function being asked.
 
 use std::sync::Arc;
 
@@ -22,23 +26,31 @@ use crate::{judged, pb};
 /// peer and its principal are on the request). It answers from what the product already holds: no I/O here.
 pub type Shown = Arc<dyn Fn(&tonic::Request<pb::DescribeRequest>) -> Vec<MethodShown> + Send + Sync>;
 
+/// Why an offered method the product's function didn't name is hidden.
+pub const NOT_STATED: &str = "not stated by the product";
+
 /// The `Describe` service over one descriptor.
 #[derive(Clone)]
 pub struct Describe {
     reply: pb::DescribeReply,
     shown: Option<Shown>,
+    /// The descriptor's offered methods, in its order. A descriptor `check_descriptor` refuses offers none.
+    offered: Arc<Vec<String>>,
 }
 
 impl Describe {
     /// The service for an encoded `FileDescriptorSet`, answering every caller alike (an empty `shown`).
     pub fn new(file_descriptor_set: Vec<u8>) -> Describe {
         let reply = anemnez_extension::describe::reply(file_descriptor_set);
+        let offered = anemnez_extension::descriptor::check_descriptor(&reply.file_descriptor_set)
+            .map(|methods| methods.into_iter().map(|m| m.path).collect())
+            .unwrap_or_default();
         let reply = pb::DescribeReply {
             file_descriptor_set: reply.file_descriptor_set,
             digest: reply.digest,
             shown: Vec::new(),
         };
-        Describe { reply, shown: None }
+        Describe { reply, shown: None, offered: Arc::new(offered) }
     }
 
     /// The same service, answering each caller what `shown` says it is shown. fabricd's peer is never asked
@@ -52,6 +64,21 @@ impl Describe {
     pub fn digest(&self) -> &str {
         &self.reply.digest
     }
+}
+
+/// One entry per `offered` method, in its order: the product's own where it named the method (its first, if it
+/// named one twice), else hidden as [`NOT_STATED`]. An entry for a path not offered is dropped.
+fn whole(offered: &[String], said: Vec<MethodShown>) -> Vec<MethodShown> {
+    let mut said: Vec<Option<MethodShown>> = said.into_iter().map(Some).collect();
+    offered
+        .iter()
+        .map(|path| {
+            said.iter_mut()
+                .find(|entry| entry.as_ref().is_some_and(|e| &e.path == path))
+                .and_then(Option::take)
+                .unwrap_or_else(|| MethodShown::hidden(path.clone(), NOT_STATED))
+        })
+        .collect()
 }
 
 /// The kernel's entry as the generated type, field for field.
@@ -72,7 +99,7 @@ impl pb::describe_server::Describe for Describe {
         let mut reply = self.reply.clone();
         let fabricd = judged(&request).is_some_and(|j| j.role == Role::Fabricd);
         if let (Some(shown), false) = (&self.shown, fabricd) {
-            reply.shown = shown(&request).into_iter().map(wire).collect();
+            reply.shown = whole(&self.offered, shown(&request)).into_iter().map(wire).collect();
         }
         Ok(tonic::Response::new(reply))
     }
