@@ -128,7 +128,8 @@ impl ProductRoutes {
 pub struct Stop<F> {
     /// Resolves when the plane should stop: the drain machine's close of the API plane.
     pub signal: F,
-    /// The drain window.
+    /// The API plane's share of CONTRACT §8.3's drain, handed in by the drain machine: below fabricd's own drain
+    /// deadline less the reply margin (nested bounds, rule 4; D m/15098). A product never picks its own.
     pub within: Duration,
     /// The clock the window is read on.
     pub clock: Clock,

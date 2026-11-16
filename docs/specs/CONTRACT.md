@@ -455,7 +455,7 @@ that the product itself decides on.
 
 | | Control plane | API plane |
 |---|---|---|
-| Socket | the instance socket (`{run}/<product>.sock`, fabric's) | the one `access` entry that declares `"plane": "api"` (`{grpc, <contract>, socket, {run}/<name>-api.sock, plane = api}`), discovered through Fabric and read by `discover::Instance::api_plane()` alone (below) |
+| Socket | the instance socket (`{run}/<product>.sock`, fabric's) | the one `access` entry that declares `"plane": "api"` (`{grpc, <contract>, socket, {run}/{own}.api.sock, plane = api}`, where `{own}` is the instance socket's stem, needing contract 17: anemnez-service `OWN_FROM`, filled by `fill_access_path`), discovered through Fabric and read by `discover::Instance::api_plane()` alone (below) |
 | Serves | `Lifecycle` (Health, Drain), migrate | `Describe`, the product's own calls (its descriptor), `Events` (Call, Watch), and a read-only twin of `Health` |
 | Admits at accept | **fabricd alone** | the product's own policy (below); fabricd for `Describe` only |
 | Decides per call | nothing more: fabricd is the only peer | the product's engine, every call (anemnez-consent against `iris/grant`) |

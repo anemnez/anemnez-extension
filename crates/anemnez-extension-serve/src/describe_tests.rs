@@ -59,7 +59,7 @@ async fn describe_answers_what_this_caller_is_shown() {
             MethodShown::shown(LAND, Presence::Full, Permission::Ask, format!("{role}: no grant yet")),
         ]
     };
-    let reply = described(shared.clone().per_caller(engine(&asked, said)), Role::Agora).await;
+    let reply = described(shared.clone().per_caller(engine(&asked, said)).expect("admitted"), Role::Agora).await;
     assert_eq!(reply.digest, shared.digest(), "caller-independent");
     assert_eq!(seen(&reply), [(LAND.to_string(), true, "Agora: no grant yet".to_string())]);
     let land = &reply.shown[0].seen;
@@ -73,8 +73,11 @@ async fn describe_answers_what_this_caller_is_shown() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_per_caller_answer_naming_nothing_hides_every_offered_method() {
     let asked = Arc::new(AtomicUsize::new(0));
-    let reply =
-        described(Describe::new(land_descriptor()).per_caller(engine(&asked, |_| Vec::new())), Role::Other).await;
+    let reply = described(
+        Describe::new(land_descriptor()).per_caller(engine(&asked, |_| Vec::new())).expect("admitted"),
+        Role::Other,
+    )
+    .await;
     assert_eq!(seen(&reply), [(LAND.to_string(), false, NOT_STATED.to_string())]);
 }
 
@@ -84,9 +87,19 @@ async fn a_per_caller_answer_naming_nothing_hides_every_offered_method() {
 async fn fabricd_and_a_product_not_answering_per_caller_get_nothing_per_caller() {
     let asked = Arc::new(AtomicUsize::new(0));
     let shared = Describe::new(land_descriptor());
-    let fabricd = described(shared.clone().per_caller(engine(&asked, |_| Vec::new())), Role::Fabricd).await;
+    let fabricd =
+        described(shared.clone().per_caller(engine(&asked, |_| Vec::new())).expect("admitted"), Role::Fabricd).await;
     assert_eq!((fabricd.digest.as_str(), fabricd.shown.len()), (shared.digest(), 0));
     assert_eq!(asked.load(Ordering::SeqCst), 0, "the engine is never asked about fabricd");
     let plain = described(shared.clone(), Role::Other).await;
     assert!(plain.shown.is_empty(), "Describe::new answers every caller alike");
+}
+
+/// D m/15110: a per-caller Describe needs an admitted descriptor. One `check_descriptor` refuses is refused at
+/// construction with its refusals, never answered as if it offered nothing, which would read as "show everything".
+#[test]
+fn a_per_caller_describe_of_a_descriptor_not_admitted_is_refused() {
+    let asked = Arc::new(AtomicUsize::new(0));
+    let refused = Describe::new(vec![0xff, 0xff, 0xff]).per_caller(engine(&asked, |_| Vec::new()));
+    assert!(refused.is_err_and(|refusals| !refusals.is_empty()), "refused with its reasons");
 }
