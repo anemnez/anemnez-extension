@@ -535,13 +535,23 @@ rule has its own row. A role this build doesn't know is not Agora, so its stamp 
 principal the call then runs as, and whether a grant covers it, stays the product's decision (below).
 
 <!-- claim: one-function-serves-the-api-plane -->
-**One function serves the API plane** (K, 2026-11-16). -serve's `serve(faces, product, token_checked,
-incoming, shutdown)` is the only server a product builds for it. It takes the contract's faces as one
+**One function serves the API plane** (K, 2026-11-16; D m/15034, E m/15035). -serve's `serve(faces, product,
+token_checked, incoming, stop)` is the only server a product builds for it. It takes the contract's faces as one
 required `ApiFaces` (`Describe`, the read-only `Health` twin from the product's one `Board`, and `Events`), the
-product's own calls as tonic `Routes`, the paths it checks a principal token on, and a stream whose items are
-`Accepted` connections, so a raw listener doesn't compile. It layers `ApiPlaneLayer` outermost, then the request
-digest for `Events` and each token-checked path, and registers nothing of the control plane's. A product
-reads the caller with anemnez-service `product::peer::caller`, the stamp's one reader (M m/14147).
+product's own calls as `ProductRoutes`, the paths it checks a principal token on, a stream whose items are
+`Accepted` connections (so a raw listener doesn't compile), and how it stops. It layers `ApiPlaneLayer`
+outermost, then the request digest for `Events` and each token-checked path, and registers nothing of the
+control plane's. A product reads the caller with anemnez-service `product::peer::caller`, the stamp's one
+reader (M m/14147).
+- **A product can't shadow a face or add Lifecycle.** `ProductRoutes::add_service` refuses a service under a
+  reserved package (`anemnez.extension.`, which holds Describe, Health and Events, and `anemnez.fabric.`, which
+  holds Lifecycle) as `reserved-service`, and one added twice as `service-named-twice`. Both are refused by name
+  before any server is built, never with a panic.
+- **A stop is bounded** (rule 4). Once the stop's signal resolves, the plane takes no new connection and lets
+  the calls in hand finish within the product's drain window, a deadline on `Host` read at each look. Past it,
+  each remaining connection is cut, its calls ending unanswered (`drain-window-passed`), and `serve` returns
+  `Stopped::Forced { open }`, "forced: N connection(s) with calls in hand past the drain window", never a clean
+  stop. A connection still open after a graceful stop is one with a call in hand, since an idle one closes at once.
 
 ### 8.1 Who is admitted, and who decides
 

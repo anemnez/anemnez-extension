@@ -25,6 +25,19 @@ pub const FABRICD_READS_DESCRIBE_ONLY: &str = "fabricd-reads-describe-only";
 /// from Agora's peer (CONTRACT.md §8.1, `every-api-call-has-a-principal`).
 pub const STAMP_NOT_FROM_AGORA: &str = "stamp-not-from-agora";
 
+/// A product's own service named under a package the contract reserves (`anemnez.extension.`, `anemnez.fabric.`):
+/// the API plane serves the contract's faces itself and never Lifecycle, so a product can't shadow or add one
+/// (CONTRACT.md `one-function-serves-the-api-plane`; D m/15034, E m/15035).
+pub const RESERVED_SERVICE: &str = "reserved-service";
+
+/// A product's own service added twice to one plane.
+pub const SERVICE_NAMED_TWICE: &str = "service-named-twice";
+
+/// A call still in hand when the drain's window passed: ended unanswered (Unclear), never "failed"
+/// (CONTRACT.md §8.3). The contract's word lives here; anemnez-service-kernel's drain carries a copy of it today,
+/// to become a re-export.
+pub const DRAIN_WINDOW_PASSED: &str = "drain-window-passed";
+
 /// A process's code identity from its **verified** signature: what the trust table judges. It is set only from a
 /// signature whose validity was checked (as anemnez-secret's identity read does), never from an identifier or team
 /// read out of an unverified Info.plist or signature blob, so no policy can be written against a self-asserted

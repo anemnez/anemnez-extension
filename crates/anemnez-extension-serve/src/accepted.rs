@@ -45,6 +45,11 @@ impl<IO> Accepted<IO> {
     pub fn judged(&self) -> &Judged {
         &self.judged
     }
+
+    /// The same connection, judged the same, its IO wrapped by `wrap` (the API plane's cut on a stop).
+    pub(crate) fn map_io<J>(self, wrap: impl FnOnce(IO) -> J) -> Accepted<J> {
+        Accepted { io: wrap(self.io), judged: self.judged }
+    }
 }
 
 impl<IO> tonic::transport::server::Connected for Accepted<IO> {
