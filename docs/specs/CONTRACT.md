@@ -507,6 +507,16 @@ against a reused pid, and nothing reads the token again per request. A peer whos
 is admitted only when the plane's policy says so explicitly. Control's policy refuses it by name, `peer's code
 identity unreadable`.
 
+<!-- claim: the-api-plane-applies-its-rules-below-every-service -->
+**The API plane's per-call rules are one layer, below every service** (K, D m/13648). -serve's
+`ApiPlaneLayer` reads the `Judged` peer on each request and answers PERMISSION_DENIED by name before
+any service runs: a call on a connection not judged at accept is refused `connection not judged at
+accept`, never served as an ordinary caller; fabricd's peer gets `Describe` only, and anything else is
+refused `fabricd-reads-describe-only`; and a call that carries a caller's stamp from any peer but
+Agora's is refused `stamp-not-from-agora`, not ignored. `api_admits` is that decision, pure, so each
+rule has its own row. A role this build doesn't know is not Agora, so its stamp is refused too. Which
+principal the call then runs as, and whether a grant covers it, stays the product's decision (below).
+
 ### 8.1 Who is admitted, and who decides
 
 <!-- claim: one-decision-per-call-at-the-product -->

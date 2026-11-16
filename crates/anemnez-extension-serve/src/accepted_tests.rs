@@ -1,7 +1,6 @@
 //! The judged peer reaches every request served over an [`Accepted`] connection (CONTRACT.md §8).
 
 use anemnez_extension::peer::{Code, Peer, Role};
-use futures_util::StreamExt as _;
 
 use crate::accepted::{Accepted, judged};
 use crate::pb;
@@ -21,12 +20,9 @@ fn fabricd() -> Code {
 async fn served<F, S>(wrap: F) -> (tonic::transport::Channel, tempfile::TempDir)
 where
     F: Fn(tokio::net::UnixStream) -> S + Send + 'static,
-    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + tonic::transport::server::Connected + Unpin + Send + 'static,
+    S: crate::serve_tests::Conn,
 {
-    let dir = tempfile::tempdir().expect("a temp dir");
-    let socket = dir.path().join("api.sock");
-    let listener = tokio::net::UnixListener::bind(&socket).expect("binds");
-    let incoming = tokio_stream::wrappers::UnixListenerStream::new(listener).map(move |accepted| accepted.map(&wrap));
+    let (dir, socket, incoming) = crate::serve_tests::listen_as(wrap);
     let said = |request: tonic::Request<()>| -> Result<tonic::Request<()>, tonic::Status> {
         let seen = match judged(&request) {
             Some(j) => format!("{:?} pid {} code {}", j.role, j.peer.pid, j.peer.code.is_ok()),
