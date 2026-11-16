@@ -500,7 +500,7 @@ plane. Both are made by one `Board` (§2), so they can't disagree.
 (D, H). anemnez-service's two-plane constructor (`product::planes`; its exact name is its review's)
 binds each socket through `product::bind_socket` and judges each connection at accept by the policy
 for its plane. Neither policy has a default, and neither defaults to allow. It hands anemnez-extension-serve's
-one serving function (H owns it) not a bare listener but **a stream of accepted connections, each
+one serving function (`serve`, K's since H moved to Lethe) not a bare listener but **a stream of accepted connections, each
 carrying its judged `Peer`** (code identity, from `product::peer`), and -serve puts that peer on every
 request beside the principal (H m/13432). The two rules decided per call by the peer then have one
 home: -serve's method router refuses fabricd's functional calls (`fabricd-reads-describe-only`), and
@@ -533,6 +533,15 @@ refused `fabricd-reads-describe-only`; and a call that carries a caller's stamp 
 Agora's is refused `stamp-not-from-agora`, not ignored. `api_admits` is that decision, pure, so each
 rule has its own row. A role this build doesn't know is not Agora, so its stamp is refused too. Which
 principal the call then runs as, and whether a grant covers it, stays the product's decision (below).
+
+<!-- claim: one-function-serves-the-api-plane -->
+**One function serves the API plane** (K, 2026-11-16). -serve's `serve(faces, product, token_checked,
+incoming, shutdown)` is the only server a product builds for it. It takes the contract's faces as one
+required `ApiFaces` (`Describe`, the read-only `Health` twin from the product's one `Board`, and `Events`), the
+product's own calls as tonic `Routes`, the paths it checks a principal token on, and a stream whose items are
+`Accepted` connections, so a raw listener doesn't compile. It layers `ApiPlaneLayer` outermost, then the request
+digest for `Events` and each token-checked path, and registers nothing of the control plane's. A product
+reads the caller with anemnez-service `product::peer::caller`, the stamp's one reader (M m/14147).
 
 ### 8.1 Who is admitted, and who decides
 
