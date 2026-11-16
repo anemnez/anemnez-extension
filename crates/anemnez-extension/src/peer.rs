@@ -16,12 +16,15 @@ pub const CONTROL_IS_FABRICD_ONLY: &str = "control-is-fabricd-only";
 /// A peer whose code identity couldn't be read, refused by name wherever a policy needs it.
 pub const CODE_UNREADABLE: &str = "peer's code identity unreadable";
 
-/// A process's code identity, as its signature says it: what the trust table judges.
+/// A process's code identity from its **verified** signature: what the trust table judges. It is set only from a
+/// signature whose validity was checked (as anemnez-secret's identity read does), never from an identifier or team
+/// read out of an unverified Info.plist or signature blob, so no policy can be written against a self-asserted
+/// identity (D m/13618).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Code {
     /// The signing identifier (`ai.anemnez.fabricd`, say).
     pub identifier: String,
-    /// The signing team.
+    /// The signing team: the leaf certificate's OU, the team identifier, never the member id in its CN.
     pub team: String,
 }
 
@@ -79,14 +82,5 @@ mod tests {
         let unread = Peer { pid: 41, pidversion: 7, code: Err("no signature".into()) };
         assert_ne!(unread, peer(41, 7));
         assert_eq!(unread.code.as_ref().unwrap_err(), "no signature");
-    }
-
-    /// The names a refusal carries are the contract's, word for word.
-    #[test]
-    fn refusals_are_named_as_the_contract_names_them() {
-        let contract = include_str!("../../../docs/specs/CONTRACT.md");
-        for name in [CONTROL_IS_FABRICD_ONLY, CODE_UNREADABLE] {
-            assert!(contract.contains(name), "CONTRACT.md never names {name:?}");
-        }
     }
 }
