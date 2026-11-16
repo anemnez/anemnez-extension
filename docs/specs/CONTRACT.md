@@ -444,8 +444,8 @@ closed, never into a guess. The lane attributes a call and authorizes nothing.
 ## 8. Two planes per product (D, H, I, E, K, 2026-11-16)
 
 At the User's ask (K m/13414), ruled by D (m/13418) with H (m/13417, m/13419, m/13421), I
-(m/13416, m/13420) and E (m/13415, enforcement), and D on the grant event and the Ask bound
-(m/13422). One Zero Trust standard that every product complies with: a product serves two sockets,
+(m/13416, m/13420) and E (m/13415, enforcement), and D on the Ask bound (m/13422) and the grant
+event (m/13431). One Zero Trust standard that every product complies with: a product serves two sockets,
 each judged at accept by its own policy, and every call on the functional one carries a principal
 that the product itself decides on.
 
@@ -481,11 +481,16 @@ plane. Both are made by one `Board` (§2), so they can't disagree.
 <!-- claim: the-constructor-takes-both-accept-policies -->
 **One constructor builds both planes, and it can't be called without both accept policies**
 (D, H). anemnez-service's two-plane constructor (`product::planes`; its exact name is its review's)
-binds each socket through `product::bind_socket`, judges each connection at accept by the policy for
-its plane, and hands the API listener to anemnez-extension-serve's one serving function (H owns it).
-Neither policy has a default, and neither defaults to allow. It is behind a feature on
-anemnez-extension-serve, so a product with no API plane builds without it, and -serve never depends on
-anemnez-service (the graph stays acyclic). The `anemnez-product` archetype renders it (E), so a new
+binds each socket through `product::bind_socket` and judges each connection at accept by the policy
+for its plane. Neither policy has a default, and neither defaults to allow. It hands anemnez-extension-serve's
+one serving function (H owns it) not a bare listener but **a stream of accepted connections, each
+carrying its judged `Peer`** (code identity, from `product::peer`), and -serve puts that peer on every
+request beside the principal (H m/13432). The two rules decided per call by the peer then have one
+home: -serve's method router refuses fabricd's functional calls (`fabricd-reads-describe-only`), and
+the stamp parser reads the peer from there (Agora's stamp is believed only from Agora's peer). No
+product re-derives the peer. The constructor is anemnez-service's, behind a feature that takes
+anemnez-extension-serve, so a product with no API plane builds without it, and -serve never depends
+on anemnez-service (the graph stays acyclic). The `anemnez-product` archetype renders it (E), so a new
 product starts compliant. No product binds a product socket with a raw `bind_socket` of its own.
 
 ### 8.1 Who is admitted, and who decides
@@ -527,7 +532,9 @@ method that never asks says **0**. The standard caps it at **120** (E), and `che
 a value past the cap by name, `ask-bound-over-cap`. An unanswered card ends the call `awaiting-consent`,
 never a hang. Nested bounds (rule 4): a caller's own per-call bound must exceed the method's
 `ask_within_secs` plus its margin. Agora checks it by value at mount and refuses a mount that inverts
-them by name (AGORA §5c, the Describe-reading slice).
+them by name (AGORA §5c, the Describe-reading slice). For a long method (`blocks` or
+`runs_to_completion`), Agora answers the MCP call at once with a job (§7), so the MCP call never holds
+the Ask: the bound checked against `ask_within_secs` is the job's, not the MCP call's (H m/13432).
 
 <!-- claim: refusals-pass-through-by-name -->
 **Refusals pass through by name** (H m/13419). `awaiting-consent`, `not-permitted` and the
@@ -542,13 +549,13 @@ answers what *this* principal is shown, from the same engine that decides its ca
 which are refused and why. A visible denied method still can't be called (`a-denied-call-never-raises-an-ask`).
 
 <!-- claim: a-grant-change-is-an-event -->
-**A grant change is an event** (I m/13420, D m/13422, H m/13421). So a per-caller face is cached by
-(descriptor SHA, principal) and re-read only when it changes. Iris publishes `grant.changed
-{principal, capability}` on its own events log whenever it writes a grant, and iris-client's
-`grants_changed()` is that log's pushing watch (§1 `a-products-events-are-pushed-through-one-watch`),
-with its heartbeat bound, its Stopper and a typed Compacted gap. It is never a raw KV
-`watch(prefix)`, which is leaving the client. On a Compacted gap the reader re-reads every face. A
-stale face is only noise, never authority: the product's per-call decision is the authority.
+**A grant change is an event** (I m/13420, H m/13421, D m/13431, m/13436). So a per-caller face is
+cached by (descriptor SHA, principal) and re-read only when it changes. The event is iris-client's
+`grants_changed()`, a watch on Iris's own grant records, with the grant key's encoding kept in Iris
+(iris-kernel `keys::GrantKey`). It says each write or delete as `Changed`. After a gap it re-lists,
+says what changed during the gap, then `Resynced`, and the reader re-reads every face for that
+principal, so it never assumes nothing changed across a gap. A stale face is only noise, never
+authority: the product's per-call decision is the authority.
 
 <!-- claim: dial-lands-only-on-the-api-plane -->
 **`Fabric.Dial` lands only on the API plane** (D), checked against the product's own record (its
@@ -566,7 +573,8 @@ descriptor SHA is caller-independent. A functional call from fabricd's peer is r
 Describe read (built against the API plane from the start, H) and Substrate's native mount move to
 the API plane. **Step 2:** the control socket drops `Describe`. A product adopting §8 for the first
 time (Minion) serves it on the API plane alone from the start. Every other product's step 2 ends
-2027-01-15 (owner H), once every reader dials the API plane.
+2027-01-15 (owner H), once each reader dials the API plane: fabricd's SHA read (D, with J), Agora's
+Describe read (H) and Substrate's native mount (B).
 
 ### 8.3 The drain machine: control outlives API
 
@@ -578,20 +586,24 @@ product. A sans-IO kernel, the product's host does the I/O:
 | State | Means | Leaves on |
 |---|---|---|
 | `Serving` | both planes open | fabricd's `Drain` accepted → `ApiDraining` |
-| `ApiDraining { in_hand, deadline }` | the API plane refuses new calls `draining` (UNAVAILABLE, retryable: the caller goes to another instance); in-flight calls run to their end; each open `Events` stream gets its last frames and then `end` | `in_hand` reaches 0 → `ApiClosed`; `deadline` passes → `ApiClosed`, with every call still in hand ended `drain-window-passed` and the overrun named in Health |
-| `ApiClosed` | the API listener is closed; control still answers | control reports `DRAINED` through Health → `ControlDrained` |
+| `ApiDraining { in_hand, deadline }` | the API plane refuses new calls `draining` (UNAVAILABLE, retryable: the caller goes to another instance); in-flight calls run to their end; each open `Events` stream gets its last frames and then `end` | `in_hand` reaches 0 → `ApiClosed`; `deadline` passes → `Cancelling` |
+| `Cancelling { in_hand }` | every call still in hand has its work cancelled at its next cancellation point, not only its reply; its caller is told `drain-window-passed`, an *unanswered* outcome (Unclear: it may or may not have applied, rule 5), never "failed"; the overrun is named in Health | the last cancelled call's work has stopped → `ApiClosed` |
+| `ApiClosed` | the API listener is closed, and nothing a call started still runs; control still answers | the machine answers `DRAINED` to a Health read, moving to `ControlDrained` in that answer → `ControlDrained` |
 | `ControlDrained` | fabricd may stop the process | the control listener closes (terminal) |
 
 Events in: `DrainAccepted { window }`, `CallStarted`, `CallEnded`, `StreamEnded`, `DeadlinePassed`,
-`HealthRead`. Actions out: refuse, close the API listener, end the remaining calls by name, report
-`DRAINED`, close control. The kernel returns its deadline, `drain_window_secs` past acceptance, read
+`WorkStopped`, `HealthRead`. Actions out: refuse, close the API listener, cancel the remaining calls'
+work and tell each caller Unclear by name, answer `DRAINED`, close control. The kernel returns its deadline, `drain_window_secs` past acceptance, read
 on the `Host` clock, since a laptop may sleep through a drain (rule 3). Invariants:
 
 1. Control never closes while the API plane holds a call or a stream.
 2. Health says `DRAINED` only in `ControlDrained`, so fabricd never stops a product that has work in
    hand.
 3. After `Serving`, the API plane admits no new call. The only way back is a new process.
-4. A deadline passing is a named end (`drain-window-passed`), never a silent drop or a hang.
+4. A deadline passing is a named end (`drain-window-passed`, an unanswered outcome), never a silent
+   drop, a hang, or a call reported failed.
+5. Nothing a call started still runs in `ControlDrained` (D m/13436), so fabricd's stop never cuts a
+   call's work mid-write.
 
 ### 8.4 Enforcement (E)
 
@@ -614,7 +626,9 @@ on the `Host` clock, since a laptop may sleep through a drain (rule 3). Invarian
    - a stamp from a peer that is not Agora is refused;
    - fabricd's peer gets `Describe` and is refused a functional call;
    - a drain refuses new API calls, finishes those in hand, and reports `DRAINED` only after the API
-     plane is closed.
+     plane is closed;
+   - a call holding past the drain window is told Unclear, and its effect, read back by value after
+     the stop, is either whole or absent.
 3. **The archetype** (`anemnez-product`) renders the constructor and the package's wiring (E's owed tag).
 4. **Themis** asks at plan and review: which plane, who is judged at accept, and which grant decides
    the call. The answers are recorded in the hearing (E words the question).
@@ -622,5 +636,5 @@ on the `Host` clock, since a laptop may sleep through a drain (rule 3). Invarian
 **Adoption order:** Minion first (its control surface is built to §8; its gate proves `prova-planes`
 before any other product's), then Typhon, then Iris (irisd's Raise, Answer and Get move off the
 instance socket). Owed, each with its owner: the constructor (D and H review), -serve's serving
-function and `ask_within_secs` (H), `grant.changed` and `grants_changed()` (I), the static rows,
+function and `ask_within_secs` (H), `grants_changed()` (I), the static rows,
 `prova-planes`, the archetype and the Themis question (E), and the drain machine (D, SHARED row 9).
