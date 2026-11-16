@@ -463,10 +463,14 @@ that the product itself decides on.
 
 <!-- claim: one-reader-finds-the-api-plane -->
 **One declared field marks the API plane, and one function finds it** (B m/13726, K m/13728, D m/13732).
-An `access` entry says `"plane": "api"` (additive: absent means it isn't an API plane, so no existing entry
-changes meaning, and the contract number doesn't move). A product has at most one. The manifest check
-refuses two, `two-api-planes`, and an `api` entry that isn't kind grpc via a socket,
-`api-plane-not-a-socket`. anemnez-service's `discover::Instance::api_plane() -> Option<&Access>` is the
+An `access` entry says `"plane": "api"` (absent means it isn't an API plane, so no existing entry changes
+meaning). The key restricts: `Access` refuses unknown fields, so an older fabricd can't read it. So a
+plane-declaring manifest needs contract N (`PLANE_FROM`), and an older fabricd refuses it by name ("needs
+contract N"), never with a parse error (rule 8; D m/13737, m/13746, after M read the code, m/13736). A
+product declares it only once its hosts' fabricd read N. A product has at most one. The manifest check
+refuses two, `two-api-planes`; an `api` entry that isn't kind grpc via a socket, `api-plane-not-a-socket`;
+and one whose socket is the instance (control) socket, `api-plane-is-control`, since `access` never names
+the control socket. anemnez-service's `discover::Instance::api_plane() -> Option<&Access>` is the
 one reader: fabricd's Describe read (J), Agora's faces host (I), Substrate's native mount (B) and
 `product::planes`, which binds the API socket from the same entry, all call it, and none matches on a
 name. A product with none stays dumb, said by name. The field travels the wire: `plane` is on
