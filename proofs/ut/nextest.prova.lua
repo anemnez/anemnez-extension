@@ -95,6 +95,8 @@ spoken_for("the-api-plane-applies-its-rules-below-every-service", "plane_tests::
 spoken_for("the-api-plane-applies-its-rules-below-every-service (unjudged)", "plane_tests::an_unjudged_connection_is_refused_by_name")
 spoken_for("fabricd-dials-the-api-plane-for-describe-only", "plane_tests::fabricd_reads_describe_only")
 spoken_for("every-api-call-has-a-principal (stamp)", "plane_tests::a_stamp_is_believed_only_from_agora")
+spoken_for("an-ask-is-bounded-in-the-call", "descriptor::tests::an_ask_bound_reads_45_when_absent_and_is_capped_at_120")
+spoken_for("an-ask-is-bounded-in-the-call (wire parity)", "serve_tests::the_descriptor_check_reads_the_protos_own_encoding")
 spoken_for("a-nonce-is-durable-before-the-method-runs (group commit)", "edge_tests::a_batch_is_one_sync")
 spoken_for("every-bridge-refuses-a-descriptor-alike", "descriptor::tests::every_refusal_is_answered_by_name")
 spoken_for("every-bridge-refuses-a-descriptor-alike (parity)", "serve_tests::the_descriptor_check_reads_the_protos_own_encoding")

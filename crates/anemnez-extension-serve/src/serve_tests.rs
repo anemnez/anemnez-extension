@@ -369,6 +369,7 @@ fn the_descriptor_check_reads_the_protos_own_encoding() {
         blocks: true,
         runs_to_completion: true,
         examples: vec![pb::Example { args_json: r#"{"train": "train/h-x"}"#.into(), caption: "Land one".into() }],
+        ask_within_secs: Some(90),
     };
     let mut method = prost_types::MethodDescriptorProto {
         name: Some("Land".into()),
@@ -417,6 +418,7 @@ fn the_descriptor_check_reads_the_protos_own_encoding() {
     want.blocks = true;
     want.runs_to_completion = true;
     want.examples = vec![Example::new(r#"{"train": "train/h-x"}"#, "Land one")];
+    want.ask_within_secs = Some(90);
     assert_eq!(methods[0].options, want);
 }
 
