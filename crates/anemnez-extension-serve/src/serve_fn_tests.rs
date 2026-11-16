@@ -2,17 +2,20 @@
 //! and the product's calls, on judged connections, behind the plane's rules and the request digest.
 
 use std::convert::Infallible;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use anemnez_clock::ManualClock;
 use anemnez_extension::health::State;
-use anemnez_extension::peer::{Code, FABRICD_READS_DESCRIBE_ONLY, Peer, Role};
+use anemnez_extension::peer::{Code, FABRICD_READS_DESCRIBE_ONLY, Peer, RESERVED_SERVICE, Role, SERVICE_NAMED_TWICE};
 use tonic::body::BoxBody;
-use tonic::service::Routes;
 
 use crate::journal::{EventsService, Journal};
-use crate::serve::{ApiFaces, serve};
+use crate::serve::{ApiFaces, ProductRoutes, Refused, Stop, Stopped, serve};
 use crate::{Accepted, Board, Describe, Judged, RequestDigest, pb};
+
+/// The drain window the rows' planes stop within.
+const WINDOW: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// The product's token-checked call and one that isn't.
 const CHECKED: &str = "/test.v1.Product/Checked";
@@ -47,16 +50,42 @@ fn peer(role: Role) -> Peer {
     Peer { pid: 41, pidversion: 7, code: Ok(Code { identifier: format!("ai.anemnez.{role:?}"), team: "TEAM1".into() }) }
 }
 
-/// Serve the API plane through [`serve`], each connection judged as `role`. Answers a channel to it, the sender
-/// that shuts it down, the server's task and the dir to keep alive.
-async fn plane(
-    role: Role,
-) -> (
-    tonic::transport::Channel,
-    tokio::sync::oneshot::Sender<()>,
-    tokio::task::JoinHandle<Result<(), tonic::transport::Error>>,
-    tempfile::TempDir,
-) {
+/// A product service whose calls never answer: each one says it arrived, then waits forever.
+#[derive(Clone)]
+struct Stuck(Arc<tokio::sync::Notify>);
+
+impl tonic::server::NamedService for Stuck {
+    const NAME: &'static str = "test.v1.Stuck";
+}
+
+impl tower_service::Service<http::Request<BoxBody>> for Stuck {
+    type Response = http::Response<BoxBody>;
+    type Error = Infallible;
+    type Future =
+        std::pin::Pin<Box<dyn std::future::Future<Output = Result<http::Response<BoxBody>, Infallible>> + Send>>;
+
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Infallible>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, _request: http::Request<BoxBody>) -> Self::Future {
+        self.0.notify_one();
+        Box::pin(std::future::pending())
+    }
+}
+
+/// A served plane: a channel to it, its clock, the sender that stops it, the server's task and the dir to keep.
+struct Plane {
+    channel: tonic::transport::Channel,
+    manual: ManualClock,
+    stop: tokio::sync::oneshot::Sender<()>,
+    server: tokio::task::JoinHandle<Result<Stopped, tonic::transport::Error>>,
+    _dir: tempfile::TempDir,
+}
+
+/// Serve the API plane through [`serve`] with the product's `routes`, each connection judged as `role`, stopping
+/// within [`WINDOW`] on a manual clock.
+async fn plane_with(role: Role, routes: ProductRoutes) -> Plane {
     let manual = ManualClock::new();
     let journal = Journal::new("a1b2c3d4.boot1", 8, manual.clock());
     let board = Board::new(journal.clone());
@@ -65,10 +94,28 @@ async fn plane(
     let faces = ApiFaces::new(Describe::new(b"the descriptor".to_vec()), board, events);
     let (dir, socket, incoming) = crate::serve_tests::listen_as(move |io| Accepted::new(io, peer(role), role));
     let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
-    let server = tokio::spawn(serve(faces, Routes::new(Product), &[CHECKED], incoming, async move {
+    let signal = async move {
         drop(stopped.await);
-    }));
-    (crate::serve_tests::channel_to(socket).await, stop, server, dir)
+    };
+    let stop_on = Stop { signal, within: WINDOW, clock: manual.clock() };
+    let server = tokio::spawn(serve(faces, routes, &[CHECKED], incoming, stop_on));
+    let channel = crate::serve_tests::channel_to(socket).await;
+    Plane { channel, manual, stop, server, _dir: dir }
+}
+
+/// [`plane_with`] the `Product` service alone.
+async fn plane(role: Role) -> Plane {
+    plane_with(role, ProductRoutes::new().add_service(Product).expect("a product's own service")).await
+}
+
+/// The server's end, within a real-time bound so a plane that never stops fails the row rather than hanging it.
+async fn ended(server: tokio::task::JoinHandle<Result<Stopped, tonic::transport::Error>>) -> Stopped {
+    anemnez_clock::Clock::system()
+        .timeout(std::time::Duration::from_secs(5), server)
+        .await
+        .expect("it stops within its bound")
+        .expect("joins")
+        .expect("the server didn't fail")
 }
 
 /// One unary call to `path` over `channel`: Ok, or the status's code and message.
@@ -88,7 +135,8 @@ async fn call(channel: &tonic::transport::Channel, path: &'static str) -> Result
 /// request. A token-checked path carries the request's digest; any other doesn't.
 #[tokio::test(flavor = "multi_thread")]
 async fn one_function_serves_the_contracts_faces_and_the_products_calls() {
-    let (channel, _stop, _server, _dir) = plane(Role::Other).await;
+    let plane = plane(Role::Other).await;
+    let channel = plane.channel.clone();
 
     let describe = pb::describe_client::DescribeClient::new(channel.clone())
         .get(pb::DescribeRequest::default())
@@ -114,7 +162,8 @@ async fn one_function_serves_the_contracts_faces_and_the_products_calls() {
 /// `serve` at all: its stream takes `Accepted` connections only.)
 #[tokio::test(flavor = "multi_thread")]
 async fn the_planes_rules_apply_to_the_products_calls() {
-    let (channel, _stop, _server, _dir) = plane(Role::Fabricd).await;
+    let plane = plane(Role::Fabricd).await;
+    let channel = plane.channel.clone();
     let describe = pb::describe_client::DescribeClient::new(channel.clone()).get(pb::DescribeRequest::default()).await;
     assert!(describe.is_ok(), "fabricd reads Describe: {describe:?}");
     let refused = Err((tonic::Code::PermissionDenied, FABRICD_READS_DESCRIBE_ONLY.to_string()));
@@ -122,15 +171,75 @@ async fn the_planes_rules_apply_to_the_products_calls() {
     assert_eq!(call(&channel, "/anemnez.extension.v1.Health/Get").await, refused, "the Health twin");
 }
 
-/// The server ends when its shutdown resolves, and ends Ok.
+/// With no call in hand, the plane stops cleanly when its signal resolves.
 #[tokio::test(flavor = "multi_thread")]
-async fn the_plane_stops_when_its_shutdown_resolves() {
-    let (_channel, stop, server, _dir) = plane(Role::Other).await;
+async fn the_plane_stops_cleanly_when_nothing_is_in_hand() {
+    let Plane { stop, server, _dir, .. } = plane(Role::Other).await;
     stop.send(()).expect("the server is listening");
-    let ended = anemnez_clock::Clock::system()
-        .timeout(std::time::Duration::from_secs(5), server)
-        .await
-        .expect("it stops within its bound")
-        .expect("joins");
-    assert!(ended.is_ok(), "{ended:?}");
+    assert_eq!(ended(server).await, Stopped::Clean);
+}
+
+/// E m/15035, rule 4: a call that never ends can't hold the stop. Past the drain window (on the plane's clock,
+/// moved by hand) its connection is cut, the call ends unanswered, and the stop says it was forced.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_call_that_never_ends_is_cut_at_the_window_and_the_stop_says_forced() {
+    let arrived = Arc::new(tokio::sync::Notify::new());
+    let routes = ProductRoutes::new().add_service(Stuck(Arc::clone(&arrived))).expect("a product's own service");
+    let Plane { channel, manual, stop, server, _dir } = plane_with(Role::Other, routes).await;
+    let mut call = tokio::spawn(async move { super::serve_fn_tests::call(&channel, "/test.v1.Stuck/Forever").await });
+    arrived.notified().await;
+
+    stop.send(()).expect("the server is listening");
+    manual.parked(1).await;
+    manual.advance(WINDOW - std::time::Duration::from_secs(1)).await;
+    // A real-time look, not a product timer: a call cut early would end within it.
+    let early = anemnez_clock::Clock::system().timeout(std::time::Duration::from_millis(300), &mut call).await;
+    assert!(early.is_err(), "inside the window the call is still let finish: {early:?}");
+    manual.advance(std::time::Duration::from_secs(1)).await;
+
+    assert_eq!(ended(server).await, Stopped::Forced { open: 1 });
+    let refused = call.await.expect("joins");
+    assert!(refused.is_err(), "the call ended unanswered: {refused:?}");
+    assert!(Stopped::Forced { open: 1 }.to_string().starts_with("forced: 1 "));
+}
+
+/// A service named in a reserved package, so as to shadow a face the plane serves itself or add Lifecycle.
+#[derive(Clone)]
+struct Named<const N: usize>;
+
+const RESERVED_NAMES: [&str; 3] =
+    ["anemnez.extension.v1.Describe", "anemnez.extension.v1.Health", "anemnez.fabric.product.v1.Lifecycle"];
+
+macro_rules! named {
+    ($($n:literal),+) => {$(
+        impl tonic::server::NamedService for Named<$n> {
+            const NAME: &'static str = RESERVED_NAMES[$n];
+        }
+        impl tower_service::Service<http::Request<BoxBody>> for Named<$n> {
+            type Response = http::Response<BoxBody>;
+            type Error = Infallible;
+            type Future = std::future::Ready<Result<http::Response<BoxBody>, Infallible>>;
+            fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Infallible>> {
+                Poll::Ready(Ok(()))
+            }
+            fn call(&mut self, _request: http::Request<BoxBody>) -> Self::Future {
+                std::future::ready(Ok(tonic::Status::unavailable("a product's own").into_http()))
+            }
+        }
+    )+};
+}
+named!(0, 1, 2);
+
+/// D m/15034, E m/15035: a product's service under a reserved package (the contract's faces, and Lifecycle under
+/// anemnez.fabric.product.v1, whose real name this row spells), or one added twice, is refused by name before any
+/// server is built: never a panic, and never a face shadowed.
+#[test]
+fn a_reserved_or_twice_named_product_service_is_refused_by_name() {
+    let refused = |r: Result<ProductRoutes, Refused>| r.err().map(|e| (e.name, e.service));
+    let reserved = |i: usize| Some((RESERVED_SERVICE, RESERVED_NAMES[i]));
+    assert_eq!(refused(ProductRoutes::new().add_service(Named::<0>)), reserved(0), "Describe");
+    assert_eq!(refused(ProductRoutes::new().add_service(Named::<1>)), reserved(1), "the Health twin");
+    assert_eq!(refused(ProductRoutes::new().add_service(Named::<2>)), reserved(2), "Lifecycle");
+    let once = ProductRoutes::new().add_service(Product).expect("once");
+    assert_eq!(refused(once.add_service(Product)), Some((SERVICE_NAMED_TWICE, "test.v1.Product")));
 }
