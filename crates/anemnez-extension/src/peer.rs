@@ -15,6 +15,15 @@
 pub const CONTROL_IS_FABRICD_ONLY: &str = "control-is-fabricd-only";
 /// A peer whose code identity couldn't be read, refused by name wherever a policy needs it.
 pub const CODE_UNREADABLE: &str = "peer's code identity unreadable";
+/// A call on a connection that was not judged at accept (it bypassed `product::planes`), refused by name:
+/// an unjudged peer is never served as an ordinary caller (CONTRACT.md §8; D m/13648).
+pub const NOT_JUDGED: &str = "connection not judged at accept";
+/// A functional call from fabricd's peer, refused by name: fabricd reads `Describe` only on the API plane
+/// (CONTRACT.md `fabricd-dials-the-api-plane-for-describe-only`).
+pub const FABRICD_READS_DESCRIBE_ONLY: &str = "fabricd-reads-describe-only";
+/// A call carrying a caller's stamp from a peer that is not Agora, refused by name: a stamp is believed only
+/// from Agora's peer (CONTRACT.md §8.1, `every-api-call-has-a-principal`).
+pub const STAMP_NOT_FROM_AGORA: &str = "stamp-not-from-agora";
 
 /// A process's code identity from its **verified** signature: what the trust table judges. It is set only from a
 /// signature whose validity was checked (as anemnez-secret's identity read does), never from an identifier or team

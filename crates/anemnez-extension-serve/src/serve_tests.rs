@@ -234,6 +234,33 @@ async fn events_channel(
     (channel_to(socket).await, dir)
 }
 
+/// A connection a test server can serve: what `serve_with_incoming` takes.
+pub(crate) trait Conn:
+    tokio::io::AsyncRead + tokio::io::AsyncWrite + tonic::transport::server::Connected + Unpin + Send + 'static
+{
+}
+impl<T> Conn for T where
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + tonic::transport::server::Connected + Unpin + Send + 'static
+{
+}
+
+/// A new socket in a temp dir and its accepted connections, each made by `wrap` (an `Accepted` for a judged one),
+/// for a test server's `serve_with_incoming`. Answers the dir (keep it alive), the socket's path and the stream.
+pub(crate) fn listen_as<F, S>(
+    wrap: F,
+) -> (tempfile::TempDir, std::path::PathBuf, impl futures_util::Stream<Item = std::io::Result<S>> + Send + 'static)
+where
+    F: Fn(tokio::net::UnixStream) -> S + Send + 'static,
+    S: Conn,
+{
+    use futures_util::StreamExt as _;
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let socket = dir.path().join("api.sock");
+    let listener = tokio::net::UnixListener::bind(&socket).expect("binds");
+    let incoming = tokio_stream::wrappers::UnixListenerStream::new(listener).map(move |accepted| accepted.map(&wrap));
+    (dir, socket, incoming)
+}
+
 /// A channel to a server listening on the Unix socket at `socket`.
 pub(crate) async fn channel_to(socket: std::path::PathBuf) -> tonic::transport::Channel {
     tonic::transport::Endpoint::from_static("http://[::]:50051")
