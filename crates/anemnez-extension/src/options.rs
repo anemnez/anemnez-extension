@@ -36,6 +36,43 @@ pub enum Permission {
     Deny,
 }
 
+impl Presence {
+    /// Its number in the options proto's `Presence` (the decoder in `descriptor` reads the same numbers back).
+    #[must_use]
+    pub fn wire(self) -> i32 {
+        match self {
+            Presence::Full => 1,
+            Presence::Minimal => 2,
+            Presence::Index => 3,
+            Presence::Hidden => 4,
+        }
+    }
+
+    /// The `Presence` numbered `n` in the options proto, or `None` (unspecified, or a number this build doesn't know).
+    #[must_use]
+    pub fn from_wire(n: i32) -> Option<Presence> {
+        [Presence::Full, Presence::Minimal, Presence::Index, Presence::Hidden].into_iter().find(|p| p.wire() == n)
+    }
+}
+
+impl Permission {
+    /// Its number in the options proto's `Permission`.
+    #[must_use]
+    pub fn wire(self) -> i32 {
+        match self {
+            Permission::Allow => 1,
+            Permission::Ask => 2,
+            Permission::Deny => 3,
+        }
+    }
+
+    /// The `Permission` numbered `n` in the options proto, or `None`.
+    #[must_use]
+    pub fn from_wire(n: i32) -> Option<Permission> {
+        [Permission::Allow, Permission::Ask, Permission::Deny].into_iter().find(|p| p.wire() == n)
+    }
+}
+
 /// Who may call a method. Only `Agent` methods get an agent face (Lua, MCP).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]

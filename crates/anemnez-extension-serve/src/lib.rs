@@ -45,6 +45,8 @@ pub mod pb {
 #[cfg(test)]
 mod accepted_tests;
 #[cfg(test)]
+mod describe_tests;
+#[cfg(test)]
 mod edge_tests;
 #[cfg(test)]
 mod plane_tests;

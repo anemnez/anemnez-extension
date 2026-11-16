@@ -122,10 +122,29 @@ fn the_describe_reply_is_the_protos() {
         .into_iter()
         .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
         .collect();
-    assert_eq!(fields, ["bytes file_descriptor_set", "string digest"]);
+    assert_eq!(fields, ["bytes file_descriptor_set", "string digest", "repeated MethodShown shown"]);
     let reply = crate::describe::reply(vec![7]);
     let bytes = reply.to_bytes();
     assert_eq!((bytes[0], bytes[3]), (0x0a, 0x12), "file_descriptor_set is 1, digest is 2");
+}
+
+/// `describe::MethodShown`, its `seen` oneof and `Shown` are the proto's, field for field and number for number;
+/// `Hidden` is empty in both. (The numbers themselves are held on the wire by describe's own row.)
+#[test]
+fn the_method_shown_messages_are_the_protos() {
+    let fields = |message: &str| -> Vec<String> {
+        assignments(protos::OPTIONS, "message", message)
+            .into_iter()
+            .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
+            .collect()
+    };
+    assert_eq!(fields("MethodShown"), ["string path", "Hidden hidden", "Shown shown"], "to the oneof's end");
+    assert_eq!(fields("Shown"), ["Presence presence", "Permission permission"]);
+    assert!(fields("Hidden").is_empty());
+    let proto = protos::OPTIONS;
+    let method = &proto[proto.find("message MethodShown {").expect("MethodShown")..];
+    let why = method.lines().find(|l| l.contains("string why")).expect("why is in MethodShown");
+    assert_eq!(why.trim(), "string why = 4;");
 }
 
 /// `describe::CallRequest` and `CallReply` are the proto's messages, each one bytes field numbered 1.

@@ -393,25 +393,14 @@ fn parse(raw: &wire::MethodOptions) -> Parsed {
         3 => Some(Callers::Owner),
         _ => None,
     };
-    let permission = match raw.permission {
-        1 => Some(Permission::Allow),
-        2 => Some(Permission::Ask),
-        3 => Some(Permission::Deny),
-        _ => None,
-    };
+    let permission = Permission::from_wire(raw.permission);
     let effect = match raw.effect {
         1 => Some(Effect::Read),
         2 => Some(Effect::Write),
         3 => Some(Effect::Act),
         _ => None,
     };
-    let presence = match raw.presence {
-        1 => Some(Presence::Full),
-        2 => Some(Presence::Minimal),
-        3 => Some(Presence::Index),
-        4 => Some(Presence::Hidden),
-        _ => None,
-    };
+    let presence = Presence::from_wire(raw.presence);
     let session = match raw.session {
         1 => Some(Session::Opens),
         2 => Some(Session::Within),

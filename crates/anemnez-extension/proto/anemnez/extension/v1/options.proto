@@ -170,6 +170,32 @@ message DescribeRequest {}
 message DescribeReply {
   // The extension's FileDescriptorSet, encoded.
   bytes file_descriptor_set = 1;
-  // Its SHA-256, so a caller re-fetches only when it changes.
+  // Its SHA-256, so a caller re-fetches only when it changes. Caller-independent: `shown` is not in it.
   string digest = 2;
+  // What THIS caller is shown of each offered method, from the product's own engine (CONTRACT.md
+  // describe-answers-per-caller). Empty means the product doesn't answer per caller: read the descriptor's
+  // own defaults. fabricd, which has no principal, always gets it empty.
+  repeated MethodShown shown = 3;
+}
+
+// One offered method as one caller sees it.
+message MethodShown {
+  // Its gRPC path, /<package>.<Service>/<Method>.
+  string path = 1;
+  // Absent reads as hidden: an entry that says nothing shows nothing.
+  oneof seen {
+    Hidden hidden = 2;
+    Shown shown = 3;
+  }
+  // Why, in the product's words: the grant that covers it, or why it is refused.
+  string why = 4;
+}
+
+// Not offered to this caller.
+message Hidden {}
+
+// Offered to this caller, listed with this presence, and answered with this permission.
+message Shown {
+  Presence presence = 1;
+  Permission permission = 2;
 }
