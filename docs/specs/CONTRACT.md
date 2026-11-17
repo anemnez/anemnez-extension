@@ -232,7 +232,18 @@ decode, so a re-encoding would refuse every newer caller the day a message gaine
 compressed frame, or a method served without the layer, is refused `malformed`. Token refusals keep their names as the status message:
 `not-for-you`, `unknown-key`, `expired` and `not-yet-valid`, which a caller may retry with a fresh
 token, are UNAUTHENTICATED; `call-mismatch`, `bad-signature`, `unattested` and `replay`, which are
-never retried, are PERMISSION_DENIED; `malformed` is INVALID_ARGUMENT.
+never retried, are PERMISSION_DENIED; `malformed` is INVALID_ARGUMENT; `lookup-unanswered` is UNAVAILABLE.
+
+<!-- claim: a-verifiers-waits-are-bounded -->
+**A verifier's two waits are bounded** (D m/15580, rule 4). The issuer's keys (`Keys::record`) are waited
+on for at most `principal::KEYS_WITHIN_MS` and the nonce's durable record (`Nonces::record`) for at most
+`NONCE_WITHIN_MS`, on the handed clock. Their sum is under one second, the smallest Ask bound a descriptor may
+state, so every per-call bound a product wraps around a verify is longer. A wait past its bound is Unclear,
+never admitted: refused `lookup-unanswered` under UNAVAILABLE, the `Refusal` saying which wait (`keys` or
+`nonce`). Only the wait is bounded, never the write: the nonce's record runs to its end on a task of its own,
+and the store keeps its one writer. So a nonce written past the bound still lands, and `lookup-unanswered` is
+retried only with a **fresh token**, never by re-sending the old one, which would meet `replay` for its own
+write (rule 5). `Refusal` is non-exhaustive, so a refusal added later never breaks a reader.
 
 <!-- claim: the-verifier-applies-retired-versus-revoked -->
 **The verifier, not the product, picks the key** (B, D, 2026-11-07; PRINCIPAL_TOKEN §2). `Keys`

@@ -20,7 +20,9 @@ use std::time::Duration;
 use anemnez_clock::{Clock, Mono};
 
 use crate::digest::RequestDigest;
-use anemnez_extension::principal::{self, Claims, Expect, MAX_TTL_MS, Refusal, SKEW_MS, Token};
+use anemnez_extension::principal::{
+    self, Claims, Expect, KEYS_WITHIN_MS, Lookup, MAX_TTL_MS, NONCE_WITHIN_MS, Refusal, SKEW_MS, Token,
+};
 
 /// The issuer's record and step 5's rule live in the kernel (D, 2026-11-07); re-exported here so
 /// nothing moves for this crate's users.
@@ -164,7 +166,13 @@ impl Verifier {
         let now_ms = self.clock.now_wall().unix_millis();
         parsed.admit(&Expect { audience: &self.audience, method, body, now_ms })?;
         let claims = &parsed.claims;
-        let record = self.keys.record(&claims.issuer).await?;
+        // Each wait is bounded on the handed clock (rule 4; D m/15580): an issuer's keys that don't answer are
+        // Unclear, refused by name, never admitted.
+        let lookup = self.keys.record(&claims.issuer);
+        let record = match self.clock.timeout(Duration::from_millis(KEYS_WITHIN_MS), lookup).await {
+            Ok(record) => record?,
+            Err(_) => return Err(Refusal::LookupUnanswered(Lookup::Keys)),
+        };
         if record.issuer != claims.issuer {
             return Err(Refusal::Unattested);
         }
@@ -172,7 +180,18 @@ impl Verifier {
         // Held for MAX_TTL + SKEW past its issue, the sum of the two named constants, so changing
         // either can never open a replay window.
         let hold = i64::try_from(MAX_TTL_MS + SKEW_MS).unwrap_or(i64::MAX);
-        self.nonces.record(&claims.issuer, claims.nonce, as_i64(claims.issued_ms).saturating_add(hold)).await?;
+        // Bound the wait, never the write: the record runs to its end on a task of its own, so a nonce written past
+        // the bound still lands, and the token, refused as Unclear, is retried only fresh (D m/15580).
+        let nonces = Arc::clone(&self.nonces);
+        let (issuer, nonce, until) =
+            (claims.issuer.clone(), claims.nonce, as_i64(claims.issued_ms).saturating_add(hold));
+        let write = tokio::spawn(async move { nonces.record(&issuer, nonce, until).await });
+        match self.clock.timeout(Duration::from_millis(NONCE_WITHIN_MS), write).await {
+            Ok(Ok(recorded)) => recorded?,
+            // The write's task ended without answering (a panic): unrecorded, so never admitted.
+            Ok(Err(_)) => return Err(Refusal::Replay),
+            Err(_) => return Err(Refusal::LookupUnanswered(Lookup::Nonce)),
+        }
         let left = as_i64(claims.expires_ms).saturating_sub(now_ms).max(0);
         Ok(Admitted {
             claims: parsed.claims.clone(),
@@ -190,7 +209,7 @@ impl Verifier {
     pub async fn check_grpc<M>(&self, method: &str, request: &tonic::Request<M>) -> Result<Option<Admitted>, Refusal> {
         // Absent means no header at all: one that is present but unreadable is a token, and is refused malformed
         // below, never admitted as absent (rule 5; K's Themis `value` no, 2026-11-17).
-        if !request.metadata().contains_key(principal::GRPC_METADATA_KEY) && self.keys.admit_absent().await {
+        if matches!(carried(request), Carried::Absent) && self.keys.admit_absent().await {
             let now = self.clock.now_wall().unix_millis();
             let mut absent = self.absent.lock().unwrap_or_else(PoisonError::into_inner);
             let seen = absent.entry(method.to_owned()).or_insert(Absent { count: 0, last_ms: now });
@@ -217,11 +236,10 @@ impl Verifier {
     /// # Errors
     /// The step's [`Refusal`] ([`status`] makes it a gRPC status).
     pub async fn verify_grpc<M>(&self, method: &str, request: &tonic::Request<M>) -> Result<Admitted, Refusal> {
-        let token = match request.metadata().get(principal::GRPC_METADATA_KEY) {
-            None => return Err(Refusal::Malformed("no principal token".into())),
-            Some(value) => {
-                value.to_str().map_err(|_| Refusal::Malformed("the principal token isn't visible ASCII".into()))?
-            }
+        let token = match carried(request) {
+            Carried::Absent => return Err(Refusal::Malformed("no principal token".into())),
+            Carried::Unreadable => return Err(Refusal::Malformed("the principal token isn't visible ASCII".into())),
+            Carried::Token(token) => token,
         };
         let RequestDigest(body) = *request.extensions().get::<RequestDigest>().ok_or_else(|| {
             Refusal::Malformed("no request digest: serve the method through DigestLayer, uncompressed".into())
@@ -230,20 +248,35 @@ impl Verifier {
     }
 }
 
-/// The principal token a gRPC call carries, if any, as text: `None` both when it carries none and when its header
-/// isn't visible ASCII. So `None` never decides that a call is unauthenticated: [`Verifier::check_grpc`] alone
-/// decides absence, by the header's presence, and refuses an unreadable one `malformed`. Use this only to read
-/// a token already checked (a digest to log or echo).
-pub fn token_of<M>(request: &tonic::Request<M>) -> Option<&str> {
-    request.metadata().get(principal::GRPC_METADATA_KEY).and_then(|v| v.to_str().ok())
+/// What a gRPC call carries under the `anemnez-principal` key: three states, so no reader can take an unreadable
+/// header for an absent one (E m/15582).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Carried<'a> {
+    /// No header at all: the only call the rollout rule may admit.
+    Absent,
+    /// A header that isn't visible ASCII: a token, refused `malformed`.
+    Unreadable,
+    /// A token, as text.
+    Token(&'a str),
 }
 
-/// A token refusal as a gRPC status: the refusal's name is the message. The four a caller may retry
-/// with a fresh token are UNAUTHENTICATED; the four that mean the token was altered or reused are
-/// PERMISSION_DENIED; a malformed one is INVALID_ARGUMENT.
+/// What `request` carries under the `anemnez-principal` key. [`Verifier::check_grpc`] decides on it; a product reads
+/// it only to log or echo a token already checked.
+pub fn carried<M>(request: &tonic::Request<M>) -> Carried<'_> {
+    match request.metadata().get(principal::GRPC_METADATA_KEY) {
+        None => Carried::Absent,
+        Some(value) => value.to_str().map_or(Carried::Unreadable, Carried::Token),
+    }
+}
+
+/// A token refusal as a gRPC status: the refusal's name is the message. A lookup that didn't answer is
+/// UNAVAILABLE (Unclear: retried with a fresh token); the four others a caller may retry with a fresh token are
+/// UNAUTHENTICATED; the four that mean the token was altered or reused are PERMISSION_DENIED; a malformed one is
+/// INVALID_ARGUMENT.
 pub fn status(refusal: &Refusal) -> tonic::Status {
     let code = match refusal {
         Refusal::Malformed(_) => tonic::Code::InvalidArgument,
+        Refusal::LookupUnanswered(_) => tonic::Code::Unavailable,
         r if r.retryable() => tonic::Code::Unauthenticated,
         _ => tonic::Code::PermissionDenied,
     };
