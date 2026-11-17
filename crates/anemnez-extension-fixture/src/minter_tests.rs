@@ -65,3 +65,24 @@ async fn a_revoked_key_refuses_every_token_and_a_retired_one_only_later_tokens()
     minter.keys().revoke(now);
     assert_eq!(verifier.verify(&backdated, METHOD, &body).await.map(|_| ()), Err(Refusal::UnknownKey));
 }
+
+#[tokio::test]
+async fn retirement_is_drawn_at_exactly_retired_at_ms() {
+    let (manual, minter, verifier) = setup();
+    let body = anemnez_extension::principal::grpc_body(BODY);
+    let at = now_ms(&manual) - SKEW_MS;
+    let just_before = minter.mint(SUBJECT, AUDIENCE, METHOD, BODY, at - 1);
+    let exactly = minter.mint(SUBJECT, AUDIENCE, METHOD, BODY, at);
+    minter.keys().retire(at);
+    assert!(verifier.verify(&just_before, METHOD, &body).await.is_ok(), "issued 1 ms before the retirement");
+    assert_eq!(verifier.verify(&exactly, METHOD, &body).await.map(|_| ()), Err(Refusal::UnknownKey));
+}
+
+#[tokio::test]
+async fn a_call_with_no_token_is_admitted_only_while_the_switch_says_so() {
+    let (_manual, minter, verifier) = setup();
+    let refused = verifier.check_grpc(METHOD, &tonic::Request::new(())).await;
+    assert!(refused.is_err(), "no token, no admission: {refused:?}");
+    minter.keys().set_admit_absent(true);
+    assert!(matches!(verifier.check_grpc(METHOD, &tonic::Request::new(())).await, Ok(None)), "admitted with no token");
+}

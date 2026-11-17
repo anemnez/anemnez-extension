@@ -10,7 +10,7 @@
 //! minter.keys().revoke(now_ms); // every token of the key is refused `unknown-key` from here
 //! ```
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use anemnez_extension::principal::{self, Claims, KeyRecord, MAX_TTL_MS, PublishedKey, Refusal};
@@ -43,7 +43,11 @@ impl TestMinter {
             retired_at_ms: None,
             revoked_at_ms: None,
         };
-        let keys = Arc::new(TestKeys { issuer: issuer.clone(), key: Mutex::new(published), absent_admitted: false });
+        let keys = Arc::new(TestKeys {
+            issuer: issuer.clone(),
+            key: Mutex::new(published),
+            absent_admitted: AtomicBool::new(false),
+        });
         TestMinter { issuer, seed, nonces: AtomicU64::new(1), keys }
     }
 
@@ -114,7 +118,7 @@ impl TestMinter {
 pub struct TestKeys {
     issuer: String,
     key: Mutex<PublishedKey>,
-    absent_admitted: bool,
+    absent_admitted: AtomicBool,
 }
 
 impl TestKeys {
@@ -125,6 +129,12 @@ impl TestKeys {
     /// A person revoked the key at `at_ms`: every token of it is refused, whatever its `issued_ms`.
     pub fn revoke(&self, at_ms: u64) {
         self.key.lock().unwrap_or_else(PoisonError::into_inner).revoked_at_ms = Some(at_ms);
+    }
+
+    /// Whether a call with no token is admitted (the rollout rule, [`Keys::admit_absent`]): false until set,
+    /// so a product can prove both its no-token paths.
+    pub fn set_admit_absent(&self, admitted: bool) {
+        self.absent_admitted.store(admitted, Ordering::Relaxed);
     }
 
     /// The key was rotated out at `at_ms`: a token issued before it still verifies.
@@ -143,6 +153,6 @@ impl Keys for TestKeys {
     }
 
     async fn admit_absent(&self) -> bool {
-        self.absent_admitted
+        self.absent_admitted.load(Ordering::Relaxed)
     }
 }
