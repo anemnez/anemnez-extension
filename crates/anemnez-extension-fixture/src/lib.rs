@@ -221,7 +221,11 @@ struct Fixture {
 /// The reply, with the caller's token's digest in its metadata when it carried one.
 fn reply<Req, Rep>(request: &tonic::Request<Req>, message: Rep) -> tonic::Response<Rep> {
     let mut response = tonic::Response::new(message);
-    let token = anemnez_extension_serve::principal::token_of(request);
+    use anemnez_extension_serve::principal::{Carried, carried};
+    let token = match carried(request) {
+        Carried::Token(token) => Some(token),
+        _ => None,
+    };
     if let Some(digest) = token.map(Token::digest).and_then(|d| d.parse().ok()) {
         response.metadata_mut().insert(DIGEST_KEY, digest);
     }

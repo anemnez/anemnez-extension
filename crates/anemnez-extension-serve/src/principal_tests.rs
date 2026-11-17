@@ -328,3 +328,95 @@ async fn the_interim_lookup_refuses_a_token_and_admits_its_absence() {
     assert_eq!(refused.err(), Some(Refusal::UnknownKey));
     assert!(crate::Unpublished.admit_absent().await, "the rollout rule admits a call without a token");
 }
+
+/// Keys whose lookup never answers.
+struct Silent;
+
+#[tonic::async_trait]
+impl Keys for Silent {
+    async fn record(&self, _issuer: &str) -> Result<crate::KeyRecord, Refusal> {
+        std::future::pending().await
+    }
+
+    async fn admit_absent(&self) -> bool {
+        true
+    }
+}
+
+/// A nonce store whose write is held until the test lets it go, then records: the write runs to its end.
+struct Held {
+    release: tokio::sync::Mutex<Option<oneshot::Receiver<()>>>,
+    recorded: Arc<std::sync::atomic::AtomicBool>,
+}
+
+#[tonic::async_trait]
+impl Nonces for Held {
+    async fn record(&self, _issuer: &str, _nonce: [u8; 16], _until_ms: i64) -> Result<(), Refusal> {
+        if let Some(release) = self.release.lock().await.take() {
+            let _ = release.await;
+        }
+        self.recorded.store(true, std::sync::atomic::Ordering::SeqCst);
+        Ok(())
+    }
+}
+
+/// D m/15580 (rule 4): an issuer's keys that never answer are refused `lookup-unanswered` (keys) at
+/// KEYS_WITHIN_MS on the handed clock, UNAVAILABLE, and the call is never admitted.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_keys_lookup_that_never_answers_is_refused_lookup_unanswered() {
+    use anemnez_extension::principal::{KEYS_WITHIN_MS, Lookup};
+    let manual = ManualClock::new();
+    let clock = manual.clock();
+    let silent = Verifier::new(AUDIENCE, clock.clone(), Arc::new(Silent), Arc::new(MemoryNonces::new(clock)));
+    let token = mint(&manual, METHOD, [1; 32], 60, 1);
+    let started = manual.clock().now_mono();
+    let verify = silent.verify(&token, METHOD, &[1; 32]);
+    let (refused, fired) = manual.run_until(verify, Duration::from_secs(10)).await.expect("answered at its bound");
+    assert_eq!(refused.expect_err("never admitted"), Refusal::LookupUnanswered(Lookup::Keys));
+    assert_eq!(fired, [started + Duration::from_millis(KEYS_WITHIN_MS)], "the lookup's bound, and only it");
+    let status = status(&Refusal::LookupUnanswered(Lookup::Keys));
+    assert_eq!((status.code(), status.message()), (tonic::Code::Unavailable, "lookup-unanswered"));
+}
+
+/// D m/15580 (rules 4 and 5): a nonce write held past NONCE_WITHIN_MS is refused `lookup-unanswered` (nonce), never
+/// admitted, and the write itself runs to its end once let go: only the wait is bounded.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_nonce_write_held_past_its_bound_is_refused_and_still_lands() {
+    use anemnez_extension::principal::{Lookup, NONCE_WITHIN_MS};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let manual = ManualClock::new();
+    let clock = manual.clock();
+    let (let_go, release) = oneshot::channel();
+    let recorded = Arc::new(AtomicBool::new(false));
+    let held = Held { release: tokio::sync::Mutex::new(Some(release)), recorded: Arc::clone(&recorded) };
+    let keys = Arc::new(OneKey { absent_admitted: false, extra: Vec::new() });
+    let verifier = Verifier::new(AUDIENCE, clock, keys, Arc::new(held));
+    let token = mint(&manual, METHOD, [1; 32], 60, 2);
+    let started = manual.clock().now_mono();
+    let verify = verifier.verify(&token, METHOD, &[1; 32]);
+    let (refused, fired) = manual.run_until(verify, Duration::from_secs(10)).await.expect("answered at its bound");
+    assert_eq!(fired, [started + Duration::from_millis(NONCE_WITHIN_MS)], "the nonce wait's bound, and only it");
+    assert_eq!(refused.expect_err("never admitted"), Refusal::LookupUnanswered(Lookup::Nonce));
+    assert!(!recorded.load(Ordering::SeqCst), "still held when the caller was answered");
+    let_go.send(()).expect("the write is still waiting");
+    for _ in 0..100_000 {
+        if recorded.load(Ordering::SeqCst) {
+            return;
+        }
+        tokio::task::yield_now().await;
+    }
+    panic!("the write never ran to its end once let go");
+}
+
+/// E m/15582: what a call carries is three states, so an unreadable header is never read as absent.
+#[test]
+fn a_call_carries_a_token_nothing_or_something_unreadable() {
+    use crate::principal::{Carried, carried};
+    let mut request = tonic::Request::new(crate::pb::EventsRequest::default());
+    assert_eq!(carried(&request), Carried::Absent);
+    request.metadata_mut().insert(principal::GRPC_METADATA_KEY, "tok".parse().expect("ascii"));
+    assert_eq!(carried(&request), Carried::Token("tok"));
+    let value = tonic::metadata::MetadataValue::try_from(&b"tok\xffen"[..]).expect("an opaque header value");
+    request.metadata_mut().insert(principal::GRPC_METADATA_KEY, value);
+    assert_eq!(carried(&request), Carried::Unreadable);
+}

@@ -24,6 +24,16 @@ pub const SKEW_MS: u64 = 30_000;
 /// The longest a principal token may live: `expires_ms - issued_ms` never exceeds it.
 pub const MAX_TTL_MS: u64 = 300_000;
 
+/// How long a verifier waits for an issuer's published keys before refusing [`Refusal::LookupUnanswered`]
+/// (D m/15580). With [`NONCE_WITHIN_MS`], it sits inside the shortest per-call bound a product wraps around a
+/// verify: their sum is under one second, the smallest Ask bound a descriptor may state.
+pub const KEYS_WITHIN_MS: u64 = 400;
+
+/// How long a verifier waits for the durable record of a token's nonce before refusing
+/// [`Refusal::LookupUnanswered`]. Only the wait is bounded: the write runs to its end, so a token refused this way
+/// may still be recorded, and is retried only as a fresh token, never re-sent (rule 5).
+pub const NONCE_WITHIN_MS: u64 = 400;
+
 /// The signed message's domain string: a token's signature is never anything else's.
 pub const DOMAIN: &str = "anemnez-principal/1";
 
@@ -67,8 +77,9 @@ pub struct Token {
 }
 
 /// Why a token was refused: one name per step of PRINCIPAL_TOKEN §4, the refusal naming the
-/// reason, never the token.
+/// reason, never the token. Non-exhaustive, so a refusal added later never breaks a reader outside this crate.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Refusal {
     /// 1. Too long, wrong version, a field missing or of the wrong length.
     Malformed(String),
@@ -88,6 +99,30 @@ pub enum Refusal {
     BadSignature,
     /// 8. This `(issuer, nonce)` was accepted before (the product's durable set).
     Replay,
+    /// 5 or 8. A lookup the verifier waits on didn't answer within its bound ([`KEYS_WITHIN_MS`],
+    /// [`NONCE_WITHIN_MS`]): Unclear, never admitted. Retried only with a fresh token, since the nonce's write
+    /// may still land and the same token would meet `replay` for its own write (D m/15580).
+    LookupUnanswered(Lookup),
+}
+
+/// Which of a verifier's waits didn't answer, said under the one name `lookup-unanswered`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lookup {
+    /// The issuer's published keys (step 5).
+    Keys,
+    /// The durable record of the token's nonce (step 8).
+    Nonce,
+}
+
+impl Lookup {
+    /// Its name in a refusal's detail.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Keys => "keys",
+            Self::Nonce => "nonce",
+        }
+    }
 }
 
 impl Refusal {
@@ -104,6 +139,7 @@ impl Refusal {
             Self::Unattested => "unattested",
             Self::BadSignature => "bad-signature",
             Self::Replay => "replay",
+            Self::LookupUnanswered(_) => "lookup-unanswered",
         }
     }
 
@@ -111,7 +147,10 @@ impl Refusal {
     /// nothing about the token was altered or reused (PRINCIPAL_TOKEN §4).
     #[must_use]
     pub const fn retryable(&self) -> bool {
-        matches!(self, Self::NotForYou | Self::UnknownKey | Self::Expired | Self::NotYetValid)
+        matches!(
+            self,
+            Self::NotForYou | Self::UnknownKey | Self::Expired | Self::NotYetValid | Self::LookupUnanswered(_)
+        )
     }
 }
 
@@ -119,6 +158,7 @@ impl std::fmt::Display for Refusal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Malformed(why) => write!(f, "malformed: {why}"),
+            Self::LookupUnanswered(lookup) => write!(f, "lookup-unanswered: {}", lookup.name()),
             other => f.write_str(other.name()),
         }
     }
@@ -419,6 +459,15 @@ mod tests {
     fn the_token_windows_are_the_specs() {
         assert_eq!((SKEW_MS, MAX_TTL_MS), (30_000, 300_000));
         const { assert!(SKEW_MS * 4 < MAX_TTL_MS) };
+    }
+
+    /// D m/15580 (rule 4, nested bounds): a verifier's two waits together sit inside the smallest Ask bound a
+    /// descriptor may state (one second), so no per-call bound a product wraps around a verify is shorter.
+    #[test]
+    fn a_verifiers_waits_sit_inside_the_smallest_ask_bound() {
+        const SMALLEST_ASK_MS: u64 = 1_000;
+        const { assert!(KEYS_WITHIN_MS + NONCE_WITHIN_MS < SMALLEST_ASK_MS) };
+        const { assert!(KEYS_WITHIN_MS > 0 && NONCE_WITHIN_MS > 0) };
     }
 
     #[test]

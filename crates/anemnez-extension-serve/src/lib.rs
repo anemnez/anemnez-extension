@@ -33,7 +33,8 @@ pub use health::Board;
 pub use journal::{EventsService, Journal, Refusal, Subscription};
 pub use plane::{ApiPlaneLayer, api_admits};
 pub use principal::{
-    Absent, Admitted, KeyRecord, Keys, MemoryNonces, Nonces, PublishedKey, UNPUBLISHED, Unpublished, Verifier,
+    Absent, Admitted, Carried, KeyRecord, Keys, MemoryNonces, Nonces, PublishedKey, UNPUBLISHED, Unpublished, Verifier,
+    carried,
 };
 pub use serve::{ApiFaces, ProductRoutes, Refused, Stop, Stopped, serve};
 
