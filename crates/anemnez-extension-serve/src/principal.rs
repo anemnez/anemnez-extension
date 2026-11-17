@@ -133,6 +133,24 @@ pub struct Verifier {
     keys: Arc<dyn Keys>,
     nonces: Arc<dyn Nonces>,
     absent: Arc<Mutex<HashMap<String, Absent>>>,
+    /// Places for nonce writes still running, past their waits too ([`NONCE_WRITES_AT_MOST`]).
+    writes: Arc<tokio::sync::Semaphore>,
+    unanswered: Arc<Mutex<std::collections::BTreeMap<Lookup, Unanswered>>>,
+}
+
+/// How many nonce writes may run at once, a write past its wait included. Past it a token is refused
+/// `lookup-unanswered` (`nonce-writes-held`) at once, so a stalled disk becomes refusals, never a pile of tasks
+/// (E m/15590).
+pub const NONCE_WRITES_AT_MOST: usize = 64;
+
+/// Lookups of one kind that didn't answer: what Health and a product's doctor name beside
+/// [`Verifier::absent_calls`], so bounds too tight for a real swarm show up and are raised by measure (D m/15589).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Unanswered {
+    /// How many.
+    pub count: u64,
+    /// The newest, Unix milliseconds.
+    pub last_ms: i64,
 }
 
 /// Calls to one method admitted without a token, under the rollout rule: what Health and a
@@ -148,7 +166,15 @@ pub struct Absent {
 impl Verifier {
     /// A verifier for `audience` (`<contract>@<major>/<instance id>`), reading time from `clock`.
     pub fn new(audience: impl Into<String>, clock: Clock, keys: Arc<dyn Keys>, nonces: Arc<dyn Nonces>) -> Verifier {
-        Verifier { audience: audience.into(), clock, keys, nonces, absent: Arc::default() }
+        Verifier {
+            audience: audience.into(),
+            clock,
+            keys,
+            nonces,
+            absent: Arc::default(),
+            writes: Arc::new(tokio::sync::Semaphore::new(NONCE_WRITES_AT_MOST)),
+            unanswered: Arc::default(),
+        }
     }
 
     /// The clock the verifier reads.
@@ -162,6 +188,28 @@ impl Verifier {
     /// # Errors
     /// The first step's [`Refusal`].
     pub async fn verify(&self, token: &str, method: &str, body: &[u8; 32]) -> Result<Admitted, Refusal> {
+        let verified = self.ladder(token, method, body).await;
+        if let Err(Refusal::LookupUnanswered(lookup)) = &verified {
+            self.count_unanswered(*lookup);
+        }
+        verified
+    }
+
+    /// Lookups that didn't answer, by kind, with how often and how lately.
+    pub fn unanswered_lookups(&self) -> Vec<(Lookup, Unanswered)> {
+        let unanswered = self.unanswered.lock().unwrap_or_else(PoisonError::into_inner);
+        unanswered.iter().map(|(l, u)| (*l, *u)).collect()
+    }
+
+    fn count_unanswered(&self, lookup: Lookup) {
+        let now = self.clock.now_wall().unix_millis();
+        let mut unanswered = self.unanswered.lock().unwrap_or_else(PoisonError::into_inner);
+        let seen = unanswered.entry(lookup).or_insert(Unanswered { count: 0, last_ms: now });
+        seen.count += 1;
+        seen.last_ms = now;
+    }
+
+    async fn ladder(&self, token: &str, method: &str, body: &[u8; 32]) -> Result<Admitted, Refusal> {
         let parsed = principal::decode(token)?;
         let now_ms = self.clock.now_wall().unix_millis();
         parsed.admit(&Expect { audience: &self.audience, method, body, now_ms })?;
@@ -182,14 +230,23 @@ impl Verifier {
         let hold = i64::try_from(MAX_TTL_MS + SKEW_MS).unwrap_or(i64::MAX);
         // Bound the wait, never the write: the record runs to its end on a task of its own, so a nonce written past
         // the bound still lands, and the token, refused as Unclear, is retried only fresh (D m/15580).
+        // Writes past their waits are capped: a full cap refuses at once, never queues (E m/15590).
+        let Ok(place) = Arc::clone(&self.writes).try_acquire_owned() else {
+            return Err(Refusal::LookupUnanswered(Lookup::NonceWritesHeld));
+        };
         let nonces = Arc::clone(&self.nonces);
         let (issuer, nonce, until) =
             (claims.issuer.clone(), claims.nonce, as_i64(claims.issued_ms).saturating_add(hold));
-        let write = tokio::spawn(async move { nonces.record(&issuer, nonce, until).await });
+        let write = tokio::spawn(async move {
+            let recorded = nonces.record(&issuer, nonce, until).await;
+            drop(place);
+            recorded
+        });
         match self.clock.timeout(Duration::from_millis(NONCE_WITHIN_MS), write).await {
             Ok(Ok(recorded)) => recorded?,
-            // The write's task ended without answering (a panic): unrecorded, so never admitted.
-            Ok(Err(_)) => return Err(Refusal::Replay),
+            // The write's task ended without answering (it panicked or was cancelled): it may have landed partway,
+            // so its outcome is unknown, never a replay (rule 5; E m/15590, D m/15589).
+            Ok(Err(_)) => return Err(Refusal::LookupUnanswered(Lookup::NonceLost)),
             Err(_) => return Err(Refusal::LookupUnanswered(Lookup::Nonce)),
         }
         let left = as_i64(claims.expires_ms).saturating_sub(now_ms).max(0);
@@ -209,7 +266,18 @@ impl Verifier {
     pub async fn check_grpc<M>(&self, method: &str, request: &tonic::Request<M>) -> Result<Option<Admitted>, Refusal> {
         // Absent means no header at all: one that is present but unreadable is a token, and is refused malformed
         // below, never admitted as absent (rule 5; K's Themis `value` no, 2026-11-17).
-        if matches!(carried(request), Carried::Absent) && self.keys.admit_absent().await {
+        // Whether the rollout admits a call with no token is the keys source's answer too, so it is bounded the same:
+        // unanswered, the call isn't admitted, and is refused as Unclear (E m/15590).
+        let admit_absent = || async {
+            match self.clock.timeout(Duration::from_millis(KEYS_WITHIN_MS), self.keys.admit_absent()).await {
+                Ok(admit) => Ok(admit),
+                Err(_) => {
+                    self.count_unanswered(Lookup::Keys);
+                    Err(Refusal::LookupUnanswered(Lookup::Keys))
+                }
+            }
+        };
+        if matches!(carried(request), Carried::Absent) && admit_absent().await? {
             let now = self.clock.now_wall().unix_millis();
             let mut absent = self.absent.lock().unwrap_or_else(PoisonError::into_inner);
             let seen = absent.entry(method.to_owned()).or_insert(Absent { count: 0, last_ms: now });

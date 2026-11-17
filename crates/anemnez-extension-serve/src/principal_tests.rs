@@ -420,3 +420,106 @@ fn a_call_carries_a_token_nothing_or_something_unreadable() {
     request.metadata_mut().insert(principal::GRPC_METADATA_KEY, value);
     assert_eq!(carried(&request), Carried::Unreadable);
 }
+
+/// A nonce store whose record panics.
+struct Panics;
+
+#[tonic::async_trait]
+impl Nonces for Panics {
+    async fn record(&self, _issuer: &str, _nonce: [u8; 16], _until_ms: i64) -> Result<(), Refusal> {
+        panic!("the store's write fell over");
+    }
+}
+
+/// A nonce store whose every write waits for good: a stalled disk.
+struct Stalled;
+
+#[tonic::async_trait]
+impl Nonces for Stalled {
+    async fn record(&self, _issuer: &str, _nonce: [u8; 16], _until_ms: i64) -> Result<(), Refusal> {
+        std::future::pending().await
+    }
+}
+
+fn keyed(manual: &ManualClock, nonces: Arc<dyn Nonces>) -> Verifier {
+    Verifier::new(AUDIENCE, manual.clock(), Arc::new(OneKey { absent_admitted: false, extra: Vec::new() }), nonces)
+}
+
+/// E m/15590 (rule 5): a nonce write whose task panics has an unknown outcome: refused `lookup-unanswered`
+/// (nonce-lost), retried fresh, never `replay`, which would say the token was reused.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_nonce_write_that_panics_is_unanswered_never_replay() {
+    use anemnez_extension::principal::Lookup;
+    let manual = ManualClock::new();
+    let verifier = keyed(&manual, Arc::new(Panics));
+    let token = mint(&manual, METHOD, [1; 32], 60, 3);
+    let (refused, _) =
+        manual.run_until(verifier.verify(&token, METHOD, &[1; 32]), Duration::from_secs(10)).await.expect("answered");
+    let refused = refused.expect_err("never admitted");
+    assert_eq!(refused, Refusal::LookupUnanswered(Lookup::NonceLost));
+    assert_eq!(status(&refused).code(), tonic::Code::Unavailable, "Unclear, never PERMISSION_DENIED");
+    assert_eq!(
+        verifier.unanswered_lookups().iter().map(|(l, u)| (*l, u.count)).collect::<Vec<_>>(),
+        [(Lookup::NonceLost, 1)]
+    );
+}
+
+/// E m/15590: nonce writes still running past their waits are capped. With the cap held by a stalled store, the
+/// next token is refused `lookup-unanswered` (nonce-writes-held) at once, before any wait, and each is counted.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stalled_store_fills_the_write_cap_and_the_next_token_is_refused_at_once() {
+    use crate::principal::NONCE_WRITES_AT_MOST;
+    use anemnez_extension::principal::Lookup;
+    let manual = ManualClock::new();
+    let verifier = keyed(&manual, Arc::new(Stalled));
+    for n in 0..NONCE_WRITES_AT_MOST {
+        let token = mint(&manual, METHOD, [1; 32], 60, u8::try_from(n).expect("under 256"));
+        let (refused, _) = manual
+            .run_until(verifier.verify(&token, METHOD, &[1; 32]), Duration::from_secs(10))
+            .await
+            .expect("answered at its bound");
+        assert_eq!(refused.expect_err("never admitted"), Refusal::LookupUnanswered(Lookup::Nonce));
+    }
+    let token = mint(&manual, METHOD, [1; 32], 60, 200);
+    let (refused, fired) =
+        manual.run_until(verifier.verify(&token, METHOD, &[1; 32]), Duration::from_secs(10)).await.expect("answered");
+    assert_eq!(refused.expect_err("refused"), Refusal::LookupUnanswered(Lookup::NonceWritesHeld));
+    assert!(fired.is_empty(), "refused at once, no wait: {fired:?}");
+    let counted: Vec<_> = verifier.unanswered_lookups().iter().map(|(l, u)| (*l, u.count)).collect();
+    assert_eq!(counted, [(Lookup::Nonce, NONCE_WRITES_AT_MOST as u64), (Lookup::NonceWritesHeld, 1)]);
+}
+
+/// Keys whose rollout answer never comes.
+struct SilentRollout;
+
+#[tonic::async_trait]
+impl Keys for SilentRollout {
+    async fn record(&self, _issuer: &str) -> Result<crate::KeyRecord, Refusal> {
+        Err(Refusal::UnknownKey)
+    }
+
+    async fn admit_absent(&self) -> bool {
+        std::future::pending().await
+    }
+}
+
+/// E m/15590: whether a call with no token may be admitted is the keys source's answer, bounded the same. Unanswered,
+/// the call is refused `lookup-unanswered` (keys), never admitted as absent, and counted.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rollout_answer_that_never_comes_admits_nothing() {
+    use anemnez_extension::principal::{KEYS_WITHIN_MS, Lookup};
+    let manual = ManualClock::new();
+    let clock = manual.clock();
+    let verifier = Verifier::new(AUDIENCE, clock.clone(), Arc::new(SilentRollout), Arc::new(MemoryNonces::new(clock)));
+    let bare = tonic::Request::new(crate::pb::EventsRequest::default());
+    let started = manual.clock().now_mono();
+    let (refused, fired) =
+        manual.run_until(verifier.check_grpc(METHOD, &bare), Duration::from_secs(10)).await.expect("answered");
+    assert_eq!(refused.expect_err("never admitted"), Refusal::LookupUnanswered(Lookup::Keys));
+    assert_eq!(fired, [started + Duration::from_millis(KEYS_WITHIN_MS)]);
+    assert!(verifier.absent_calls().is_empty(), "never counted as admitted without a token");
+    assert_eq!(
+        verifier.unanswered_lookups().iter().map(|(l, u)| (*l, u.count)).collect::<Vec<_>>(),
+        [(Lookup::Keys, 1)]
+    );
+}
