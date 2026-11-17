@@ -261,11 +261,13 @@ A write that fails refuses the batch, never admits it. An acknowledged nonce sur
 child process records one, is answered, and aborts, and the reopened store still refuses it.
 `MemoryNonces` is for tests only.
 
+<!-- claim: the-rollout-rule-admits-only-a-call-with-no-token -->
 **The rollout rule** (PRINCIPAL_TOKEN §3, B and D, for every product). A call carrying no token is
 admitted only while `Keys::admit_absent` says so, which holds while some Substrate instance in the
 swarm has no `fabric.principals` record yet. The default is `false`. Each such call is counted by
 method (`Verifier::absent_calls`), for Health and a product's doctor to name. A token that is
-present is always checked in full.
+present is always checked in full. Absent means no `anemnez-principal` header at all: one that is present but
+isn't visible ASCII is a token, refused `malformed`, never read as absent (K, 2026-11-17).
 
 **The refusals reach a caller by name.** A refusal's name is the gRPC status message, under the
 nearest code: `cursor-not-mine` FAILED_PRECONDITION, `out-of-range` OUT_OF_RANGE, `data-loss`
