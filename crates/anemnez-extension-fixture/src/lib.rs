@@ -37,6 +37,9 @@ pub mod pb {
     tonic::include_proto!("anemnez.fixture.v1");
 }
 
+pub mod minter;
+pub use minter::{TestKeys, TestMinter};
+
 /// The reply metadata key carrying the caller's principal token's digest.
 pub const DIGEST_KEY: &str = "anemnez-principal-digest";
 
@@ -300,3 +303,5 @@ impl pb::fixture_server::Fixture for Fixture {
 
 #[cfg(test)]
 mod fixture_tests;
+#[cfg(test)]
+mod minter_tests;
