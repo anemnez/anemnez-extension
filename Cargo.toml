@@ -22,9 +22,13 @@ serde_json = "1"
 # The serving face (crates/anemnez-extension-serve): the gRPC stack matches Substrate's and
 # anemnez-service's (tonic 0.12 / prost 0.13), so a product pulls in no second copy.
 anemnez-extension = { path = "crates/anemnez-extension", version = "0.7.18", registry = "artichoke" }
-anemnez-clock = { version = "0.1.4", registry = "artichoke" }
+# The one clock, in the dual form at the rev every git-built closure shares (D m/16149: one crate, one source,
+# one rev; M m/16161): 3ed93558f1b7, as the SDK and hydramq pin it, so cargo builds one copy. The version is loose
+# ("0.1") because the git tree says 0.1.0; Herald rewrites it to the release at that rev when it publishes.
+anemnez-clock = { git = "ssh://git@github.com/anemnez/anemnez-clock.git", rev = "3ed93558f1b7", version = "0.1", registry-index = "sparse+http://127.0.0.1:7787/crates/index/" }
 # The one face for every product's events (fabric EVENTS.md §6a): the client reads it over Events/Call.
-hydramq-events = { version = "0.4.83", registry = "artichoke" }
+# hydramq's leaves in the same dual form, at hydramq main's rev (0.4.98), so their anemnez-clock is the same git copy.
+hydramq-events = { git = "ssh://git@github.com/anemnez/hydramq.git", rev = "7bbd2b738654", version = "0.4", registry-index = "sparse+http://127.0.0.1:7787/crates/index/" }
 tonic = "0.12"
 tonic-build = "0.12"
 prost = "0.13"
