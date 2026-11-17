@@ -47,6 +47,29 @@ pub trait Keys: Send + Sync + 'static {
     }
 }
 
+/// The key lookup before Fabric publishes principals (`fabric.principals`): no issuer has a record, so a token
+/// that is present is refused `unknown-key`, and a call with none is admitted by the rollout rule
+/// ([`Keys::admit_absent`]). One interim for every product, so the day Fabric publishes keys there is one lookup to
+/// swap (rule 2; it was typhond's own until Minion needed it too).
+///
+/// SUNSET: `true` only until J's `principals` feature in anemnez-swarm-client. Then the rule is B's swarm-wide
+/// auto rule (PRINCIPAL_TOKEN §3), and a product on this interim says so in Health ([`UNPUBLISHED`]).
+pub struct Unpublished;
+
+/// What a product on [`Unpublished`] says in Health, so the gap stays visible, not only logged (D).
+pub const UNPUBLISHED: &str = "interim: no key lookup (fabric.principals is not read yet)";
+
+#[tonic::async_trait]
+impl Keys for Unpublished {
+    async fn record(&self, _issuer: &str) -> Result<KeyRecord, Refusal> {
+        Err(Refusal::UnknownKey)
+    }
+
+    async fn admit_absent(&self) -> bool {
+        true
+    }
+}
+
 /// Step 8: the product's durable set of accepted nonces.
 #[tonic::async_trait]
 pub trait Nonces: Send + Sync + 'static {
