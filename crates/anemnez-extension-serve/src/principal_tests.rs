@@ -453,8 +453,11 @@ async fn a_nonce_write_that_panics_is_unanswered_never_replay() {
     let manual = ManualClock::new();
     let verifier = keyed(&manual, Arc::new(Panics));
     let token = mint(&manual, METHOD, [1; 32], 60, 3);
-    let (refused, _) =
-        manual.run_until(verifier.verify(&token, METHOD, &[1; 32]), Duration::from_secs(10)).await.expect("answered");
+    // The manual clock never moves here, so the write's bound can't fire before its task's panic is joined: the
+    // outcome is the lost write's, by construction, never a race with the bound (prova flagged it FLAKY under load
+    // when run_until advanced the clock). A real-time bound on the test itself guards a hang.
+    let verify = verifier.verify(&token, METHOD, &[1; 32]);
+    let refused = anemnez_clock::Clock::system().timeout(Duration::from_secs(10), verify).await.expect("answered");
     let refused = refused.expect_err("never admitted");
     assert_eq!(refused, Refusal::LookupUnanswered(Lookup::NonceLost));
     assert_eq!(status(&refused).code(), tonic::Code::Unavailable, "Unclear, never PERMISSION_DENIED");
