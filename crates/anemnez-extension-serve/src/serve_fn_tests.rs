@@ -11,7 +11,7 @@ use anemnez_extension::peer::{Code, FABRICD_READS_DESCRIBE_ONLY, Peer, RESERVED_
 use tonic::body::BoxBody;
 
 use crate::journal::{EventsService, Journal};
-use crate::serve::{ApiFaces, ProductRoutes, Refused, Stop, Stopped, serve};
+use crate::serve::{ApiFaces, ProductRoutes, Refused, Stop, Stopped, serve, serve_admitted};
 use crate::{Accepted, Board, Describe, Judged, RequestDigest, pb};
 
 /// The drain window the rows' planes stop within.
@@ -86,6 +86,11 @@ struct Plane {
 /// Serve the API plane through [`serve`] with the product's `routes`, each connection judged as `role`, stopping
 /// within [`WINDOW`] on a manual clock.
 async fn plane_with(role: Role, routes: ProductRoutes) -> Plane {
+    plane_admitted(role, routes, None).await
+}
+
+/// [`plane_with`], through [`serve_admitted`] with `admit` when one is given.
+async fn plane_admitted(role: Role, routes: ProductRoutes, admit: Option<Admit>) -> Plane {
     let manual = ManualClock::new();
     let journal = Journal::new("a1b2c3d4.boot1", 8, manual.clock());
     let board = Board::new(journal.clone());
@@ -98,7 +103,10 @@ async fn plane_with(role: Role, routes: ProductRoutes) -> Plane {
         drop(stopped.await);
     };
     let stop_on = Stop { signal, within: WINDOW, clock: manual.clock() };
-    let server = tokio::spawn(serve(faces, routes, &[CHECKED], incoming, stop_on));
+    let server = match admit {
+        None => tokio::spawn(serve(faces, routes, &[CHECKED], incoming, stop_on)),
+        Some(admit) => tokio::spawn(serve_admitted(admit, faces, routes, &[CHECKED], incoming, stop_on)),
+    };
     let channel = crate::serve_tests::channel_to(socket).await;
     Plane { channel, manual, stop, server, _dir: dir }
 }
@@ -242,4 +250,80 @@ fn a_reserved_or_twice_named_product_service_is_refused_by_name() {
     assert_eq!(refused(ProductRoutes::new().add_service(Named::<2>)), reserved(2), "Lifecycle");
     let once = ProductRoutes::new().add_service(Product).expect("once");
     assert_eq!(refused(once.add_service(Product)), Some((SERVICE_NAMED_TWICE, "test.v1.Product")));
+}
+
+/// An admission layer for the rows: it keeps each path it sees, and refuses every request ADMIT_REFUSED when `refuse`.
+#[derive(Clone, Default)]
+struct Admit {
+    seen: Arc<std::sync::Mutex<Vec<String>>>,
+    refuse: bool,
+}
+
+/// What [`Admit`] answers when it refuses: Unavailable, apart from the plane's PERMISSION_DENIED and the product's.
+const ADMIT_REFUSED: &str = "admit-refused";
+
+impl<S> tower_layer::Layer<S> for Admit {
+    type Service = Admitting<S>;
+
+    fn layer(&self, inner: S) -> Admitting<S> {
+        Admitting { inner, admit: self.clone() }
+    }
+}
+
+#[derive(Clone)]
+struct Admitting<S> {
+    inner: S,
+    admit: Admit,
+}
+
+impl<S> tower_service::Service<http::Request<BoxBody>> for Admitting<S>
+where
+    S: tower_service::Service<http::Request<BoxBody>, Response = http::Response<BoxBody>> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+    S::Error: Send + 'static,
+{
+    type Response = http::Response<BoxBody>;
+    type Error = S::Error;
+    type Future =
+        std::pin::Pin<Box<dyn std::future::Future<Output = Result<http::Response<BoxBody>, S::Error>> + Send>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), S::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, request: http::Request<BoxBody>) -> Self::Future {
+        self.admit.seen.lock().expect("seen").push(request.uri().path().to_owned());
+        let refuse = self.admit.refuse;
+        let answered = self.inner.call(request);
+        Box::pin(async move {
+            if refuse { Ok(tonic::Status::unavailable(ADMIT_REFUSED).into_http()) } else { answered.await }
+        })
+    }
+}
+
+/// An admission layer is outermost (D m/5): it sees every request, Describe and the Health twin included, and its
+/// refusal comes before the plane's own, so a call the plane would refuse fabricd is answered by the admission.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_admission_layer_is_outermost_and_sees_every_call() {
+    let routes = || ProductRoutes::new().add_service(Product).expect("a product's own service");
+    let passing = Admit::default();
+    let plane = plane_admitted(Role::Other, routes(), Some(passing.clone())).await;
+    let describe =
+        pb::describe_client::DescribeClient::new(plane.channel.clone()).get(pb::DescribeRequest::default()).await;
+    assert!(describe.is_ok(), "an admitted Describe is served: {describe:?}");
+    let reached = call(&plane.channel, CHECKED).await;
+    assert_eq!(
+        reached,
+        Err((tonic::Code::Unavailable, "product: Some(Other) digest true".to_owned())),
+        "under the plane's layers"
+    );
+    assert_eq!(passing.seen.lock().expect("seen").clone(), ["/anemnez.extension.v1.Describe/Get", CHECKED]);
+
+    let refusing = Admit { refuse: true, ..Admit::default() };
+    let plane = plane_admitted(Role::Fabricd, routes(), Some(refusing)).await;
+    assert_eq!(
+        call(&plane.channel, PLAIN).await,
+        Err((tonic::Code::Unavailable, ADMIT_REFUSED.to_owned())),
+        "before fabricd-reads-describe-only"
+    );
 }
