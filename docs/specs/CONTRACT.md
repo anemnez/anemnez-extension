@@ -244,6 +244,15 @@ never admitted: refused `lookup-unanswered` under UNAVAILABLE, the `Refusal` say
 and the store keeps its one writer. So a nonce written past the bound still lands, and `lookup-unanswered` is
 retried only with a **fresh token**, never by re-sending the old one, which would meet `replay` for its own
 write (rule 5). `Refusal` is non-exhaustive, so a refusal added later never breaks a reader.
+Every unknown outcome is this name, never a definite one (E m/15590): a nonce write whose task panicked or was
+cancelled may have landed partway, so it is `lookup-unanswered` (`nonce-lost`), never `replay`, which says a
+token was reused. Writes still running past their waits are capped (`NONCE_WRITES_AT_MOST`): a full cap refuses
+at once (`nonce-writes-held`), so a stalled disk becomes refusals, never a pile of tasks. The rollout rule's own
+question (`Keys::admit_absent`) is the keys source's answer, bounded by `KEYS_WITHIN_MS` too: unanswered, the call
+is not admitted. Each kind is counted (`Verifier::unanswered_lookups`) beside `absent_calls`, for Health and a
+product's doctor, so bounds too tight for a real swarm are raised by measure (D m/15589). Owed before Fabric
+publishes keys (owner K, by 2026-12-15): a per-issuer cache of its record, with a bounded age, so most calls never
+wait on Fabric.
 
 <!-- claim: the-verifier-applies-retired-versus-revoked -->
 **The verifier, not the product, picks the key** (B, D, 2026-11-07; PRINCIPAL_TOKEN §2). `Keys`

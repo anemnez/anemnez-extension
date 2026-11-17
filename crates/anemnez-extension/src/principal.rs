@@ -105,13 +105,19 @@ pub enum Refusal {
     LookupUnanswered(Lookup),
 }
 
-/// Which of a verifier's waits didn't answer, said under the one name `lookup-unanswered`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Which of a verifier's waits didn't answer, said under the one name `lookup-unanswered`. Each is Unclear:
+/// the outcome of the lookup or write is unknown, so the token is retried fresh, never re-sent (rule 5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[non_exhaustive]
 pub enum Lookup {
-    /// The issuer's published keys (step 5).
+    /// The issuer's published keys (step 5), or whether a call with no token may be admitted.
     Keys,
-    /// The durable record of the token's nonce (step 8).
+    /// The durable record of the token's nonce (step 8), past its bound.
     Nonce,
+    /// The nonce's write ended without answering (its task panicked or was cancelled): it may have landed.
+    NonceLost,
+    /// Too many nonce writes still running past their waits (a stalled disk): refused at once, never queued.
+    NonceWritesHeld,
 }
 
 impl Lookup {
@@ -121,6 +127,8 @@ impl Lookup {
         match self {
             Self::Keys => "keys",
             Self::Nonce => "nonce",
+            Self::NonceLost => "nonce-lost",
+            Self::NonceWritesHeld => "nonce-writes-held",
         }
     }
 }
