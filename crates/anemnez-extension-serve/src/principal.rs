@@ -52,8 +52,9 @@ pub trait Keys: Send + Sync + 'static {
 /// ([`Keys::admit_absent`]). One interim for every product, so the day Fabric publishes keys there is one lookup to
 /// swap (rule 2; it was typhond's own until Minion needed it too).
 ///
-/// SUNSET: `true` only until J's `principals` feature in anemnez-swarm-client. Then the rule is B's swarm-wide
-/// auto rule (PRINCIPAL_TOKEN §3), and a product on this interim says so in Health ([`UNPUBLISHED`]).
+/// SUNSET: Owner J; exit: anemnez-swarm-client `principals` released and adopted here. Ends 2026-12-15 (J m/15234;
+/// D m/15228, E m/15226). Then the rule is B's swarm-wide auto rule (PRINCIPAL_TOKEN §3). Until then a product on
+/// this interim says so in Health ([`UNPUBLISHED`]), and past the date the sunset row in proofs/quality is red by name.
 pub struct Unpublished;
 
 /// What a product on [`Unpublished`] says in Health, so the gap stays visible, not only logged (D).
