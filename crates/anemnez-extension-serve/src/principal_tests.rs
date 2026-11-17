@@ -298,3 +298,19 @@ async fn a_record_time_in_the_wrong_unit_is_refused_as_implausible() {
         "a milliseconds retired_at would otherwise never retire the key"
     );
 }
+
+/// The shared interim key lookup: a present token is refused, since no issuer has a record yet, and a call without
+/// one is admitted by the rollout rule.
+#[tokio::test]
+async fn the_interim_lookup_refuses_a_token_and_admits_its_absence() {
+    let manual = ManualClock::new();
+    let v = Verifier::new(
+        AUDIENCE,
+        manual.clock(),
+        Arc::new(crate::Unpublished),
+        Arc::new(MemoryNonces::new(manual.clock())),
+    );
+    let refused = v.verify(&mint(&manual, METHOD, [1; 32], 60, 1), METHOD, &[1; 32]).await;
+    assert_eq!(refused.err(), Some(Refusal::UnknownKey));
+    assert!(crate::Unpublished.admit_absent().await, "the rollout rule admits a call without a token");
+}
