@@ -40,7 +40,9 @@ use tonic::body::BoxBody;
 use tonic::server::NamedService;
 use tonic::service::Routes;
 
+use crate::digest::DigestService;
 use crate::journal::{EVENTS_METHOD, EventsService};
+use crate::plane::ApiPlaneService;
 use crate::{Accepted, ApiPlaneLayer, Board, Describe, DigestLayer, pb};
 
 /// The packages the contract reserves: the API plane serves their faces itself, and never Lifecycle.
@@ -165,7 +167,7 @@ impl std::fmt::Display for Stopped {
 
 /// Serve the API plane until `stop` says so: `faces` and the product's own calls, `product`, on each connection
 /// `incoming` hands over, behind [`ApiPlaneLayer`] and, for `Events` and each path in `token_checked` (gRPC
-/// paths, `/<package>.<Service>/<Method>`), [`DigestLayer`].
+/// paths, `/<package>.<Service>/<Method>`), [`DigestLayer`]. As [`serve_admitted`] with no admission layer.
 ///
 /// # Errors
 /// tonic's transport error, when the server itself fails.
@@ -177,6 +179,40 @@ pub async fn serve<I, IO, IE, F>(
     stop: Stop<F>,
 ) -> Result<Stopped, tonic::transport::Error>
 where
+    I: Stream<Item = Result<Accepted<IO>, IE>>,
+    IO: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    IE: Into<Box<dyn std::error::Error + Send + Sync>>,
+    F: Future<Output = ()>,
+{
+    serve_admitted(tower_layer::Identity::new(), faces, product, token_checked, incoming, stop).await
+}
+
+/// The service an admission layer wraps: the plane's own layers around every route.
+pub type Planed = ApiPlaneService<DigestService<tonic::service::Routes>>;
+
+/// As [`serve`], with `admit` outermost: every request, Describe and Health's twin included, passes it before
+/// [`ApiPlaneLayer`] judges it (D m/5). Products don't call this themselves: anemnez-service's
+/// `product::planes::serve_api` does, with the drain machine's layer, typed to the API plane's half so the layer
+/// can't reach control.
+///
+/// # Errors
+/// tonic's transport error, when the server itself fails.
+pub async fn serve_admitted<L, B, I, IO, IE, F>(
+    admit: L,
+    faces: ApiFaces,
+    product: ProductRoutes,
+    token_checked: &[&str],
+    incoming: I,
+    stop: Stop<F>,
+) -> Result<Stopped, tonic::transport::Error>
+where
+    L: tower_layer::Layer<Planed> + Clone + Send + Sync + 'static,
+    L::Service: tower_service::Service<http::Request<BoxBody>, Response = http::Response<B>> + Clone + Send + 'static,
+    <L::Service as tower_service::Service<http::Request<BoxBody>>>::Future: Send + 'static,
+    <L::Service as tower_service::Service<http::Request<BoxBody>>>::Error:
+        Into<Box<dyn std::error::Error + Send + Sync>> + Send,
+    B: http_body::Body<Data = bytes::Bytes> + Send + 'static,
+    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
     I: Stream<Item = Result<Accepted<IO>, IE>>,
     IO: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     IE: Into<Box<dyn std::error::Error + Send + Sync>>,
@@ -196,6 +232,7 @@ where
     };
     let digested = DigestLayer::for_paths(std::iter::once(EVENTS_METHOD).chain(token_checked.iter().copied()));
     let server = tonic::transport::Server::builder()
+        .layer(admit)
         .layer(ApiPlaneLayer)
         .layer(digested)
         .add_routes(product.routes)

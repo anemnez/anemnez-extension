@@ -565,6 +565,11 @@ product's own calls as `ProductRoutes`, the paths it checks a principal token on
 outermost, then the request digest for `Events` and each token-checked path, and registers nothing of the
 control plane's. A product reads the caller with anemnez-service `product::peer::caller`, the stamp's one
 reader (M m/14147).
+- **An admission layer goes outermost, through the SDK** (D m/5). `serve_admitted(admit, ..)` is `serve` with one
+  layer stacked above `ApiPlaneLayer`, so it sees every request, Describe and the Health twin included, and its
+  refusal comes before the plane's own. Its type takes the plane's layered service (`Planed`), so it can't be
+  stacked anywhere else. Products don't call it themselves: anemnez-service's `planes::serve_api` does, with the
+  drain machine's layer, taking only the API half of the planes so the layer can't reach control.
 - **A product can't shadow a face or add Lifecycle.** `ProductRoutes::add_service` refuses a service under a
   reserved package (`anemnez.extension.`, which holds Describe, Health and Events, and `anemnez.fabric.`, which
   holds Lifecycle) as `reserved-service`, and one added twice as `service-named-twice`. Both are refused by name

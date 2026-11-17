@@ -106,6 +106,7 @@ spoken_for("one-function-serves-the-api-plane", "serve_fn_tests::one_function_se
 spoken_for("one-function-serves-the-api-plane (rules)", "serve_fn_tests::the_planes_rules_apply_to_the_products_calls")
 spoken_for("one-function-serves-the-api-plane (stop)", "serve_fn_tests::the_plane_stops_cleanly_when_nothing_is_in_hand")
 spoken_for("one-function-serves-the-api-plane (bounded stop)", "serve_fn_tests::a_call_that_never_ends_is_cut_at_the_window_and_the_stop_says_forced")
+spoken_for("one-function-serves-the-api-plane (admission)", "serve_fn_tests::an_admission_layer_is_outermost_and_sees_every_call")
 spoken_for("one-function-serves-the-api-plane (reserved)", "serve_fn_tests::a_reserved_or_twice_named_product_service_is_refused_by_name")
 spoken_for("describe-answers-per-caller", "describe_tests::describe_answers_what_this_caller_is_shown")
 spoken_for("describe-answers-per-caller (fabricd)", "describe_tests::fabricd_and_a_product_not_answering_per_caller_get_nothing_per_caller")
