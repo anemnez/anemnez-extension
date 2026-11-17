@@ -224,6 +224,20 @@ async fn an_absent_token_is_admitted_only_under_the_rollout_rule_and_counted() {
     assert_eq!(status(&checked).code(), tonic::Code::InvalidArgument);
 }
 
+/// A token header that is present but not visible ASCII is a token, refused `malformed` by name, never read as
+/// absent and admitted by the rollout rule (rule 5: an unreadable value is never absent).
+#[tokio::test]
+async fn an_unreadable_token_header_is_refused_never_admitted_as_absent() {
+    let manual = ManualClock::new();
+    let rollout = verifier(&manual, true);
+    let mut unreadable = tonic::Request::new(crate::pb::EventsRequest::default());
+    let value = tonic::metadata::MetadataValue::try_from(&b"tok\xffen"[..]).expect("an opaque header value");
+    unreadable.metadata_mut().insert(principal::GRPC_METADATA_KEY, value);
+    let refused = rollout.check_grpc(METHOD, &unreadable).await.expect_err("refused, never admitted as absent");
+    assert_eq!((status(&refused).code(), refused.name()), (tonic::Code::InvalidArgument, "malformed"));
+    assert!(rollout.absent_calls().is_empty(), "never counted as a call without a token");
+}
+
 /// A token for the test call, signed by `seed`, issued at `issued_ms` (Unix milliseconds).
 fn signed_at(seed: &[u8; 32], issued_ms: u64, nonce: u8) -> String {
     let claims = Claims {

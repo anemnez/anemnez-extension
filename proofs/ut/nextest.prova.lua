@@ -81,6 +81,8 @@ spoken_for("health-may-say-what-a-restart-costs", "health::tests::a_restart_cost
 spoken_for("a-product-pushes-events-as-a-stream-it-serves", "serve_tests::a_foreign_cursor_is_not_mine_and_an_old_one_is_out_of_range")
 spoken_for("a-keyed-route-names-a-string-field", "options::tests::a_keyed_route_names_a_top_level_string_field")
 spoken_for("the-serving-face-runs-the-whole-principal-ladder", "principal_tests::each_step_refuses_by_its_own_name")
+spoken_for("the-rollout-rule-admits-only-a-call-with-no-token", "principal_tests::an_absent_token_is_admitted_only_under_the_rollout_rule_and_counted")
+spoken_for("the-rollout-rule-admits-only-a-call-with-no-token (unreadable)", "principal_tests::an_unreadable_token_header_is_refused_never_admitted_as_absent")
 spoken_for("the-serving-face-runs-the-whole-principal-ladder (replay)", "principal_tests::a_token_accepted_once_is_refused_replay_after")
 spoken_for("a-nonce-is-durable-before-the-method-runs", "principal_tests::the_verifier_answers_only_after_the_nonce_is_recorded")
 spoken_for("a-token-binds-the-bytes-as-received", "serve_tests::a_request_with_a_field_this_build_does_not_know_still_verifies")

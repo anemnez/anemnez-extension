@@ -188,7 +188,9 @@ impl Verifier {
     /// The step's [`Refusal`] ([`status`] makes it a gRPC status); an absent token outside the
     /// rollout is `malformed`.
     pub async fn check_grpc<M>(&self, method: &str, request: &tonic::Request<M>) -> Result<Option<Admitted>, Refusal> {
-        if token_of(request).is_none() && self.keys.admit_absent().await {
+        // Absent means no header at all: one that is present but unreadable is a token, and is refused malformed
+        // below, never admitted as absent (rule 5; K's Themis `value` no, 2026-11-17).
+        if !request.metadata().contains_key(principal::GRPC_METADATA_KEY) && self.keys.admit_absent().await {
             let now = self.clock.now_wall().unix_millis();
             let mut absent = self.absent.lock().unwrap_or_else(PoisonError::into_inner);
             let seen = absent.entry(method.to_owned()).or_insert(Absent { count: 0, last_ms: now });
@@ -215,7 +217,12 @@ impl Verifier {
     /// # Errors
     /// The step's [`Refusal`] ([`status`] makes it a gRPC status).
     pub async fn verify_grpc<M>(&self, method: &str, request: &tonic::Request<M>) -> Result<Admitted, Refusal> {
-        let token = token_of(request).ok_or_else(|| Refusal::Malformed("no principal token".into()))?;
+        let token = match request.metadata().get(principal::GRPC_METADATA_KEY) {
+            None => return Err(Refusal::Malformed("no principal token".into())),
+            Some(value) => {
+                value.to_str().map_err(|_| Refusal::Malformed("the principal token isn't visible ASCII".into()))?
+            }
+        };
         let RequestDigest(body) = *request.extensions().get::<RequestDigest>().ok_or_else(|| {
             Refusal::Malformed("no request digest: serve the method through DigestLayer, uncompressed".into())
         })?;
@@ -223,9 +230,10 @@ impl Verifier {
     }
 }
 
-/// The principal token a gRPC call carries, if any. A product rolling tokens out host by host
-/// (admitting a call that carries none, counted and logged, until its callers mint) asks this first;
-/// a token that IS present always goes through [`Verifier::verify_grpc`].
+/// The principal token a gRPC call carries, if any, as text: `None` both when it carries none and when its header
+/// isn't visible ASCII. So `None` never decides that a call is unauthenticated: [`Verifier::check_grpc`] alone
+/// decides absence, by the header's presence, and refuses an unreadable one `malformed`. Use this only to read
+/// a token already checked (a digest to log or echo).
 pub fn token_of<M>(request: &tonic::Request<M>) -> Option<&str> {
     request.metadata().get(principal::GRPC_METADATA_KEY).and_then(|v| v.to_str().ok())
 }
