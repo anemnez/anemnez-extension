@@ -8,3 +8,9 @@ index = "sparse+http://127.0.0.1:7787/crates/index/"
 # Cargo refuses an authenticated registry unless a credential provider is on.
 [registry]
 global-credential-providers = ["cargo:token"]
+
+# A seeded simulation replays only when tokio's own draw (select!'s order) is seeded from the run's seed, which tokio
+# allows only under this cfg (standards cargo/sim-tokio-unstable; MACHINES §4; D m/17459). The key cache's sim row
+# refuses by name without it.
+[build]
+rustflags = ["--cfg", "tokio_unstable"]

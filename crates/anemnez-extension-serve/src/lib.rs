@@ -53,6 +53,8 @@ mod describe_tests;
 #[cfg(test)]
 mod edge_tests;
 #[cfg(test)]
+mod key_cache_sim_tests;
+#[cfg(test)]
 mod plane_tests;
 #[cfg(test)]
 mod principal_tests;

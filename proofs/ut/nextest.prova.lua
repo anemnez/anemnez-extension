@@ -91,6 +91,7 @@ spoken_for("an-issuers-record-is-read-once-per-key-age", "key_cache::tests::flig
 spoken_for("an-issuers-record-is-read-once-per-key-age", "principal_tests::tokens_at_once_from_one_issuer_make_one_read")
 spoken_for("an-issuers-record-is-read-once-per-key-age", "principal_tests::tokens_waiting_on_a_hung_read_are_unclear_at_its_deadline")
 spoken_for("an-issuers-record-is-read-once-per-key-age", "principal_tests::a_host_asleep_past_the_key_age_reads_the_record_again_and_sees_a_revoke")
+spoken_for("an-issuers-record-is-read-once-per-key-age", "key_cache_sim_tests::tokens_on_one_flight_are_admitted_on_one_read_or_unclear_at_its_deadline_and_each_seed_replays")
 spoken_for("a-stream-asked-to-end-by-the-drain-ends-draining", "serve_tests::the_events_service_ends_a_stream_by_the_end_in_its_request")
 spoken_for("a-stream-asked-to-end-by-the-drain-ends-draining", "serve_tests::a_draining_stream_ends_at_the_journal_s_place_when_asked_however_busy")
 spoken_for("async-cancelled-only-by-its-owner", "serve_tests::a_dropped_subscriber_cancels_nothing")
