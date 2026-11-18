@@ -34,8 +34,13 @@ anemnez-extension.workspace = true
 tonic-build.workspace = true
 
 [dev-dependencies]
+anemnez-sim.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "net"] }
 tempfile.workspace = true
 tokio-stream.workspace = true
 hyper-util.workspace = true
 tower.workspace = true
+
+# The simulation's seeded runtime is read by `cfg!(tokio_unstable)` (standards cargo/sim-tokio-unstable).
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(tokio_unstable)"] }

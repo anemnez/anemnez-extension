@@ -80,6 +80,7 @@ version = "0.7.25"
 dependencies = [
  "anemnez-clock",
  "anemnez-extension",
+ "anemnez-sim",
  "bytes",
  "futures-util",
  "http",
@@ -105,6 +106,17 @@ version = "0.1.0"
 source = "git+ssh://git@github.com/anemnez/anemnez-layout.git?rev=c4d569544bc2#c4d569544bc2269f9334d85aa8c4253ac856a928"
 dependencies = [
  "anemnez-sim-io",
+]
+
+[[package]]
+name = "anemnez-sim"
+version = "0.1.0"
+source = "git+ssh://git@github.com/anemnez/anemnez-sim.git?rev=2c38ab7c80a0#2c38ab7c80a0acf7e4a2944d883ed1ef2c61666d"
+dependencies = [
+ "anemnez-clock",
+ "anemnez-sim-io",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

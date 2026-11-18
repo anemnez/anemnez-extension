@@ -62,7 +62,12 @@ pub(crate) fn verifier(manual: &ManualClock, absent_admitted: bool) -> Verifier 
 /// A token for `method` with `body`, living `life` seconds from the clock's now (issued and
 /// expires in ms).
 pub(crate) fn mint(manual: &ManualClock, method: &str, body: [u8; 32], life: u64, nonce: u8) -> String {
-    let now = u64::try_from(manual.clock().now_wall().unix_millis()).expect("after 1970");
+    mint_on(&manual.clock(), method, body, life, nonce)
+}
+
+/// [`mint`], at `clock`'s wall: for a clock that isn't a ManualClock's (the simulation's).
+pub(crate) fn mint_on(clock: &anemnez_clock::Clock, method: &str, body: [u8; 32], life: u64, nonce: u8) -> String {
+    let now = u64::try_from(clock.now_wall().unix_millis()).expect("after 1970");
     let claims = Claims {
         issuer: ISSUER.into(),
         key_id: principal::key_id(&signed::public_key(Alg::Ed25519, &SEED)),
