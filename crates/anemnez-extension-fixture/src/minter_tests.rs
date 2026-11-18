@@ -63,6 +63,9 @@ async fn a_revoked_key_refuses_every_token_and_a_retired_one_only_later_tokens()
 
     let backdated = minter.mint(SUBJECT, AUDIENCE, METHOD, BODY, now - 2 * SKEW_MS);
     minter.keys().revoke(now);
+    // The Verifier holds an issuer's record for KEY_AGE, the worst-case latency of a revoke (PRINCIPAL_TOKEN §4):
+    // past it, the record is read again and the revoke is seen.
+    manual.advance(anemnez_extension_serve::key_cache::KEY_AGE).await;
     assert_eq!(verifier.verify(&backdated, METHOD, &body).await.map(|_| ()), Err(Refusal::UnknownKey));
 }
 

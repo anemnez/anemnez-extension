@@ -12,6 +12,10 @@
 //!
 //! The time is the injected clock's: the product's reading for steps 4 and 8, and the token's expiry
 //! as a [`Mono`] deadline for a stream that must end at it.
+//!
+//! An issuer's record is read through the [`KeyCache`](crate::key_cache) machine: one read per issuer per
+//! [`KEY_AGE`](crate::key_cache::KEY_AGE), one flight shared by every token waiting on it, its ages on `Host`. The
+//! cache saves the read, never a check: each token is still checked against the record.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -23,6 +27,9 @@ use crate::digest::RequestDigest;
 use anemnez_extension::principal::{
     self, Claims, Expect, KEYS_WITHIN_MS, Lookup, MAX_TTL_MS, NONCE_WITHIN_MS, Refusal, SKEW_MS, Token,
 };
+use tokio::sync::watch;
+
+use crate::key_cache::{FETCH_WITHIN, Flight, KeyCache, Settled, Step};
 
 /// The issuer's record and step 5's rule live in the kernel (D, 2026-11-07); re-exported here so
 /// nothing moves for this crate's users.
@@ -136,7 +143,30 @@ pub struct Verifier {
     /// Places for nonce writes still running, past their waits too ([`NONCE_WRITES_AT_MOST`]).
     writes: Arc<tokio::sync::Semaphore>,
     unanswered: Arc<Mutex<std::collections::BTreeMap<Lookup, Unanswered>>>,
+    /// The key-record cache and each flight's waiters.
+    cache: Arc<Mutex<Cached>>,
 }
+
+/// The cache's machine and, for each flight in the air, what its waiters read the answer from.
+#[derive(Default)]
+struct Cached {
+    machine: KeyCache,
+    flights: HashMap<Flight, watch::Sender<Option<Result<KeyRecord, Refusal>>>>,
+}
+
+impl Cached {
+    /// Clear flights past their deadline: each one's waiters are told Unclear.
+    fn expire(&mut self, now: anemnez_clock::Host) {
+        for (_, flight) in self.machine.expire(now) {
+            if let Some(waiters) = self.flights.remove(&flight) {
+                waiters.send_replace(Some(Err(Refusal::LookupUnanswered(Lookup::Keys))));
+            }
+        }
+    }
+}
+
+/// How far past a flight's deadline its waiters wait: the outer of the two nested bounds.
+const WAITER_MARGIN: Duration = Duration::from_millis(100);
 
 /// How many nonce writes may run at once, a write past its wait included. Past it a token is refused
 /// `lookup-unanswered` (`nonce-writes-held`) at once, so a stalled disk becomes refusals, never a pile of tasks
@@ -174,6 +204,7 @@ impl Verifier {
             absent: Arc::default(),
             writes: Arc::new(tokio::sync::Semaphore::new(NONCE_WRITES_AT_MOST)),
             unanswered: Arc::default(),
+            cache: Arc::default(),
         }
     }
 
@@ -209,18 +240,70 @@ impl Verifier {
         seen.last_ms = now;
     }
 
+    /// `issuer`'s record for a token naming `key_id`, through the cache: held, refused, or read by one flight every
+    /// waiter joins, each waiter bounded by the flight's deadline ([`FETCH_WITHIN`]).
+    async fn key_record(&self, issuer: &str, key_id: &str) -> Result<KeyRecord, Refusal> {
+        let waiting = {
+            let mut cached = self.cache.lock().unwrap_or_else(PoisonError::into_inner);
+            let now = self.clock.now_host();
+            cached.expire(now);
+            match cached.machine.lookup(issuer, key_id, now) {
+                Step::Use(record) => return Ok(record),
+                Step::Refuse(why) => return Err(why),
+                Step::Join(flight) => match cached.flights.get(&flight) {
+                    Some(waiters) => waiters.subscribe(),
+                    None => return Err(Refusal::LookupUnanswered(Lookup::Keys)),
+                },
+                Step::Fetch(flight) => {
+                    let (waiters, waiting) = watch::channel(None);
+                    cached.flights.insert(flight, waiters);
+                    self.fly(issuer.to_owned(), flight);
+                    waiting
+                }
+            }
+        };
+        let mut waiting = waiting;
+        // The flight's own deadline answers its waiters; this outer bound, a little longer (nested bounds, inner
+        // shorter), holds only if the flight's task never does (rule 4).
+        let answered = self.clock.timeout(FETCH_WITHIN + WAITER_MARGIN, waiting.wait_for(Option::is_some)).await;
+        match answered {
+            Ok(Ok(answer)) => answer.clone().unwrap_or(Err(Refusal::LookupUnanswered(Lookup::Keys))),
+            // The flight ended unanswered, or not within its deadline: Unclear, by name.
+            Ok(Err(_)) | Err(_) => Err(Refusal::LookupUnanswered(Lookup::Keys)),
+        }
+    }
+
+    /// Read `issuer`'s record as `flight`, on a task of its own so a caller that hangs up never takes the read from
+    /// the others waiting on it; bounded by the flight's deadline, its answer settled through the machine.
+    fn fly(&self, issuer: String, flight: Flight) {
+        let (keys, clock, cache) = (Arc::clone(&self.keys), self.clock.clone(), Arc::clone(&self.cache));
+        tokio::spawn(async move {
+            let answer = match clock.timeout(FETCH_WITHIN, keys.record(&issuer)).await {
+                Ok(answer) => answer,
+                Err(_) => Err(Refusal::LookupUnanswered(Lookup::Keys)),
+            };
+            let mut cached = cache.lock().unwrap_or_else(PoisonError::into_inner);
+            let now = clock.now_host();
+            let told = match cached.machine.fetched(&issuer, flight, answer, now) {
+                Settled::Answered(answer) => answer,
+                // Gone past its deadline or replaced: its waiters were told Unclear, or are told it now.
+                Settled::Dropped => Err(Refusal::LookupUnanswered(Lookup::Keys)),
+            };
+            if let Some(waiters) = cached.flights.remove(&flight) {
+                waiters.send_replace(Some(told));
+            }
+            cached.expire(now);
+        });
+    }
+
     async fn ladder(&self, token: &str, method: &str, body: &[u8; 32]) -> Result<Admitted, Refusal> {
         let parsed = principal::decode(token)?;
         let now_ms = self.clock.now_wall().unix_millis();
         parsed.admit(&Expect { audience: &self.audience, method, body, now_ms })?;
         let claims = &parsed.claims;
-        // Each wait is bounded on the handed clock (rule 4; D m/15580): an issuer's keys that don't answer are
+        // Through the cache, bounded on the handed clock (rule 4; D m/15580): an issuer's keys that don't answer are
         // Unclear, refused by name, never admitted.
-        let lookup = self.keys.record(&claims.issuer);
-        let record = match self.clock.timeout(Duration::from_millis(KEYS_WITHIN_MS), lookup).await {
-            Ok(record) => record?,
-            Err(_) => return Err(Refusal::LookupUnanswered(Lookup::Keys)),
-        };
+        let record = self.key_record(&claims.issuer, &claims.key_id).await?;
         if record.issuer != claims.issuer {
             return Err(Refusal::Unattested);
         }
