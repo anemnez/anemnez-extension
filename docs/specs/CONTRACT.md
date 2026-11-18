@@ -214,6 +214,14 @@ ended with `data-loss`, never silently skipped.
 `anemnez-clock` `Clock` at construction and never reads the system's; a stream's expiry is a `Mono`
 deadline on that clock, read once when it opens (C), so a `ManualClock` test drives it end to end.
 
+<!-- claim: a-stream-asked-to-end-by-the-drain-ends-draining -->
+**A stream asked to end by its instance's drain ends `draining`** (§8.3's "last frames, then `end`"; D m/16592). The
+product's drain layer puts a `StreamEnd` in each stream's request; the `Events` service reads it from there. Once the
+drain asks, the stream sends what the journal already holds after its cursor, then ends UNAVAILABLE `draining`:
+retryable, and the subscriber subscribes afresh at another instance and surfaces the gap, as for `cursor-not-mine`
+(a cursor is its instance's own). A stream opened after the ask ends at once. One with no `StreamEnd` (served
+outside a drain layer) is as it was, held to the window.
+
 <!-- claim: async-cancelled-only-by-its-owner -->
 **A dropped subscriber cancels nothing.** A stream only reads the journal; the product's own work
 never runs inside a handler's future, so a client that disconnects ends its stream and nothing else.

@@ -454,3 +454,65 @@ async fn a_journals_events_watch_is_refused_by_name() {
     assert_eq!(refused.code(), tonic::Code::Unimplemented);
     assert!(refused.message().starts_with(anemnez_extension::refusal::EVENTS_CALL_UNSERVED), "{}", refused.message());
 }
+
+/// An end the test says when, as the drain layer's would: a level on a watch.
+fn stream_end() -> (crate::journal::StreamEnd, tokio::sync::watch::Sender<bool>) {
+    let (tx, rx) = tokio::sync::watch::channel(false);
+    let end = crate::journal::StreamEnd::new(move || {
+        let mut rx = rx.clone();
+        async move {
+            drop(rx.wait_for(|ended| *ended).await);
+        }
+    });
+    (end, tx)
+}
+
+/// CONTRACT.md §8.3: a stream its instance's drain asks to end sends every event the journal holds after its
+/// cursor, then ends `draining`, retryable, never cut short and never held to the window; a reader parked on the journal is
+/// woken by the ask; and a stream opened once the drain has asked ends at once.
+#[tokio::test]
+async fn a_stream_asked_to_end_by_the_drain_sends_what_it_holds_then_ends_draining() {
+    let (journal, manual) = journal(8);
+    let (end, ask) = stream_end();
+    let mut sub = journal.subscribe("", Vec::new(), far(&manual)).expect("subscribes").ending_on(Some(end.clone()));
+    let first = journal.publish("tick", vec![1]);
+    let second = journal.publish("tick", vec![2]);
+    ask.send_replace(true);
+    assert_eq!(sub.next().await.expect("an event").map(|e| e.cursor), Ok(first), "held events are sent");
+    assert_eq!(sub.next().await.expect("an event").map(|e| e.cursor), Ok(second));
+    assert_eq!(sub.next().await, Some(Err(Refusal::Draining)), "then it ends draining");
+    assert_eq!(sub.next().await, None, "the stream ends after draining");
+
+    let (end, ask) = stream_end();
+    let mut parked =
+        journal.subscribe(&journal.head(), Vec::new(), far(&manual)).expect("subscribes").ending_on(Some(end));
+    let reader = tokio::spawn(async move { parked.next().await });
+    tokio::task::yield_now().await;
+    ask.send_replace(true);
+    assert_eq!(reader.await.expect("joins"), Some(Err(Refusal::Draining)), "a parked reader is woken by the ask");
+
+    let mut late =
+        journal.subscribe(&journal.head(), Vec::new(), far(&manual)).expect("subscribes").ending_on(Some(end_now()));
+    assert_eq!(late.next().await, Some(Err(Refusal::Draining)), "opened after the ask, it ends at once");
+    assert_eq!(Refusal::Draining.status().code(), tonic::Code::Unavailable, "retryable, elsewhere");
+}
+
+fn end_now() -> crate::journal::StreamEnd {
+    crate::journal::StreamEnd::new(|| async {})
+}
+
+/// The Events service reads the drain's end from its request, where the product's drain layer puts it: the
+/// stream ends UNAVAILABLE `draining`. Without one, nothing changes (every other Events row).
+#[tokio::test(flavor = "multi_thread")]
+async fn the_events_service_ends_a_stream_by_the_end_in_its_request() {
+    use crate::pb::events_server::Events as _;
+    use tokio_stream::StreamExt as _;
+    let (journal, manual) = journal(8);
+    let service = crate::journal::EventsService::new(journal, crate::principal_tests::verifier(&manual, true));
+    let mut request = tonic::Request::new(pb::EventsRequest::default());
+    request.extensions_mut().insert(end_now());
+    let mut stream = service.events(request).await.expect("opens").into_inner();
+    let ended = stream.next().await.expect("an item").expect_err("ended");
+    assert_eq!((ended.code(), ended.message()), (tonic::Code::Unavailable, anemnez_extension::refusal::DRAINING));
+    assert!(stream.next().await.is_none(), "and the stream ends");
+}

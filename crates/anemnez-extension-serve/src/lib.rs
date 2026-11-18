@@ -30,7 +30,7 @@ pub use describe::Describe;
 pub use digest::{DigestLayer, RequestDigest};
 pub use edge::FileNonces;
 pub use health::Board;
-pub use journal::{EventsService, Journal, Refusal, Subscription};
+pub use journal::{EventsService, Journal, Refusal, StreamEnd, Subscription};
 pub use plane::{ApiPlaneLayer, api_admits};
 pub use principal::{
     Absent, Admitted, Carried, KeyRecord, Keys, MemoryNonces, Nonces, PublishedKey, UNPUBLISHED, Unpublished, Verifier,

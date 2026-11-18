@@ -75,6 +75,8 @@ end
 
 spoken_for("async-stream-never-awaits-a-subscriber", "serve_tests::a_publisher_never_waits_on_a_subscriber_that_never_reads")
 spoken_for("a-stream-ends-at-its-tokens-expiry-on-the-injected-clock", "serve_tests::a_stream_ends_with_expired_at_its_tokens_expiry_on_the_injected_clock")
+spoken_for("a-stream-asked-to-end-by-the-drain-ends-draining", "serve_tests::a_stream_asked_to_end_by_the_drain_sends_what_it_holds_then_ends_draining")
+spoken_for("a-stream-asked-to-end-by-the-drain-ends-draining", "serve_tests::the_events_service_ends_a_stream_by_the_end_in_its_request")
 spoken_for("async-cancelled-only-by-its-owner", "serve_tests::a_dropped_subscriber_cancels_nothing")
 spoken_for("health-is-state-with-parts", "serve_tests::a_watcher_reads_health_then_sees_only_later_changes")
 spoken_for("health-may-say-what-a-restart-costs", "health::tests::a_restart_cost_is_said_once_per_change_and_can_be_taken_back")
