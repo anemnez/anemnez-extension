@@ -526,3 +526,104 @@ async fn a_rollout_answer_that_never_comes_admits_nothing() {
         [(Lookup::Keys, 1)]
     );
 }
+
+/// The issuer's record, counting reads, revocable, and held until let go when `gate` is set.
+struct Counted {
+    reads: std::sync::atomic::AtomicU32,
+    revoked: std::sync::atomic::AtomicBool,
+    gate: Option<tokio::sync::Notify>,
+}
+
+impl Counted {
+    fn new(gated: bool) -> Arc<Counted> {
+        Arc::new(Counted {
+            reads: std::sync::atomic::AtomicU32::new(0),
+            revoked: std::sync::atomic::AtomicBool::new(false),
+            gate: gated.then(tokio::sync::Notify::new),
+        })
+    }
+
+    fn reads(&self) -> u32 {
+        self.reads.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+#[tonic::async_trait]
+impl Keys for Counted {
+    async fn record(&self, _issuer: &str) -> Result<crate::KeyRecord, Refusal> {
+        self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if let Some(gate) = &self.gate {
+            gate.notified().await;
+        }
+        let mut key = published(&SEED);
+        if self.revoked.load(std::sync::atomic::Ordering::SeqCst) {
+            key.revoked_at_ms = Some(key.made_at_ms + 1);
+        }
+        Ok(crate::KeyRecord { issuer: ISSUER.into(), keys: vec![key] })
+    }
+}
+
+fn counted_verifier(manual: &ManualClock, keys: &Arc<Counted>) -> Verifier {
+    let clock = manual.clock();
+    let keys: Arc<dyn Keys> = Arc::clone(keys) as Arc<dyn Keys>;
+    Verifier::new(AUDIENCE, clock.clone(), keys, Arc::new(MemoryNonces::new(clock)))
+}
+
+/// E 3 (KeyCache): tokens from one issuer at once make one read of its record, and later tokens within KEY_AGE none.
+#[tokio::test(flavor = "multi_thread")]
+async fn tokens_at_once_from_one_issuer_make_one_read() {
+    let manual = ManualClock::new();
+    let keys = Counted::new(false);
+    let verifier = counted_verifier(&manual, &keys);
+    let asks: Vec<_> = (1..=20u8)
+        .map(|n| {
+            let (verifier, token) = (verifier.clone(), mint(&manual, METHOD, [1; 32], 60, n));
+            tokio::spawn(async move { verifier.verify(&token, METHOD, &[1; 32]).await })
+        })
+        .collect();
+    for ask in asks {
+        assert!(ask.await.expect("joins").is_ok(), "admitted");
+    }
+    assert_eq!(keys.reads(), 1, "one read for twenty tokens");
+    let later = mint(&manual, METHOD, [1; 32], 60, 99);
+    assert!(verifier.verify(&later, METHOD, &[1; 32]).await.is_ok());
+    assert_eq!(keys.reads(), 1, "and none within KEY_AGE");
+}
+
+/// D 2 (KeyCache): a read that hangs answers every token waiting on it Unclear at the flight's deadline, by name, and
+/// the next token reads afresh.
+#[tokio::test(flavor = "multi_thread")]
+async fn tokens_waiting_on_a_hung_read_are_unclear_at_its_deadline() {
+    use anemnez_extension::principal::Lookup;
+    let manual = ManualClock::new();
+    let keys = Counted::new(true);
+    let verifier = counted_verifier(&manual, &keys);
+    let waiting = futures_util::future::join_all((1..=5u8).map(|n| {
+        let (verifier, token) = (verifier.clone(), mint(&manual, METHOD, [1; 32], 60, n));
+        async move { verifier.verify(&token, METHOD, &[1; 32]).await }
+    }));
+    let (answers, _) = manual.run_until(waiting, Duration::from_secs(10)).await.expect("answered at the deadline");
+    for answer in answers {
+        assert_eq!(answer.map(|_| ()), Err(Refusal::LookupUnanswered(Lookup::Keys)), "Unclear, by name");
+    }
+    assert_eq!(keys.reads(), 1, "the waiters joined one flight");
+}
+
+/// E 1 (KeyCache): a host asleep past KEY_AGE, Mono standing still, wakes and reads the record again, so a revoke
+/// published while it slept is seen. Red if the age were read on Mono.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_host_asleep_past_the_key_age_reads_the_record_again_and_sees_a_revoke() {
+    let manual = ManualClock::new();
+    let keys = Counted::new(false);
+    let verifier = counted_verifier(&manual, &keys);
+    assert!(verifier.verify(&mint(&manual, METHOD, [1; 32], 300, 1), METHOD, &[1; 32]).await.is_ok());
+    keys.revoked.store(true, std::sync::atomic::Ordering::SeqCst);
+    manual.sleep_host(crate::key_cache::KEY_AGE + Duration::from_secs(1));
+    let woke = mint(&manual, METHOD, [1; 32], 300, 2);
+    assert_eq!(
+        verifier.verify(&woke, METHOD, &[1; 32]).await.map(|_| ()),
+        Err(Refusal::UnknownKey),
+        "the revoke is seen"
+    );
+    assert_eq!(keys.reads(), 2, "read again on waking");
+}
