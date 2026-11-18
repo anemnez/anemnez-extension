@@ -280,3 +280,14 @@ fn flights_past_their_cap_are_unclear_at_once() {
     assert_eq!(cache.lookup("one-more", "k", at(0)), Step::Refuse(Refusal::LookupUnanswered(Lookup::Keys)));
     assert_eq!(cache.counts().2, FLIGHTS_AT_MOST);
 }
+
+/// B m/17520: a backoff past its time is dropped by the lookup that meets it, so the count is of live ones.
+#[test]
+fn a_lapsed_backoff_is_dropped_by_the_lookup_that_meets_it() {
+    let mut cache = KeyCache::new();
+    let mut reads = 0;
+    read(&mut cache, "i", "k1", at(0), &Err(Refusal::LookupUnanswered(Lookup::Keys)), &mut reads);
+    assert_eq!(cache.backed_off(), 1);
+    let Step::Fetch(_) = cache.lookup("i", "k1", at(2)) else { panic!("past its time, read again") };
+    assert_eq!(cache.backed_off(), 0, "the lapsed backoff dropped at the lookup, before any answer");
+}

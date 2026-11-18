@@ -148,7 +148,11 @@ impl KeyCache {
             (None, None) if entry.backoff.is_some_and(|until| now < until) => {
                 return Step::Refuse(Refusal::LookupUnanswered(Lookup::Keys));
             }
-            (None, None) => return self.start(issuer, now),
+            (None, None) => {
+                // A backoff past its time is dropped where it is met, so `backed_off` counts only live ones (B).
+                self.unback(issuer);
+                return self.start(issuer, now);
+            }
         };
         self.touch(issuer);
         step
@@ -209,13 +213,15 @@ impl KeyCache {
         (self.held.len(), self.refused.len(), self.flights)
     }
 
-    /// How many issuers are backed off.
+    /// How many issuers are backed off: a lapsed backoff counts until a lookup meets it or it is evicted.
     #[must_use]
     pub fn backed_off(&self) -> usize {
         self.unanswered.len()
     }
 
     /// Hold `issuer`'s next read off until `now + UNANSWERED_FOR`, in the backoff pool, evicting its oldest past the cap.
+    /// A backoff past its time is dropped by the next lookup that meets it, or by eviction: no sweep is needed, since the
+    /// pool is capped and a lapsed backoff only lets a read happen (E m/17516).
     fn back_off(&mut self, issuer: &str, now: Host) {
         self.unback(issuer);
         self.tick += 1;

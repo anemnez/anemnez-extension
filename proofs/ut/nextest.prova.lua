@@ -91,6 +91,7 @@ spoken_for("an-issuers-record-is-read-once-per-key-age", "key_cache::tests::flig
 spoken_for("an-issuers-record-is-read-once-per-key-age", "key_cache::tests::an_outage_costs_one_read_per_second_per_issuer_not_one_per_call")
 spoken_for("an-issuers-record-is-read-once-per-key-age", "key_cache::tests::a_backoff_never_shadows_a_fresh_record")
 spoken_for("an-issuers-record-is-read-once-per-key-age", "key_cache::tests::backoffs_are_bounded_and_never_make_an_issuer_known")
+spoken_for("an-issuers-record-is-read-once-per-key-age", "key_cache::tests::a_lapsed_backoff_is_dropped_by_the_lookup_that_meets_it")
 spoken_for("an-issuers-record-is-read-once-per-key-age", "principal_tests::tokens_at_once_from_one_issuer_make_one_read")
 spoken_for("an-issuers-record-is-read-once-per-key-age", "principal_tests::tokens_waiting_on_a_hung_read_are_unclear_at_its_deadline")
 spoken_for("an-issuers-record-is-read-once-per-key-age", "principal_tests::a_host_asleep_past_the_key_age_reads_the_record_again_and_sees_a_revoke")
