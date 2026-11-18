@@ -9,9 +9,15 @@
 //! Cursors are instance-scoped (`<origin>:<seq>`), where `origin` names the instance and its boot
 //! (`<inst8>.<boot>`), so a cursor from another instance or from before a restart is refused with
 //! `cursor-not-mine`.
+//!
+//! A stream asked to end by its instance's drain ([`StreamEnd`], put in the request by the product's drain layer)
+//! sends what the journal already holds after its cursor, then ends with `draining`: retryable, subscribed afresh at
+//! another instance (CONTRACT.md §8.3).
 
 use std::collections::VecDeque;
 use std::fmt;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use anemnez_clock::{Clock, Mono};
@@ -34,6 +40,8 @@ pub enum Refusal {
     DataLoss,
     /// The stream's principal token ran out.
     Expired,
+    /// The instance is draining: every event held was sent; subscribe afresh at another instance.
+    Draining,
 }
 
 impl Refusal {
@@ -44,6 +52,7 @@ impl Refusal {
             Refusal::OutOfRange => refusal::OUT_OF_RANGE,
             Refusal::DataLoss => refusal::DATA_LOSS,
             Refusal::Expired => refusal::EXPIRED,
+            Refusal::Draining => refusal::DRAINING,
         }
     }
 
@@ -54,6 +63,7 @@ impl Refusal {
             Refusal::OutOfRange => tonic::Code::OutOfRange,
             Refusal::DataLoss => tonic::Code::DataLoss,
             Refusal::Expired => tonic::Code::Unauthenticated,
+            Refusal::Draining => tonic::Code::Unavailable,
         };
         tonic::Status::new(code, self.name())
     }
@@ -66,6 +76,37 @@ impl fmt::Display for Refusal {
 }
 
 impl std::error::Error for Refusal {}
+
+type Ended = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
+
+/// What tells an `Events` stream its instance is draining: a level, made fresh for each wait, that completes once
+/// the drain asks the stream to end (or cancels it). The product's drain layer puts it in the request's extensions
+/// (anemnez-service's `ApiDrain`, from the call's `Signals`); [`EventsService`] reads it from there. -serve names no
+/// drain machine, so it takes the end as a future.
+#[derive(Clone)]
+pub struct StreamEnd(Arc<dyn Fn() -> Ended + Send + Sync>);
+
+impl StreamEnd {
+    /// The end `ended` says: each call makes a future that completes once the stream should end, at once if it
+    /// already should.
+    pub fn new<F, Fut>(ended: F) -> StreamEnd
+    where
+        F: Fn() -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        StreamEnd(Arc::new(move || Box::pin(ended())))
+    }
+
+    fn ended(&self) -> Ended {
+        (self.0)()
+    }
+}
+
+impl fmt::Debug for StreamEnd {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("StreamEnd")
+    }
+}
 
 /// An extension's events journal. Cloning it shares the one journal.
 #[derive(Clone)]
@@ -158,7 +199,7 @@ impl Journal {
             seq + 1
         };
         drop(ring);
-        Ok(Subscription { journal: self.clone(), next, kinds, expires, ended: false })
+        Ok(Subscription { journal: self.clone(), next, kinds, expires, ended: false, end: None, draining: false })
     }
 
     fn cursor(&self, seq: u64) -> String {
@@ -187,6 +228,10 @@ pub struct Subscription {
     kinds: Vec<String>,
     expires: Mono,
     ended: bool,
+    /// The drain's ask to end, if the stream was opened with one.
+    end: Option<StreamEnd>,
+    /// The drain asked: send what is held, then end `draining`.
+    draining: bool,
 }
 
 /// What reading the journal found.
@@ -197,6 +242,14 @@ enum Read {
 }
 
 impl Subscription {
+    /// This subscription, ended by `end` when its instance drains: what the journal holds after its cursor is
+    /// still sent, then it ends with [`Refusal::Draining`]. `None` leaves it as it was.
+    #[must_use]
+    pub fn ending_on(mut self, end: Option<StreamEnd>) -> Subscription {
+        self.end = end;
+        self
+    }
+
     /// The next event, a refusal that ends the stream, or `None` once it has ended.
     pub async fn next(&mut self) -> Option<Result<pb::Event, Refusal>> {
         loop {
@@ -216,11 +269,21 @@ impl Subscription {
             match self.read() {
                 Read::Event(event) => return Some(Ok((*event).clone())),
                 Read::Lost => return self.end(Refusal::DataLoss),
+                Read::Nothing if self.draining => return self.end(Refusal::Draining),
                 Read::Nothing => {}
             }
+            let end = self.end.as_ref().map(StreamEnd::ended);
+            let asked = async {
+                match end {
+                    Some(end) => end.await,
+                    None => std::future::pending().await,
+                }
+            };
             tokio::select! {
                 () = &mut published => {}
                 () = clock.sleep_until(self.expires) => return self.end(Refusal::Expired),
+                // Asked to end: go round once more, sending what is held, then end `draining`.
+                () = asked => self.draining = true,
             }
         }
     }
@@ -302,8 +365,9 @@ impl pb::events_server::Events for EventsService {
                 self.journal.clock().now_mono() + life
             }
         };
+        let end = request.extensions().get::<StreamEnd>().cloned();
         let pb::EventsRequest { after, kinds } = request.into_inner();
-        let sub = self.journal.subscribe(&after, kinds, expires).map_err(|r| r.status())?;
+        let sub = self.journal.subscribe(&after, kinds, expires).map_err(|r| r.status())?.ending_on(end);
         Ok(tonic::Response::new(Box::pin(sub.into_grpc_stream())))
     }
 

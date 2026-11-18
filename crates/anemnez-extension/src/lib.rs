@@ -75,6 +75,10 @@ pub mod refusal {
     /// The subscriber fell behind the live stream and events were dropped: the stream ends with this,
     /// never silently; resubscribe from the last cursor seen and surface the gap.
     pub const DATA_LOSS: &str = "data-loss";
+    /// The instance is draining: the stream sent every event it held, then ended, retryable. Subscribe afresh at
+    /// another instance (a cursor is its instance's own, so this one's is `cursor-not-mine` there) and surface the
+    /// gap, as for `cursor-not-mine` (CONTRACT.md §8.3).
+    pub const DRAINING: &str = "draining";
     /// A keyed-route call carried an empty key: refused by the bridge before the call leaves, since
     /// no holder can be resolved for it.
     pub const NO_KEY: &str = "no-key";
