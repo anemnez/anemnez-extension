@@ -217,10 +217,14 @@ deadline on that clock, read once when it opens (C), so a `ManualClock` test dri
 <!-- claim: a-stream-asked-to-end-by-the-drain-ends-draining -->
 **A stream asked to end by its instance's drain ends `draining`** (§8.3's "last frames, then `end`"; D m/16592). The
 product's drain layer puts a `StreamEnd` in each stream's request; the `Events` service reads it from there. Once the
-drain asks, the stream sends what the journal already holds after its cursor, then ends UNAVAILABLE `draining`:
-retryable, and the subscriber subscribes afresh at another instance and surfaces the gap, as for `cursor-not-mine`
-(a cursor is its instance's own). A stream opened after the ask ends at once. One with no `StreamEnd` (served
-outside a drain layer) is as it was, held to the window.
+drain asks, the stream sends what the journal already holds after its cursor, then ends UNAVAILABLE `draining`
+(the bare name): retryable, and the subscriber subscribes afresh at another instance from its own checkpoint and
+surfaces the gap, as for `cursor-not-mine`. A cursor is its instance's own, so no lossless resumption is promised
+(D). That flush is the frames the body yields, never a wait on the reader: a reader too slow to take them by the
+window is cut by the drain layer's `drain-window-passed`, so `draining` never holds DRAINED. A stream opened after
+the ask ends at once. One with no `StreamEnd` (served outside a drain layer) is as it was, held to the window.
+`journal::Refusal` is unchanged (it is exhaustive): a drained `Subscription` ends with `None`, and says
+`drained()`.
 
 <!-- claim: async-cancelled-only-by-its-owner -->
 **A dropped subscriber cancels nothing.** A stream only reads the journal; the product's own work

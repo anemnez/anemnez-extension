@@ -40,8 +40,6 @@ pub enum Refusal {
     DataLoss,
     /// The stream's principal token ran out.
     Expired,
-    /// The instance is draining: every event held was sent; subscribe afresh at another instance.
-    Draining,
 }
 
 impl Refusal {
@@ -52,7 +50,6 @@ impl Refusal {
             Refusal::OutOfRange => refusal::OUT_OF_RANGE,
             Refusal::DataLoss => refusal::DATA_LOSS,
             Refusal::Expired => refusal::EXPIRED,
-            Refusal::Draining => refusal::DRAINING,
         }
     }
 
@@ -63,7 +60,6 @@ impl Refusal {
             Refusal::OutOfRange => tonic::Code::OutOfRange,
             Refusal::DataLoss => tonic::Code::DataLoss,
             Refusal::Expired => tonic::Code::Unauthenticated,
-            Refusal::Draining => tonic::Code::Unavailable,
         };
         tonic::Status::new(code, self.name())
     }
@@ -78,6 +74,13 @@ impl fmt::Display for Refusal {
 impl std::error::Error for Refusal {}
 
 type Ended = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
+
+/// A drained stream's end: UNAVAILABLE `draining`, the bare name a caller matches by equality (CONTRACT §8.3, K
+/// m/16116), retryable at another instance. A cursor is its instance's own, so the subscriber subscribes afresh
+/// there, from its own checkpoint, and surfaces the gap: no lossless resumption is promised (D).
+fn draining() -> tonic::Status {
+    tonic::Status::unavailable(refusal::DRAINING)
+}
 
 /// What tells an `Events` stream its instance is draining: a level, made fresh for each wait, that completes once
 /// the drain asks the stream to end (or cancels it). The product's drain layer puts it in the request's extensions
@@ -243,14 +246,23 @@ enum Read {
 
 impl Subscription {
     /// This subscription, ended by `end` when its instance drains: what the journal holds after its cursor is
-    /// still sent, then it ends with [`Refusal::Draining`]. `None` leaves it as it was.
+    /// still sent, then it ends ([`Subscription::drained`] says why; its gRPC stream ends UNAVAILABLE `draining`).
+    /// `None` leaves it as it was. The drain's ask isn't a [`Refusal`]: that enum is exhaustive, and a variant would
+    /// break every match on it (D).
     #[must_use]
     pub fn ending_on(mut self, end: Option<StreamEnd>) -> Subscription {
         self.end = end;
         self
     }
 
-    /// The next event, a refusal that ends the stream, or `None` once it has ended.
+    /// Whether the stream ended because its instance's drain asked: every event it held was sent first.
+    #[must_use]
+    pub fn drained(&self) -> bool {
+        self.draining && self.ended
+    }
+
+    /// The next event, a refusal that ends the stream, or `None` once it has ended (or was drained:
+    /// [`Subscription::drained`]).
     pub async fn next(&mut self) -> Option<Result<pb::Event, Refusal>> {
         loop {
             if self.ended {
@@ -269,7 +281,10 @@ impl Subscription {
             match self.read() {
                 Read::Event(event) => return Some(Ok((*event).clone())),
                 Read::Lost => return self.end(Refusal::DataLoss),
-                Read::Nothing if self.draining => return self.end(Refusal::Draining),
+                Read::Nothing if self.draining => {
+                    self.ended = true;
+                    return None;
+                }
                 Read::Nothing => {}
             }
             let end = self.end.as_ref().map(StreamEnd::ended);
@@ -293,11 +308,15 @@ impl Subscription {
         futures_util::stream::unfold(self, |mut sub| async move { sub.next().await.map(|item| (item, sub)) })
     }
 
-    /// The subscription as a gRPC response stream: each refusal as its [`Refusal::status`].
+    /// The subscription as a gRPC response stream: each refusal as its [`Refusal::status`], and a drained end as
+    /// UNAVAILABLE `draining`, said once.
     pub fn into_grpc_stream(self) -> impl Stream<Item = Result<pb::Event, tonic::Status>> + Send + 'static {
-        futures_util::stream::unfold(self, |mut sub| async move {
-            let item = sub.next().await?;
-            Some((item.map_err(|r| r.status()), sub))
+        futures_util::stream::unfold((self, false), |(mut sub, said)| async move {
+            match sub.next().await {
+                Some(item) => Some((item.map_err(|r| r.status()), (sub, said))),
+                None if sub.drained() && !said => Some((Err(draining()), (sub, true))),
+                None => None,
+            }
         })
     }
 
