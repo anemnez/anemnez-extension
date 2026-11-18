@@ -217,7 +217,9 @@ deadline on that clock, read once when it opens (C), so a `ManualClock` test dri
 <!-- claim: a-stream-asked-to-end-by-the-drain-ends-draining -->
 **A stream asked to end by its instance's drain ends `draining`** (§8.3's "last frames, then `end`"; D m/16592). The
 product's drain layer puts a `StreamEnd` in each stream's request; the `Events` service reads it from there. Once the
-drain asks, the stream sends what the journal already holds after its cursor, then ends UNAVAILABLE `draining`
+drain asks, the stream notes the journal's place when it first reads the ask (before reading the journal, so a busy
+journal never hides it), sends what is held after its cursor up to there and never what is published later, then
+ends UNAVAILABLE `draining`
 (the bare name): retryable, and the subscriber subscribes afresh at another instance from its own checkpoint and
 surfaces the gap, as for `cursor-not-mine`. A cursor is its instance's own, so no lossless resumption is promised
 (D). That flush is the frames the body yields, never a wait on the reader: a reader too slow to take them by the
