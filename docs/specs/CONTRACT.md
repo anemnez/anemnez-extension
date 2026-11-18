@@ -121,7 +121,7 @@ are not on that log yet refuses the call `events-call-unserved`, as the serving 
 product's events, the `Events(after)` stream and `Call`, and the serving face keeps a second log, its
 `Journal`. Both retire onto `Call` and the producer's hydramq-events log. Step 1 is this release:
 `Call` is added and the Journal refuses it by name. Step 2 moves each product's events and the
-serving face onto the log, and removes `Events(after)` and the Journal. Ends 2026-12-15 (owner K, from H).
+serving face onto the log, and removes `Events(after)` and the Journal. Ends 2026-11-21 (owner K, from H; the User via B m/18544: our own ends are days).
 
 <!-- claim: a-products-events-are-pushed-through-one-watch -->
 **A product's events are pushed through one watch** (A, D, H, 2026-11-14; house rule 14: no long
@@ -454,7 +454,7 @@ call, such as a server between builds (R9's bound), because that is rule 4's, no
 **Retiring:** the face first written here answered a long method with one call bounded by its
 progress. That call retires: step 1 is this change, the spec. Step 2 is the job shape built in the
 mapping and its host, with the progress-bounded long call removed. No host generates a long tool
-yet, so nothing waits on it today. Ends 2026-12-15 (owner K, from H).
+yet, so nothing waits on it today. Ends 2026-11-21 (owner K, from H; the User via B m/18544: our own ends are days).
 
 <!-- claim: a-flattened-name-is-one-tool -->
 **A flattened name is one tool.** Two offered methods whose names flatten alike (`GetURL` and
