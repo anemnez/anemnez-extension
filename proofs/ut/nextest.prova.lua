@@ -78,6 +78,7 @@ spoken_for("a-stream-ends-at-its-tokens-expiry-on-the-injected-clock", "serve_te
 spoken_for("a-stream-asked-to-end-by-the-drain-ends-draining", "serve_tests::a_stream_asked_to_end_by_the_drain_sends_what_it_holds_then_ends_draining")
 spoken_for("an-issuers-record-is-read-once-per-key-age", "key_cache::tests::a_held_record_is_used_until_its_age_then_read_again")
 spoken_for("an-issuers-record-is-read-once-per-key-age", "key_cache::tests::an_age_passed_while_asleep_reads_again")
+spoken_for("an-issuers-record-is-read-once-per-key-age", "key_cache::tests::a_records_age_runs_from_its_ask")
 spoken_for("an-issuers-record-is-read-once-per-key-age", "key_cache::tests::concurrent_lookups_make_one_read_and_join_its_flight")
 spoken_for("an-issuers-record-is-read-once-per-key-age", "key_cache::tests::a_flight_past_its_deadline_is_gone_and_its_answer_dropped")
 spoken_for("an-issuers-record-is-read-once-per-key-age", "key_cache::tests::a_late_answer_never_overwrites_a_newer_record")

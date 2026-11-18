@@ -269,7 +269,8 @@ product's doctor, so bounds too tight for a real swarm are raised by measure (D 
 <!-- claim: an-issuers-record-is-read-once-per-key-age -->
 **An issuer's record is read once per `KEY_AGE`, and the cache saves only the read** (D m/4, E m/5 direct; -serve's
 `key_cache`, a pure machine the `Verifier` hosts). A held record is used for `KEY_AGE` (60 s), read on `Host`, so a
-host asleep through a revoke reads again on waking: **60 s is the worst-case latency of a revoke**. Tokens from one
+host asleep through a revoke reads again on waking, and its age runs from when the read was asked, not answered, so a
+slow answer never stretches it (B m/17752): **60 s is the worst-case latency of a revoke**. Tokens from one
 issuer at once share one read (a flight); the flight has a deadline (`FETCH_WITHIN`, the keys bound), past which
 every waiter is `lookup-unanswered` (keys), and an answer naming a flight that is gone or replaced is dropped, so a
 late answer never overwrites a newer record or revives a cleared one. An Unclear is never a record, and the read is

@@ -7,8 +7,8 @@
 //! | Known | Means | A lookup |
 //! |---|---|---|
 //! | none, or stale | nothing usable | starts a flight ([`Step::Fetch`]), or joins the one in flight ([`Step::Join`]) |
-//! | `Held { record, read_at }`, fresh | read within [`KEY_AGE`] | uses it ([`Step::Use`]); a key id it lacks starts a flight at most once per [`REFETCH_EVERY`] |
-//! | `Refused { why, read_at }`, fresh | `unknown-key` or `unattested` within [`REFUSED_AGE`] | is refused by the same name ([`Step::Refuse`]) |
+//! | `Held { record, read_at }`, fresh | asked within [`KEY_AGE`] (its age runs from the ask) | uses it ([`Step::Use`]); a key id it lacks starts a flight at most once per [`REFETCH_EVERY`] |
+//! | `Refused { why, read_at }`, fresh | `unknown-key` or `unattested` within [`REFUSED_AGE`] of its ask | is refused by the same name ([`Step::Refuse`]) |
 //!
 //! A read that ends Unclear backs the issuer off for [`UNANSWERED_FOR`]: its lookups are `lookup-unanswered` at once,
 //! never a record and never a refusal, so a Fabric outage costs one wait per issuer per second, not one per call (B m/17496,
@@ -85,6 +85,8 @@ enum Known {
 #[derive(Clone, Copy, Debug)]
 struct InFlight {
     flight: Flight,
+    /// When it was asked: an answer's age runs from here, so a slow answer never stretches KEY_AGE (B m/17752).
+    asked: Host,
     by: Host,
 }
 
@@ -162,19 +164,19 @@ impl KeyCache {
     pub fn fetched(&mut self, issuer: &str, flight: Flight, answer: Result<KeyRecord, Refusal>, now: Host) -> Settled {
         self.expire(now);
         let Some(entry) = self.entries.get_mut(issuer) else { return Settled::Dropped };
-        if entry.flight.map(|f| f.flight) != Some(flight) {
+        let Some(asked) = entry.flight.filter(|f| f.flight == flight).map(|f| f.asked) else {
             return Settled::Dropped;
-        }
+        };
         entry.flight = None;
         self.flights = self.flights.saturating_sub(1);
         match &answer {
             Ok(record) => {
                 self.unback(issuer);
-                self.know(issuer, Known::Held { record: record.clone(), read_at: now });
+                self.know(issuer, Known::Held { record: record.clone(), read_at: asked });
             }
             Err(why @ (Refusal::UnknownKey | Refusal::Unattested)) => {
                 self.unback(issuer);
-                self.know(issuer, Known::Refused { why: why.clone(), read_at: now });
+                self.know(issuer, Known::Refused { why: why.clone(), read_at: asked });
             }
             // Unclear is never a record: what was known stays as it was, a stale record stays unused, and the next
             // read is held off for UNANSWERED_FOR.
@@ -255,7 +257,7 @@ impl KeyCache {
         self.next_flight += 1;
         let flight = Flight(self.next_flight);
         let entry = self.entries.entry(issuer.to_owned()).or_default();
-        entry.flight = Some(InFlight { flight, by: now + FETCH_WITHIN });
+        entry.flight = Some(InFlight { flight, asked: now, by: now + FETCH_WITHIN });
         entry.last_read = Some(now);
         self.flights += 1;
         Step::Fetch(flight)

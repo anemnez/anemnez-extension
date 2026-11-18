@@ -291,3 +291,26 @@ fn a_lapsed_backoff_is_dropped_by_the_lookup_that_meets_it() {
     let Step::Fetch(_) = cache.lookup("i", "k1", at(2)) else { panic!("past its time, read again") };
     assert_eq!(cache.backed_off(), 0, "the lapsed backoff dropped at the lookup, before any answer");
 }
+
+/// B m/17752: KEY_AGE is a revoke's worst case, so a record's age runs from when it was asked, not answered: a slow
+/// read answered near FETCH_WITHIN never stretches the window past KEY_AGE.
+#[test]
+fn a_records_age_runs_from_its_ask() {
+    let mut cache = KeyCache::new();
+    let Step::Fetch(flight) = cache.lookup("i", "k1", at(0)) else { panic!("the first lookup reads") };
+    let slow = FETCH_WITHIN.checked_sub(Duration::from_millis(1)).expect("FETCH_WITHIN is past 1 ms");
+    let answered = at(0).plus(slow);
+    assert_eq!(
+        cache.fetched("i", flight, Ok(record("i", &["k1"])), answered),
+        Settled::Answered(Ok(record("i", &["k1"])))
+    );
+    assert_eq!(
+        cache.lookup("i", "k1", ms(at(59), 999)),
+        Step::Use(record("i", &["k1"])),
+        "fresh inside KEY_AGE of its ask"
+    );
+    assert!(
+        matches!(cache.lookup("i", "k1", at(60)), Step::Fetch(_)),
+        "stale at KEY_AGE from its ask, however slow the answer"
+    );
+}
