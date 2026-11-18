@@ -480,8 +480,9 @@ async fn a_stream_asked_to_end_by_the_drain_sends_what_it_holds_then_ends_draini
     ask.send_replace(true);
     assert_eq!(sub.next().await.expect("an event").map(|e| e.cursor), Ok(first), "held events are sent");
     assert_eq!(sub.next().await.expect("an event").map(|e| e.cursor), Ok(second));
-    assert_eq!(sub.next().await, Some(Err(Refusal::Draining)), "then it ends draining");
-    assert_eq!(sub.next().await, None, "the stream ends after draining");
+    assert_eq!(sub.next().await, None, "then it ends");
+    assert!(sub.drained(), "drained, said so");
+    assert_eq!(sub.next().await, None, "and stays ended");
 
     let (end, ask) = stream_end();
     let mut parked =
@@ -489,12 +490,12 @@ async fn a_stream_asked_to_end_by_the_drain_sends_what_it_holds_then_ends_draini
     let reader = tokio::spawn(async move { parked.next().await });
     tokio::task::yield_now().await;
     ask.send_replace(true);
-    assert_eq!(reader.await.expect("joins"), Some(Err(Refusal::Draining)), "a parked reader is woken by the ask");
+    assert_eq!(reader.await.expect("joins").map(|_| ()), None, "a parked reader is woken by the ask and ends");
 
     let mut late =
         journal.subscribe(&journal.head(), Vec::new(), far(&manual)).expect("subscribes").ending_on(Some(end_now()));
-    assert_eq!(late.next().await, Some(Err(Refusal::Draining)), "opened after the ask, it ends at once");
-    assert_eq!(Refusal::Draining.status().code(), tonic::Code::Unavailable, "retryable, elsewhere");
+    assert_eq!(late.next().await.map(|_| ()), None, "opened after the ask, it ends at once");
+    assert!(late.drained());
 }
 
 fn end_now() -> crate::journal::StreamEnd {
