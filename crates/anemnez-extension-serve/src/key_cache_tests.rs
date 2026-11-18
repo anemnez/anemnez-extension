@@ -111,7 +111,7 @@ fn a_flight_past_its_deadline_is_gone_and_its_answer_dropped() {
     assert_eq!(gone, vec![("i".to_owned(), flight)], "its waiters are Unclear");
     assert_eq!(cache.next_deadline(), None);
     assert_eq!(cache.fetched("i", flight, Ok(record("i", &["k1"])), at(1)), Settled::Dropped, "never revived");
-    assert!(matches!(cache.lookup("i", "k1", at(1)), Step::Fetch(f) if f != flight), "the next lookup reads afresh");
+    assert!(matches!(cache.lookup("i", "k1", at(2)), Step::Fetch(f) if f != flight), "past its backoff, a fresh read");
 }
 
 /// E 2: flight 1 times out, flight 2 holds record B, flight 1's late answer A arrives: B stands.
@@ -120,11 +120,11 @@ fn a_late_answer_never_overwrites_a_newer_record() {
     let mut cache = KeyCache::new();
     let Step::Fetch(one) = cache.lookup("i", "k1", at(0)) else { panic!("fetches") };
     cache.expire(at(1));
-    let Step::Fetch(two) = cache.lookup("i", "k1", at(1)) else { panic!("fetches again") };
+    let Step::Fetch(two) = cache.lookup("i", "k1", at(3)) else { panic!("fetches again, past the backoff") };
     let b = record("i", &["k1", "b"]);
-    assert_eq!(cache.fetched("i", two, Ok(b.clone()), at(1)), Settled::Answered(Ok(b.clone())));
-    assert_eq!(cache.fetched("i", one, Ok(record("i", &["k1", "a"])), at(1)), Settled::Dropped);
-    assert_eq!(cache.lookup("i", "k1", at(2)), Step::Use(b), "B stands");
+    assert_eq!(cache.fetched("i", two, Ok(b.clone()), at(3)), Settled::Answered(Ok(b.clone())));
+    assert_eq!(cache.fetched("i", one, Ok(record("i", &["k1", "a"])), at(3)), Settled::Dropped);
+    assert_eq!(cache.lookup("i", "k1", at(4)), Step::Use(b), "B stands");
 }
 
 /// D 3: past KEY_AGE with the refetch Unclear, the call is Unclear: the stale record is never used, no grace.
@@ -135,20 +135,70 @@ fn a_stale_record_whose_refetch_is_unclear_is_never_used() {
     read(&mut cache, "i", "k1", at(0), &Ok(record("i", &["k1"])), &mut reads);
     let unclear = Err(Refusal::LookupUnanswered(Lookup::Keys));
     assert_eq!(read(&mut cache, "i", "k1", at(61), &unclear, &mut reads), Step::Refuse(unclear.clone().unwrap_err()));
-    // Not cached: the next lookup reads again, and still never uses the stale record.
-    assert!(matches!(cache.lookup("i", "k1", at(61)), Step::Fetch(_)));
+    // Never a record: within UNANSWERED_FOR the lookup is Unclear at once, and after it the read is retried, never
+    // the stale record used.
+    assert_eq!(cache.lookup("i", "k1", at(61)), Step::Refuse(unclear.clone().unwrap_err()));
+    assert!(matches!(cache.lookup("i", "k1", at(62)), Step::Fetch(_)));
 }
 
+/// D m/17498: an Unclear is never a record, and the read is retried after UNANSWERED_FOR.
 #[test]
-fn unclear_is_never_cached() {
+fn unclear_is_never_a_record_and_is_retried_after_its_backoff() {
     let mut cache = KeyCache::new();
     let mut reads = 0;
     let unclear = Err(Refusal::LookupUnanswered(Lookup::Keys));
     for _ in 0..5 {
-        read(&mut cache, "i", "k1", at(0), &unclear, &mut reads);
+        assert_eq!(
+            read(&mut cache, "i", "k1", at(0), &unclear, &mut reads),
+            Step::Refuse(unclear.clone().unwrap_err())
+        );
     }
-    assert_eq!(reads, 5, "each lookup reads: an Unclear answer is no answer");
-    assert_eq!(cache.counts(), (0, 0, 0), "and nothing is kept");
+    assert_eq!(reads, 1, "one read, then Unclear at once for UNANSWERED_FOR");
+    assert_eq!(cache.counts(), (0, 0, 0), "never a held record nor a refusal");
+    read(&mut cache, "i", "k1", at(1), &unclear, &mut reads);
+    assert_eq!(reads, 2, "retried after UNANSWERED_FOR");
+}
+
+/// D m/17498 (B's should): an outage of N seconds costs at most N + 1 reads per issuer, not one per call.
+#[test]
+fn an_outage_costs_one_read_per_second_per_issuer_not_one_per_call() {
+    let mut cache = KeyCache::new();
+    let mut reads = 0;
+    let unclear = Err(Refusal::LookupUnanswered(Lookup::Keys));
+    // Calls every 10 ms for 10 s, every read Unclear.
+    for tick in 0..1000 {
+        read(&mut cache, "i", "k1", ms(at(0), tick * 10), &unclear, &mut reads);
+    }
+    assert!(reads <= 11, "at most N + 1 reads over N = 10 s: {reads}");
+}
+
+/// D m/17498 1: a backoff never shadows a fresh record: a key-id miss whose refetch is Unclear leaves the fresh record
+/// in use for the key ids it has.
+#[test]
+fn a_backoff_never_shadows_a_fresh_record() {
+    let mut cache = KeyCache::new();
+    let mut reads = 0;
+    read(&mut cache, "i", "k1", at(0), &Ok(record("i", &["k1"])), &mut reads);
+    let unclear = Err(Refusal::LookupUnanswered(Lookup::Keys));
+    assert_eq!(
+        read(&mut cache, "i", "rotated", at(2), &unclear, &mut reads),
+        Step::Refuse(unclear.clone().unwrap_err())
+    );
+    assert_eq!(cache.lookup("i", "k1", at(2)), Step::Use(record("i", &["k1"])), "the fresh record still serves");
+}
+
+/// D m/17498 2: backoffs are their own bounded pool, and never make an issuer look known.
+#[test]
+fn backoffs_are_bounded_and_never_make_an_issuer_known() {
+    let mut cache = KeyCache::new();
+    let mut reads = 0;
+    let unclear = Err(Refusal::LookupUnanswered(Lookup::Keys));
+    for n in 0..UNANSWERED_AT_MOST * 10 {
+        read(&mut cache, &format!("down-{n}"), "k", at(0), &unclear, &mut reads);
+    }
+    assert_eq!(cache.backed_off(), UNANSWERED_AT_MOST, "at most its cap");
+    assert_eq!(cache.counts(), (0, 0, 0), "no issuer looks held or refused");
+    assert!(cache.entries.len() <= UNANSWERED_AT_MOST, "the map grows no further than the pool");
 }
 
 #[test]
