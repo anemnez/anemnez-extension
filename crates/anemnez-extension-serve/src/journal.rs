@@ -11,7 +11,7 @@
 //! `cursor-not-mine`.
 //!
 //! A stream asked to end by its instance's drain ([`StreamEnd`], put in the request by the product's drain layer)
-//! sends what the journal already holds after its cursor, then ends with `draining`: retryable, subscribed afresh at
+//! sends what the journal holds after its cursor at the ask, never what is published later, then ends with `draining`: retryable, subscribed afresh at
 //! another instance (CONTRACT.md §8.3).
 
 use std::collections::VecDeque;
@@ -22,7 +22,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use anemnez_clock::{Clock, Mono};
 use anemnez_extension::refusal;
-use futures_util::Stream;
+use futures_util::{FutureExt as _, Stream};
 use tokio::sync::Notify;
 
 use crate::pb;
@@ -202,7 +202,7 @@ impl Journal {
             seq + 1
         };
         drop(ring);
-        Ok(Subscription { journal: self.clone(), next, kinds, expires, ended: false, end: None, draining: false })
+        Ok(Subscription { journal: self.clone(), next, kinds, expires, ended: false, end: None, drain_until: None })
     }
 
     fn cursor(&self, seq: u64) -> String {
@@ -233,8 +233,9 @@ pub struct Subscription {
     ended: bool,
     /// The drain's ask to end, if the stream was opened with one.
     end: Option<StreamEnd>,
-    /// The drain asked: send what is held, then end `draining`.
-    draining: bool,
+    /// The drain asked: the journal's next sequence then. What is held before it is sent, then the stream ends:
+    /// never later events, so a busy journal can't keep a draining stream open (E).
+    drain_until: Option<u64>,
 }
 
 /// What reading the journal found.
@@ -258,7 +259,7 @@ impl Subscription {
     /// Whether the stream ended because its instance's drain asked: every event it held was sent first.
     #[must_use]
     pub fn drained(&self) -> bool {
-        self.draining && self.ended
+        self.drain_until.is_some() && self.ended
     }
 
     /// The next event, a refusal that ends the stream, or `None` once it has ended (or was drained:
@@ -278,10 +279,14 @@ impl Subscription {
             let published = inner.published.notified();
             tokio::pin!(published);
             published.as_mut().enable();
+            // The ask is read before the journal, so a journal published to on every turn never hides it.
+            if self.drain_until.is_none() && self.end.as_ref().is_some_and(|end| end.ended().now_or_never().is_some()) {
+                self.drain_until = Some(self.journal.ring().next);
+            }
             match self.read() {
                 Read::Event(event) => return Some(Ok((*event).clone())),
                 Read::Lost => return self.end(Refusal::DataLoss),
-                Read::Nothing if self.draining => {
+                Read::Nothing if self.drain_until.is_some() => {
                     self.ended = true;
                     return None;
                 }
@@ -295,10 +300,11 @@ impl Subscription {
                 }
             };
             tokio::select! {
+                biased;
+                // Asked to end: note where the journal stands, send what it holds up to there, then end.
+                () = asked => self.drain_until = Some(self.journal.ring().next),
                 () = &mut published => {}
                 () = clock.sleep_until(self.expires) => return self.end(Refusal::Expired),
-                // Asked to end: go round once more, sending what is held, then end `draining`.
-                () = asked => self.draining = true,
             }
         }
     }
@@ -327,7 +333,9 @@ impl Subscription {
         }
         let mut next = self.next;
         let mut found = Read::Nothing;
-        while next < ring.next {
+        // Draining, nothing published after the ask is read.
+        let limit = self.drain_until.map_or(ring.next, |until| until.min(ring.next));
+        while next < limit {
             let event = &ring.events[(next - ring.first) as usize];
             next += 1;
             if self.kinds.is_empty() || self.kinds.iter().any(|k| *k == event.kind) {

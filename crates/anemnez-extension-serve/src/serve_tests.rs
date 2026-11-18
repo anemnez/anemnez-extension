@@ -498,6 +498,24 @@ async fn a_stream_asked_to_end_by_the_drain_sends_what_it_holds_then_ends_draini
     assert!(late.drained());
 }
 
+/// E: a draining stream ends at the journal's place when it first reads the ask, however busy the journal stays:
+/// what is published after that is never sent, so `draining` comes at the noted sequence, not when a reader catches
+/// up with a publisher that never stops.
+#[tokio::test]
+async fn a_draining_stream_ends_at_the_journal_s_place_when_asked_however_busy() {
+    let (journal, manual) = journal(64);
+    let (end, ask) = stream_end();
+    let mut sub = journal.subscribe("", Vec::new(), far(&manual)).expect("subscribes").ending_on(Some(end));
+    let held = journal.publish("tick", vec![0]);
+    ask.send_replace(true);
+    assert_eq!(sub.next().await.expect("an event").map(|e| e.cursor), Ok(held), "what was held is sent");
+    for i in 1..=20u8 {
+        journal.publish("tick", vec![i]);
+    }
+    assert_eq!(sub.next().await.map(|_| ()), None, "nothing published after the ask is sent");
+    assert!(sub.drained(), "ended by the drain");
+}
+
 fn end_now() -> crate::journal::StreamEnd {
     crate::journal::StreamEnd::new(|| async {})
 }
