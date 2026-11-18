@@ -10,6 +10,10 @@
 //! | `Held { record, read_at }`, fresh | read within [`KEY_AGE`] | uses it ([`Step::Use`]); a key id it lacks starts a flight at most once per [`REFETCH_EVERY`] |
 //! | `Refused { why, read_at }`, fresh | `unknown-key` or `unattested` within [`REFUSED_AGE`] | is refused by the same name ([`Step::Refuse`]) |
 //!
+//! A read that ends Unclear backs the issuer off for [`UNANSWERED_FOR`]: its lookups are `lookup-unanswered` at once,
+//! never a record and never a refusal, so a Fabric outage costs one wait per issuer per second, not one per call (B m/17496,
+//! D m/17498). A backoff never shadows a fresh record and never makes an issuer look known: it has its own pool.
+//!
 //! A flight has an id and a deadline ([`FETCH_WITHIN`]). Past it every waiter is Unclear and the flight is gone; an
 //! answer naming a flight that is gone or replaced is dropped ([`Settled::Dropped`]), so a late answer never
 //! overwrites a newer record or revives a cleared one (E). An Unclear answer is never cached, and a stale record is
@@ -41,6 +45,10 @@ pub const HELD_AT_MOST: usize = 1024;
 pub const REFUSED_AT_MOST: usize = 256;
 /// Flights at once; past it a lookup is Unclear at once, never queued.
 pub const FLIGHTS_AT_MOST: usize = 64;
+/// How long a read that ended Unclear holds the issuer's next read off: its lookups are Unclear at once meanwhile.
+pub const UNANSWERED_FOR: Duration = Duration::from_secs(1);
+/// Backoffs kept, in a pool of their own: evicting one only lets the next read happen sooner.
+pub const UNANSWERED_AT_MOST: usize = 256;
 
 /// A flight's id: [`KeyCache::fetched`] names it, so an answer for a flight that is gone is dropped.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -86,6 +94,10 @@ struct Entry {
     flight: Option<InFlight>,
     /// When this issuer was last read, for the key-id bypass.
     last_read: Option<Host>,
+    /// Until when its next read is held off, after a read that ended Unclear.
+    backoff: Option<Host>,
+    /// Its place in the backoff pool's order.
+    backed: u64,
     /// Its place in its pool's order.
     used: u64,
 }
@@ -97,6 +109,7 @@ pub struct KeyCache {
     /// Each pool's order, least recently used first: `used` to issuer.
     held: BTreeMap<u64, String>,
     refused: BTreeMap<u64, String>,
+    unanswered: BTreeMap<u64, String>,
     flights: usize,
     next_flight: u64,
     tick: u64,
@@ -131,6 +144,10 @@ impl KeyCache {
             }
             (Some(Err(why)), _) => Step::Refuse(why),
             (None, Some(f)) => Step::Join(f.flight),
+            // Backed off after an Unclear read: Unclear at once, never a stale record (D m/17498).
+            (None, None) if entry.backoff.is_some_and(|until| now < until) => {
+                return Step::Refuse(Refusal::LookupUnanswered(Lookup::Keys));
+            }
             (None, None) => return self.start(issuer, now),
         };
         self.touch(issuer);
@@ -147,12 +164,17 @@ impl KeyCache {
         entry.flight = None;
         self.flights = self.flights.saturating_sub(1);
         match &answer {
-            Ok(record) => self.know(issuer, Known::Held { record: record.clone(), read_at: now }),
+            Ok(record) => {
+                self.unback(issuer);
+                self.know(issuer, Known::Held { record: record.clone(), read_at: now });
+            }
             Err(why @ (Refusal::UnknownKey | Refusal::Unattested)) => {
+                self.unback(issuer);
                 self.know(issuer, Known::Refused { why: why.clone(), read_at: now });
             }
-            // Unclear is never cached: what was known stays as it was, and a stale record stays unused.
-            Err(_) => self.forget_if_bare(issuer),
+            // Unclear is never a record: what was known stays as it was, a stale record stays unused, and the next
+            // read is held off for UNANSWERED_FOR.
+            Err(_) => self.back_off(issuer, now),
         }
         Settled::Answered(answer)
     }
@@ -169,7 +191,8 @@ impl KeyCache {
                 entry.flight = None;
                 self.flights = self.flights.saturating_sub(1);
             }
-            self.forget_if_bare(issuer);
+            // A flight past its deadline is an Unclear read.
+            self.back_off(issuer, now);
         }
         gone
     }
@@ -184,6 +207,38 @@ impl KeyCache {
     #[must_use]
     pub fn counts(&self) -> (usize, usize, usize) {
         (self.held.len(), self.refused.len(), self.flights)
+    }
+
+    /// How many issuers are backed off.
+    #[must_use]
+    pub fn backed_off(&self) -> usize {
+        self.unanswered.len()
+    }
+
+    /// Hold `issuer`'s next read off until `now + UNANSWERED_FOR`, in the backoff pool, evicting its oldest past the cap.
+    fn back_off(&mut self, issuer: &str, now: Host) {
+        self.unback(issuer);
+        self.tick += 1;
+        let tick = self.tick;
+        let entry = self.entries.entry(issuer.to_owned()).or_default();
+        entry.backoff = Some(now + UNANSWERED_FOR);
+        entry.backed = tick;
+        self.unanswered.insert(tick, issuer.to_owned());
+        while self.unanswered.len() > UNANSWERED_AT_MOST {
+            let Some((_, evicted)) = self.unanswered.pop_first() else { break };
+            if let Some(entry) = self.entries.get_mut(&evicted) {
+                entry.backoff = None;
+            }
+            self.forget_if_bare(&evicted);
+        }
+    }
+
+    fn unback(&mut self, issuer: &str) {
+        if let Some(entry) = self.entries.get_mut(issuer)
+            && entry.backoff.take().is_some()
+        {
+            self.unanswered.remove(&entry.backed);
+        }
     }
 
     fn start(&mut self, issuer: &str, now: Host) -> Step {
@@ -214,14 +269,16 @@ impl KeyCache {
         }
         let (pool, cap) = if held { (&mut self.held, HELD_AT_MOST) } else { (&mut self.refused, REFUSED_AT_MOST) };
         pool.insert(tick, issuer.to_owned());
+        let mut evicted = Vec::new();
         while pool.len() > cap {
-            let Some((_, evicted)) = pool.pop_first() else { break };
-            if let Some(entry) = self.entries.get_mut(&evicted) {
+            let Some((_, gone)) = pool.pop_first() else { break };
+            evicted.push(gone);
+        }
+        for gone in evicted {
+            if let Some(entry) = self.entries.get_mut(&gone) {
                 entry.known = None;
             }
-            if self.entries.get(&evicted).is_some_and(|e| e.flight.is_none()) {
-                self.entries.remove(&evicted);
-            }
+            self.forget_if_bare(&gone);
         }
     }
 
@@ -250,7 +307,7 @@ impl KeyCache {
 
     /// An entry with nothing known and nothing in flight goes, so lookups alone never grow the map.
     fn forget_if_bare(&mut self, issuer: &str) {
-        if self.entries.get(issuer).is_some_and(|e| e.known.is_none() && e.flight.is_none()) {
+        if self.entries.get(issuer).is_some_and(|e| e.known.is_none() && e.flight.is_none() && e.backoff.is_none()) {
             self.entries.remove(issuer);
         }
     }

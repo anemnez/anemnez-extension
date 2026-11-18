@@ -272,8 +272,11 @@ product's doctor, so bounds too tight for a real swarm are raised by measure (D 
 host asleep through a revoke reads again on waking: **60 s is the worst-case latency of a revoke**. Tokens from one
 issuer at once share one read (a flight); the flight has a deadline (`FETCH_WITHIN`, the keys bound), past which
 every waiter is `lookup-unanswered` (keys), and an answer naming a flight that is gone or replaced is dropped, so a
-late answer never overwrites a newer record or revives a cleared one. An Unclear read is never cached, and a stale
-record is never used: past `KEY_AGE` with its read Unclear, the call is Unclear, with no grace. `unknown-key` and
+late answer never overwrites a newer record or revives a cleared one. An Unclear is never a record, and the read is
+retried after `UNANSWERED_FOR` (1 s): meanwhile that issuer's lookups are `lookup-unanswered` at once, so a Fabric outage
+costs one wait per issuer per second, not one per call (B m/17496, D m/17498). That backoff never shadows a fresh
+record and never makes an issuer look known: it is its own pool (256). A stale record is never used: past `KEY_AGE`
+with its read Unclear, the call is Unclear, with no grace. `unknown-key` and
 `unattested` are answered from the cache for `REFUSED_AGE` (5 s). A token naming a key id the held record lacks (a
 rotation) reads again at most once per `REFETCH_EVERY` (1 s). Held records (1024) and refusals (256) are separate
 least-recently-used pools, so a flood of made-up issuers never evicts a real one's record; flights are capped (64),
