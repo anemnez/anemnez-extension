@@ -6,7 +6,7 @@ use crate::accepted::{Accepted, judged};
 use crate::pb;
 
 fn peer(pid: i32, code: Result<Code, String>) -> Peer {
-    Peer { pid, pidversion: 7, code }
+    Peer::from_token([501, 501, 20, 501, 20, pid.cast_unsigned(), 100_001, 7], code)
 }
 
 fn fabricd() -> Code {

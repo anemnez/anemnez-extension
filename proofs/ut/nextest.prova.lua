@@ -124,6 +124,7 @@ spoken_for("a-nonce-is-durable-before-the-method-runs (a crash)", "edge_tests::a
 spoken_for("the-judged-peer-is-on-every-request", "accepted_tests::the_judged_peer_is_on_every_request")
 spoken_for("the-judged-peer-is-on-every-request (unreadable code)", "accepted_tests::an_unreadable_code_identity_reaches_the_request_as_unreadable")
 spoken_for("the-judged-peer-is-on-every-request (unjudged)", "accepted_tests::a_connection_not_accepted_through_planes_is_unjudged")
+spoken_for("the-judged-peer-is-on-every-request (whole token)", "peer::tests::a_peer_carries_its_whole_token_and_its_pid_pair_is_the_tokens")
 spoken_for("the-api-plane-applies-its-rules-below-every-service", "plane_tests::the_layer_applies_the_rules_before_any_service")
 spoken_for("the-api-plane-applies-its-rules-below-every-service (unjudged)", "plane_tests::an_unjudged_connection_is_refused_by_name")
 spoken_for("one-function-serves-the-api-plane", "serve_fn_tests::one_function_serves_the_contracts_faces_and_the_products_calls")

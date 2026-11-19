@@ -47,7 +47,10 @@ impl tower_service::Service<http::Request<BoxBody>> for Product {
 }
 
 fn peer(role: Role) -> Peer {
-    Peer { pid: 41, pidversion: 7, code: Ok(Code { identifier: format!("ai.anemnez.{role:?}"), team: "TEAM1".into() }) }
+    Peer::from_token(
+        [501, 501, 20, 501, 20, 41, 100_001, 7],
+        Ok(Code { identifier: format!("ai.anemnez.{role:?}"), team: "TEAM1".into() }),
+    )
 }
 
 /// A product service whose calls never answer: each one says it arrived, then waits forever.

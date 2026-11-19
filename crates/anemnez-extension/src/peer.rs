@@ -50,14 +50,34 @@ pub struct Code {
     pub team: String,
 }
 
-/// The peer of one accepted connection, read once at accept.
+/// The audit token's word that holds the pid (`audit_token_to_pid`).
+pub const PID_WORD: usize = 5;
+/// The audit token's word that holds the pidversion (`audit_token_to_pidversion`).
+pub const PIDVERSION_WORD: usize = 7;
+
+/// The peer of one accepted connection, read once at accept. Made only by [`Peer::from_token`], so its pid and
+/// pidversion are always the token's own, and a field added later is never a break (`non_exhaustive`).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub struct Peer {
     pub pid: i32,
     /// Tells a reused pid apart: a peer is the pair, never the pid alone.
     pub pidversion: i32,
+    /// The whole audit token (`audit_token_t`'s eight words) as read at accept, for a check that needs more than
+    /// the pid pair (Agora's WhoIs, say), so nobody reads it again or rebuilds it from the pair (M m/19189, G, D
+    /// m/19178).
+    pub token: [u32; 8],
     /// Its code identity, or why that couldn't be read.
     pub code: Result<Code, String>,
+}
+
+impl Peer {
+    /// The peer whose audit token, read once at accept, is `token`: its pid and pidversion are the token's own
+    /// words ([`PID_WORD`], [`PIDVERSION_WORD`]), so the two can never disagree.
+    #[must_use]
+    pub fn from_token(token: [u32; 8], code: Result<Code, String>) -> Peer {
+        Peer { pid: token[PID_WORD].cast_signed(), pidversion: token[PIDVERSION_WORD].cast_signed(), token, code }
+    }
 }
 
 /// What the accept judged the peer to be. -serve's router acts on it alone: fabricd reads `Describe` only, a
@@ -87,8 +107,28 @@ pub enum Verdict {
 mod tests {
     use super::*;
 
+    fn token(pid: i32, pidversion: i32) -> [u32; 8] {
+        let mut words = [501, 501, 20, 501, 20, 0, 100_001, 0];
+        (words[PID_WORD], words[PIDVERSION_WORD]) = (pid.cast_unsigned(), pidversion.cast_unsigned());
+        words
+    }
+
     fn peer(pid: i32, pidversion: i32) -> Peer {
-        Peer { pid, pidversion, code: Ok(Code { identifier: "ai.anemnez.fabricd".into(), team: "TEAM1".into() }) }
+        Peer::from_token(
+            token(pid, pidversion),
+            Ok(Code { identifier: "ai.anemnez.fabricd".into(), team: "TEAM1".into() }),
+        )
+    }
+
+    /// M m/19189: a peer carries its whole token, and its pid pair is the token's own words, never set apart.
+    #[test]
+    fn a_peer_carries_its_whole_token_and_its_pid_pair_is_the_tokens() {
+        let words = token(41, 7);
+        let made = Peer::from_token(words, Err("no signature".into()));
+        assert_eq!((made.pid, made.pidversion, made.token), (41, 7, words));
+        let mut other = words;
+        other[0] = 502;
+        assert_ne!(Peer::from_token(other, Err("no signature".into())), made, "another token is another peer");
     }
 
     /// A reused pid is another peer: identity is the pid and its version together.
@@ -101,7 +141,7 @@ mod tests {
     /// An unreadable code identity is carried with its reason, and is never equal to any readable one.
     #[test]
     fn an_unreadable_code_identity_is_carried_with_why() {
-        let unread = Peer { pid: 41, pidversion: 7, code: Err("no signature".into()) };
+        let unread = Peer::from_token(token(41, 7), Err("no signature".into()));
         assert_ne!(unread, peer(41, 7));
         assert_eq!(unread.code.as_ref().unwrap_err(), "no signature");
     }

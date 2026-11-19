@@ -18,8 +18,10 @@ const LAND: &str = "/h.v1.H/Land";
 
 /// Serve `describe` on a socket whose connections are judged as `role`; answer one Describe call's reply.
 async fn described(describe: Describe, role: Role) -> pb::DescribeReply {
-    let peer =
-        Peer { pid: 41, pidversion: 7, code: Ok(Code { identifier: "ai.anemnez.x".into(), team: "TEAM1".into() }) };
+    let peer = Peer::from_token(
+        [501, 501, 20, 501, 20, 41, 100_001, 7],
+        Ok(Code { identifier: "ai.anemnez.x".into(), team: "TEAM1".into() }),
+    );
     let (_dir, socket, incoming) = crate::serve_tests::listen_as(move |io| Accepted::new(io, peer.clone(), role));
     let server = tonic::transport::Server::builder().add_service(pb::describe_server::DescribeServer::new(describe));
     tokio::spawn(server.serve_with_incoming(incoming));
