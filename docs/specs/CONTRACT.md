@@ -576,10 +576,10 @@ request with no code path to forget; a router reads it with `judged(&request)`, 
 other connection reads `None`, an unjudged peer, which a router refuses wherever a judged one is needed. -serve's router acts on the `Role` the accept decided and never holds the trust table
 or matches a team or identifier itself. The peer token is read **once, at accept**, and kept with the connection:
 macOS answers LOCAL_PEERTOKEN for whoever holds the socket's peer pid when it is asked, so `pidversion` guards
-against a reused pid, and nothing reads the token again per request. `Peer` carries the whole token (`token`, its
-eight words) beside the pair, and is made only by `Peer::from_token`, which takes the pair from the token's own words
-5 and 7, so the two can never disagree; a check that needs the whole token (Agora's WhoIs) takes it from the peer and
-never rebuilds it (M m/19189). `Peer` is `#[non_exhaustive]`, so a field added later is not a break. A peer whose code identity couldn't be read
+against a reused pid, and nothing reads the token again per request. `Peer` is made by `Peer::from_token`, which takes the pair from the token's own words 5 and 7, so the two can
+never disagree. The whole token joins `Peer` as a field (M m/19189) only once no struct literal is left in any
+consumer: Herald publishes requirements as open floors, so a break in a release reaches every consumer at once
+(K m/19305). 0.8.0 shipped it too early and was withdrawn. A peer whose code identity couldn't be read
 is admitted only when the plane's policy says so explicitly. Control's policy refuses it by name, `peer's code
 identity unreadable`.
 
