@@ -306,8 +306,13 @@ ships that store, `FileNonces::open(data_dir, clock)` (K, D), in its one edge mo
 it takes every record already queued, appends them, makes them durable with ONE full sync (std's `sync_data`, which
 is `F_FULLFSYNC` on macOS, where a plain `fsync` leaves data in the drive's cache: D, J), and only then answers each, so a burst costs one fsync. At open it keeps what has not passed its hold (a torn
 last line, never answered, is dropped), and it compacts by atomic rename once dead entries dominate.
-A write that fails refuses the batch, never admits it. An acknowledged nonce survives a crash: a
-child process records one, is answered, and aborts, and the reopened store still refuses it.
+A write that fails refuses the batch, never admits it, and marks the file dirty: the next commit rewrites it whole
+from what is held before anything appends, so a fragment never glues onto an acknowledged entry. An acknowledged
+nonce survives a crash: a child process records one, is answered, and aborts, and the reopened store still refuses
+it. The file is versioned (HOUSE rule 8, G m/9 direct): a first line `anemnez-nonces <N>` names its schema, and no
+line reads as schema 1. A newer schema is refused at open `nonces-file-newer`, and a line that isn't an entry
+anywhere but last is damage, refused `nonces-file-unreadable`, never skipped in silence; both leave the file as it
+is. This build reads the line and doesn't write it yet: it is written once every product in service reads it.
 `MemoryNonces` is for tests only.
 
 <!-- claim: the-rollout-rule-admits-only-a-call-with-no-token -->
