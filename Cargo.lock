@@ -80,6 +80,7 @@ version = "0.7.25"
 dependencies = [
  "anemnez-clock",
  "anemnez-extension",
+ "anemnez-layout",
  "anemnez-sim",
  "bytes",
  "futures-util",

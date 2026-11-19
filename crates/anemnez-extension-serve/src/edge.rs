@@ -186,20 +186,14 @@ impl Store {
         }
     }
 
-    /// Drop what has expired and rewrite the file with only the live entries, durably: a temp file,
-    /// synced, then an atomic rename and a sync of the directory.
+    /// Drop what has expired and rewrite the file with only the live entries, durably, through the one durable write
+    /// (`anemnez_layout::replace`, rule 8: a temp file, synced, an atomic rename, the directory synced; owner-only),
+    /// never a copy of its steps (D m/19196).
     fn compact(&mut self) -> io::Result<()> {
         let now = self.clock.now_wall().unix_millis();
         self.held.retain(|_, until| *until >= now);
-        let tmp = self.path.with_extension("log.tmp");
-        let mut out = File::create(&tmp)?;
         let body: String = self.held.iter().map(|(key, until)| line(key, *until)).collect();
-        out.write_all(body.as_bytes())?;
-        full_sync(&out)?;
-        std::fs::rename(&tmp, &self.path)?;
-        if let Some(dir) = self.path.parent() {
-            full_sync(&File::open(dir)?)?;
-        }
+        anemnez_layout::replace(&self.path, body.as_bytes())?;
         self.file = OpenOptions::new().append(true).open(&self.path)?;
         self.lines = self.held.len();
         Ok(())
