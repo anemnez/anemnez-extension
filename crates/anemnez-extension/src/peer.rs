@@ -56,28 +56,25 @@ pub const PID_WORD: usize = 5;
 /// The audit token's word that holds the pidversion (`audit_token_to_pidversion`).
 pub const PIDVERSION_WORD: usize = 7;
 
-/// The peer of one accepted connection, read once at accept. Made only by [`Peer::from_token`], so its pid and
-/// pidversion are always the token's own, and a field added later is never a break (`non_exhaustive`).
+/// The peer of one accepted connection, read once at accept. Make it with [`Peer::from_token`], never a struct
+/// literal: the whole audit token joins it as a field in a later release, and a literal would then stop compiling.
+/// Herald publishes requirements as open floors, so that release reaches every consumer at once; it waits until no
+/// literal is left anywhere (readers first, K m/19305).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-#[non_exhaustive]
 pub struct Peer {
     pub pid: i32,
     /// Tells a reused pid apart: a peer is the pair, never the pid alone.
     pub pidversion: i32,
-    /// The whole audit token (`audit_token_t`'s eight words) as read at accept, for a check that needs more than
-    /// the pid pair (Agora's WhoIs, say), so nobody reads it again or rebuilds it from the pair (M m/19189, G, D
-    /// m/19178).
-    pub token: [u32; 8],
     /// Its code identity, or why that couldn't be read.
     pub code: Result<Code, String>,
 }
 
 impl Peer {
     /// The peer whose audit token, read once at accept, is `token`: its pid and pidversion are the token's own
-    /// words ([`PID_WORD`], [`PIDVERSION_WORD`]), so the two can never disagree.
+    /// words ([`PID_WORD`], [`PIDVERSION_WORD`]), so the two can never disagree. The one way to make a Peer.
     #[must_use]
     pub fn from_token(token: [u32; 8], code: Result<Code, String>) -> Peer {
-        Peer { pid: token[PID_WORD].cast_signed(), pidversion: token[PIDVERSION_WORD].cast_signed(), token, code }
+        Peer { pid: token[PID_WORD].cast_signed(), pidversion: token[PIDVERSION_WORD].cast_signed(), code }
     }
 }
 
@@ -121,15 +118,11 @@ mod tests {
         )
     }
 
-    /// M m/19189: a peer carries its whole token, and its pid pair is the token's own words, never set apart.
+    /// M m/19189: a peer's pid pair is its token's own words 5 and 7, never set apart.
     #[test]
-    fn a_peer_carries_its_whole_token_and_its_pid_pair_is_the_tokens() {
-        let words = token(41, 7);
-        let made = Peer::from_token(words, Err("no signature".into()));
-        assert_eq!((made.pid, made.pidversion, made.token), (41, 7, words));
-        let mut other = words;
-        other[0] = 502;
-        assert_ne!(Peer::from_token(other, Err("no signature".into())), made, "another token is another peer");
+    fn a_peers_pid_pair_is_its_tokens() {
+        let made = Peer::from_token(token(41, 7), Err("no signature".into()));
+        assert_eq!((made.pid, made.pidversion), (41, 7));
     }
 
     /// A reused pid is another peer: identity is the pid and its version together.
