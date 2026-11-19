@@ -50,7 +50,8 @@ pub struct Code {
     pub team: String,
 }
 
-/// The audit token's word that holds the pid (`audit_token_to_pid`).
+/// The audit token's word that holds the pid (`audit_token_to_pid`). anemnez-secret's `identity::Token::from_words`
+/// reads the same two words: a change to either is a change to both (M m/19217).
 pub const PID_WORD: usize = 5;
 /// The audit token's word that holds the pidversion (`audit_token_to_pidversion`).
 pub const PIDVERSION_WORD: usize = 7;
