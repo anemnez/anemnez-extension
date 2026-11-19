@@ -23,6 +23,17 @@ use crate::principal::Nonces;
 /// The file a [`FileNonces`] keeps under its directory.
 pub const FILE: &str = "nonces.log";
 
+/// The file's schema line, `anemnez-nonces <N>`, first when present (HOUSE rule 8, G m/9 direct). A file without one
+/// reads as schema 1. This build reads schema 1 and doesn't write the line yet: it is written once every reader in
+/// service (and its rollback) reads it, the upgrade-compat two-step.
+pub const HEADER: &str = "anemnez-nonces";
+/// The schema this build reads.
+pub const SCHEMA: u32 = 1;
+/// Open's refusal of a file written by a newer schema: never read as this one's.
+pub const NEWER: &str = "nonces-file-newer";
+/// Open's refusal of a file with a line that isn't an entry anywhere but last: damage, never skipped in silence.
+pub const UNREADABLE: &str = "nonces-file-unreadable";
+
 /// The durable nonce set: an append-only file under a product's own data directory, loaded at open,
 /// pruned of what has expired, and compacted once dead entries dominate.
 pub struct FileNonces {
@@ -78,6 +89,8 @@ pub(crate) struct Store {
     lines: usize,
     /// How many [`full_sync`] calls it has made, for the group-commit proof.
     pub(crate) syncs: u64,
+    /// A write failed, so the file may end in a fragment: the next commit rewrites it whole before it appends.
+    pub(crate) dirty: bool,
 }
 
 impl Store {
@@ -87,13 +100,31 @@ impl Store {
         let now = clock.now_wall().unix_millis();
         let mut held = HashMap::new();
         if let Ok(file) = File::open(&path) {
-            for line in BufReader::new(file).lines() {
-                // A torn last line is a record whose sync never finished, so it was never answered:
-                // dropping it loses no acknowledged nonce.
-                if let Some((key, until)) = line.ok().as_deref().and_then(parse)
-                    && until >= now
+            let lines: Vec<Option<String>> = BufReader::new(file).lines().map(Result::ok).collect();
+            let last = lines.len().saturating_sub(1);
+            for (n, line) in lines.iter().enumerate() {
+                if n == 0
+                    && let Some(said) = line.as_deref().and_then(|l| l.strip_prefix(HEADER)?.strip_prefix(' '))
                 {
-                    held.insert(key, until);
+                    schema(&path, said)?;
+                    continue;
+                }
+                match line.as_deref().and_then(parse) {
+                    Some((key, until)) => {
+                        if until >= now {
+                            held.insert(key, until);
+                        }
+                    }
+                    // A torn last line is a record whose sync never finished, so it was never answered:
+                    // dropping it loses no acknowledged nonce. Open compacts it away before anything appends.
+                    None if n == last => {}
+                    // Anywhere else it is damage: skipping it would forget nonces in silence.
+                    None => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("{UNREADABLE}: {} line {} is not an entry; left as it is", path.display(), n + 1),
+                        ));
+                    }
                 }
             }
         }
@@ -104,6 +135,7 @@ impl Store {
             lines: 0,
             held,
             syncs: 0,
+            dirty: false,
         };
         store.compact()?;
         Ok(store)
@@ -126,9 +158,17 @@ impl Store {
             answers.push((job.answer, Ok(())));
         }
         if !out.is_empty() {
-            let written = self.file.write_all(out.as_bytes()).and_then(|()| full_sync(&self.file));
+            // A fragment left by a failed write is never appended after: the file is first rewritten whole from
+            // what is held (which already carries this batch, so a rewrite makes it durable too).
+            let written = if self.dirty {
+                self.compact()
+            } else {
+                let appended = self.file.write_all(out.as_bytes()).and_then(|()| full_sync(&self.file));
+                self.lines += out.lines().count();
+                appended
+            };
             self.syncs += 1;
-            self.lines += out.lines().count();
+            self.dirty = written.is_err();
             if written.is_err() {
                 // Not durable, so not accepted: refuse every record in this batch (fail closed).
                 for answer in &mut answers {
@@ -174,6 +214,22 @@ impl Store {
 /// `libc`/`nix` fsync, which would not flush the drive. With group commit it is one flush per batch.
 pub fn full_sync(file: &File) -> io::Result<()> {
     file.sync_data()
+}
+
+/// Schema `said` in `path`'s first line: this build's opens; a newer one is refused by name, and anything else is
+/// damage.
+fn schema(path: &Path, said: &str) -> io::Result<()> {
+    match said.parse::<u32>() {
+        Ok(SCHEMA) => Ok(()),
+        Ok(newer) if newer > SCHEMA => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{NEWER}: {} is schema {newer}; this build reads {SCHEMA}; left as it is", path.display()),
+        )),
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{UNREADABLE}: {} says schema {said:?}; left as it is", path.display()),
+        )),
+    }
 }
 
 /// One entry: `<issuer hex> <nonce hex> <until_ms>`. The issuer is hex so no character in it can
