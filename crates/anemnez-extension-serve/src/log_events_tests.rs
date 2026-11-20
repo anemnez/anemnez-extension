@@ -275,3 +275,101 @@ async fn a_held_consumer_never_blocks_the_writer() {
     }
     assert_eq!(read, appends);
 }
+
+/// A log whose reads wait on a clock the row holds: a read asked to wait for events on an empty log blocks its
+/// thread until the row advances that clock, which it does at the end so no thread outlives the row.
+fn held_fixture() -> (Fixture, ManualClock) {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let log_clock = ManualClock::new();
+    let log = Arc::new(
+        Events::open(&dir.path().join("log"), "miniond", LOG, hydramq_events::Settings::default(), &log_clock.clock())
+            .expect("the log opens"),
+    );
+    (Fixture { _dir: dir, log, manual: ManualClock::new() }, log_clock)
+}
+
+/// A read that waits for events, on the empty log: it holds its thread until the log's clock moves.
+fn held_read() -> tonic::Request<pb::CallRequest> {
+    tonic::Request::new(pb::CallRequest { request: read_request(&from_start(), 1, Duration::from_secs(30)).unwrap() })
+}
+
+/// a-call-is-bounded-by-one-deadline (E m/20675, rule 4): the product's authorization and the log's read share one
+/// deadline from admit. An authorization that answers late leaves the read only what remains, so the call ends by
+/// the deadline, before the caller's own bound, and names the read as the stage that ran out.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_late_authorization_leaves_the_read_only_what_remains() {
+    use crate::log_events::FACE_WITHIN;
+    let (f, log_clock) = held_fixture();
+    let late = Duration::from_secs(40);
+    let clock = f.manual.clock();
+    let face = Arc::new(f.face(Authorize::new(move |_| {
+        let clock = clock.clone();
+        async move {
+            clock.sleep(late).await;
+            Ok(())
+        }
+    })));
+    let calling = Arc::clone(&face);
+    let mut call = tokio::spawn(async move { calling.call(held_read()).await });
+    let authorizing = f.manual.until_waiting(1, PARK).await;
+    f.manual.advance(late).await;
+    // The read now waits on its bound: what the deadline has left, never CALL_WITHIN whole.
+    let reading = f.manual.until_waiting(1, PARK).await;
+    let left = FACE_WITHIN - late;
+    f.manual.advance(left - Duration::from_millis(1)).await;
+    let early = call.is_finished();
+    f.manual.advance(Duration::from_millis(1)).await;
+    let ended = tokio::time::timeout(Duration::from_secs(5), &mut call).await;
+    // The held read's thread is let go before any assert, so a red row fails and never hangs the runtime.
+    let _ = log_clock.until_waiting(1, PARK).await;
+    log_clock.advance(Duration::from_secs(30)).await;
+    assert!(authorizing && reading, "the authorization, then the read, waited on the face's clock");
+    assert!(!early, "the read still had a millisecond");
+    let refused = ended.expect("the call ends at the deadline").expect("joins").expect_err("refused");
+    assert_eq!(refused.code(), tonic::Code::Unavailable);
+    assert!(refused.message().starts_with("events-call-unanswered: "), "the read is named: {}", refused.message());
+    assert!(late + left < crate::log_events::CALLER_WITHIN, "the face ends inside the caller's minute");
+}
+
+/// A face holds at most its cap of reads: the next call is refused `events-call-busy` at once, and a read past
+/// its bound still counts until its thread ends (D m/20673).
+#[tokio::test(flavor = "multi_thread")]
+async fn calls_past_the_cap_are_refused_at_once() {
+    let (f, log_clock) = held_fixture();
+    let face = Arc::new(f.face(Authorize::allow_all()).with_calls_max(1));
+    let holding = Arc::clone(&face);
+    let held = tokio::spawn(async move { holding.call(held_read()).await });
+    let counted = tokio::time::timeout(PARK, async {
+        while face.calls_open() < 1 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
+    let second = tokio::time::timeout(Duration::from_secs(5), face.call(held_read())).await;
+    // The held read times out on the face, and still counts until its thread ends.
+    let armed = f.manual.until_waiting(1, PARK).await;
+    f.manual.advance(crate::log_events::CALL_WITHIN).await;
+    let held_ended = tokio::time::timeout(Duration::from_secs(5), held).await.is_ok();
+    let still_counted = face.calls_open();
+    // Every held read's thread is let go before any assert, so a red row fails and never hangs the runtime.
+    let _ = log_clock.until_waiting(1, PARK).await;
+    log_clock.advance(Duration::from_secs(30)).await;
+    assert!(counted.is_ok() && armed, "the first read holds its slot and waits on its bound");
+    let busy = second.expect("refused at once, never waiting").expect_err("refused");
+    assert_eq!(busy.code(), tonic::Code::ResourceExhausted);
+    assert!(busy.message().starts_with("events-call-busy"), "{}", busy.message());
+    assert!(held_ended, "the held call ends at its bound");
+    assert_eq!(still_counted, 1, "a read past its bound counts until its thread ends");
+    let freed = tokio::time::timeout(PARK, async {
+        while face.calls_open() > 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
+    assert!(freed.is_ok(), "the slot is freed when the read's thread ends");
+    face.call(tonic::Request::new(pb::CallRequest {
+        request: read_request(&from_start(), 1, Duration::ZERO).unwrap(),
+    }))
+    .await
+    .expect("served once the slot is free");
+}
