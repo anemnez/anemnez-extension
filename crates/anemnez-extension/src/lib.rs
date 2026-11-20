@@ -79,6 +79,14 @@ pub mod refusal {
     /// another instance from your own checkpoint (a cursor is its instance's own, so this one's is `cursor-not-mine`
     /// there) and surface the gap: no lossless resumption is promised (CONTRACT.md §8.3).
     pub const DRAINING: &str = "draining";
+    /// `Events/Watch` past the most concurrent watches a product's log face holds (each is a thread of its own):
+    /// refused at once, never queued; retry later or read with `Events/Call` (CONTRACT.md, the log face).
+    pub const EVENTS_WATCH_BUSY: &str = "events-watch-busy";
+    /// `Events/Call` whose read on the product's log didn't answer within the face's bound: Unclear, retry.
+    pub const EVENTS_CALL_UNANSWERED: &str = "events-call-unanswered";
+    /// The product's own authorization of an `Events/Call` or `Events/Watch` refused it, or didn't answer within
+    /// its bound: nothing of the log is served (CONTRACT.md, the log face). The reason follows the name.
+    pub const UNAUTHORIZED: &str = "unauthorized";
     /// A keyed-route call carried an empty key: refused by the bridge before the call leaves, since
     /// no holder can be resolved for it.
     pub const NO_KEY: &str = "no-key";

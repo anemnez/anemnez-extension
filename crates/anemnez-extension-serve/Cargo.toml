@@ -27,6 +27,9 @@ http-body-util.workspace = true
 bytes.workspace = true
 tower-layer.workspace = true
 tower-service.workspace = true
+# The log face (CONTRACT.md `#a-products-events-are-read-through-one-call`): a product's own hydramq-events log,
+# served through `wire`. The core kernel crate still depends on nothing of hydramq.
+hydramq-events.workspace = true
 
 [build-dependencies]
 # The contract's protos come from the kernel crate itself (`protos::write_all`): the version this

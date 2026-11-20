@@ -122,6 +122,29 @@ product's events, the `Events(after)` stream and `Call`, and the serving face ke
 `Journal`. Both retire onto `Call` and the producer's hydramq-events log. Step 1 is this release:
 `Call` is added and the Journal refuses it by name. Step 2 moves each product's events and the
 serving face onto the log, and removes `Events(after)` and the Journal. Ends 2026-11-21 (owner K, from H; the User via B m/18544: our own ends are days).
+Step 2 has begun: the serving face's log face exists (below), and each product moves onto it on its owner's
+queue, Minion's audit log first. `Events(after)` and the Journal are removed once no product serves one.
+
+<!-- claim: a-product-serves-its-own-log-through-the-face -->
+**A product serves its own log through the face, authorized before a byte is read** (K; D m/20645, E m/20648).
+anemnez-extension-serve's `EventsFace` is what `ApiFaces` takes: `Journal` (the retiring `EventsService`) or `Log`,
+a `LogEvents` over the product's own `hydramq_events::Events`. `Call` answers with `wire::serve` on the blocking pool
+inside `CALL_WITHIN` (past it, `events-call-unanswered`), `Watch` drives `wire::watch`, and `Events(after)` is refused
+`events-call-unserved`. Each call's principal token is checked by the one `Verifier`, then the product's own
+`Authorize` decides within `AUTHORIZE_WITHIN`: a refusal, or no answer, is `unauthorized` with its reason, and nothing
+of the log is served. There is no default: a product whose log is everyone's passes `Authorize::allow_all` by name.
+
+<!-- claim: a-log-watch-is-bounded-and-ends-stopped -->
+**A log watch is bounded, and its every end stops it.** Each watch is a thread of its own pushing into a bounded
+channel, so a consumer that holds its stream stalls only that stream and never the log's writer. A face holds at most
+`WATCHES_MAX` watches (the product may set another), and the next is refused `events-watch-busy` at once. The stream
+is a kernel's (`watch::Driver`): the instance's drain ends it `draining` after what it had read, its token's expiry
+`expired`, and the consumer leaving or the producer's own end quietly, and each stops the wire watch first, once.
+
+<!-- claim: a-revoked-grant-stops-a-watch-within-one-token-life -->
+**A revoked grant stops a watch within one token's life.** A watch is authorized when it opens, and ends at its
+token's expiry (a stream admitted without one, at `MAX_TTL_MS`). Re-opened, it is authorized again, so a grant
+revoked while it ran is refused `unauthorized` at that renewal.
 
 <!-- claim: a-products-events-are-pushed-through-one-watch -->
 **A product's events are pushed through one watch** (A, D, H, 2026-11-14; house rule 14: no long
