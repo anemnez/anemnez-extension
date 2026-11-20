@@ -319,7 +319,7 @@ async fn a_late_authorization_leaves_the_read_only_what_remains() {
     f.manual.advance(left - Duration::from_millis(1)).await;
     let early = call.is_finished();
     f.manual.advance(Duration::from_millis(1)).await;
-    let ended = tokio::time::timeout(Duration::from_secs(5), &mut call).await;
+    let ended = anemnez_clock::Clock::system().timeout(Duration::from_secs(5), &mut call).await;
     // The held read's thread is let go before any assert, so a red row fails and never hangs the runtime.
     let _ = log_clock.until_waiting(1, PARK).await;
     log_clock.advance(Duration::from_secs(30)).await;
@@ -339,17 +339,18 @@ async fn calls_past_the_cap_are_refused_at_once() {
     let face = Arc::new(f.face(Authorize::allow_all()).with_calls_max(1));
     let holding = Arc::clone(&face);
     let held = tokio::spawn(async move { holding.call(held_read()).await });
-    let counted = tokio::time::timeout(PARK, async {
-        while face.calls_open() < 1 {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await;
-    let second = tokio::time::timeout(Duration::from_secs(5), face.call(held_read())).await;
+    let counted = anemnez_clock::Clock::system()
+        .timeout(PARK, async {
+            while face.calls_open() < 1 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
+    let second = anemnez_clock::Clock::system().timeout(Duration::from_secs(5), face.call(held_read())).await;
     // The held read times out on the face, and still counts until its thread ends.
     let armed = f.manual.until_waiting(1, PARK).await;
     f.manual.advance(crate::log_events::CALL_WITHIN).await;
-    let held_ended = tokio::time::timeout(Duration::from_secs(5), held).await.is_ok();
+    let held_ended = anemnez_clock::Clock::system().timeout(Duration::from_secs(5), held).await.is_ok();
     let still_counted = face.calls_open();
     // Every held read's thread is let go before any assert, so a red row fails and never hangs the runtime.
     let _ = log_clock.until_waiting(1, PARK).await;
@@ -360,12 +361,13 @@ async fn calls_past_the_cap_are_refused_at_once() {
     assert!(busy.message().starts_with("events-call-busy"), "{}", busy.message());
     assert!(held_ended, "the held call ends at its bound");
     assert_eq!(still_counted, 1, "a read past its bound counts until its thread ends");
-    let freed = tokio::time::timeout(PARK, async {
-        while face.calls_open() > 0 {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await;
+    let freed = anemnez_clock::Clock::system()
+        .timeout(PARK, async {
+            while face.calls_open() > 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
     assert!(freed.is_ok(), "the slot is freed when the read's thread ends");
     face.call(tonic::Request::new(pb::CallRequest {
         request: read_request(&from_start(), 1, Duration::ZERO).unwrap(),
