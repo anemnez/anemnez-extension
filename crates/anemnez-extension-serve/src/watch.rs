@@ -1,6 +1,7 @@
 //! The Watch driver: one `Events/Watch` stream over a product's own log, as a kernel (house rule 1). It is
 //! pure and sync, with no I/O and no clock. The host ([`crate::log_events`]) feeds it what happened (a frame
-//! the watch thread read, the thread ending, the instance's drain, the token's expiry, the consumer gone) and
+//! the watch thread read, the thread ending, the instance's drain, the token's expiry, the product's authorization
+//! ending (its revoke, or the end it said at admit), the consumer gone) and
 //! does what it answers: send a frame, stop the wire watch, end the stream by name.
 //!
 //! Invariant: the stream never ends with its wire watch still running. Every way into [`State::Ended`]
@@ -20,6 +21,9 @@ pub enum End {
     Expired,
     /// The consumer went away.
     ConsumerGone,
+    /// The product's authorization stopped holding before the token's life: its revoke, or the end it said when it
+    /// admitted the stream. What was sent stays sent; nothing more is.
+    Unauthorized,
 }
 
 impl End {
@@ -29,6 +33,7 @@ impl End {
         match self {
             End::Draining => Some(refusal::DRAINING),
             End::Expired => Some(refusal::EXPIRED),
+            End::Unauthorized => Some(refusal::UNAUTHORIZED),
             End::Producer | End::ConsumerGone => None,
         }
     }
@@ -58,6 +63,10 @@ pub enum Input {
     Expired,
     /// The consumer dropped the stream.
     ConsumerGone,
+    /// The product revoked the authorization it gave this stream.
+    Revoked,
+    /// The end the product's authorization said at admit passed.
+    Lapsed,
 }
 
 /// What the host does.
@@ -117,6 +126,9 @@ impl Driver {
             }
             (State::Streaming | State::Draining, Input::Expired) => self.end(End::Expired, &mut out),
             (State::Streaming | State::Draining, Input::ConsumerGone) => self.end(End::ConsumerGone, &mut out),
+            (State::Streaming | State::Draining, Input::Revoked | Input::Lapsed) => {
+                self.end(End::Unauthorized, &mut out);
+            }
         }
         out
     }

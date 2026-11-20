@@ -13,7 +13,7 @@ use hydramq_events::{Events, Position, Read};
 use tokio::sync::Notify;
 
 use crate::journal::StreamEnd;
-use crate::log_events::{Authorize, LogEvents, Method};
+use crate::log_events::{Admit, Authorize, LogEvents, Method, Revoke};
 use crate::pb;
 use crate::pb::events_server::Events as _;
 
@@ -374,4 +374,73 @@ async fn calls_past_the_cap_are_refused_at_once() {
     }))
     .await
     .expect("served once the slot is free");
+}
+
+/// a-watch-ends-when-its-authorization-does: a watch admitted under a [`Revoke`] the product keeps sends what it
+/// read, and the revoke ends it `unauthorized` at once, long before its token's life, stopping its thread.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_revoke_mid_stream_ends_the_watch_unauthorized_after_what_was_sent() {
+    let f = fixture();
+    let hold = Revoke::new();
+    let given = hold.clone();
+    let face = f.face(Authorize::holding(move |_| {
+        let given = given.clone();
+        async move { Ok(Admit::admitted().revoked_by(given)) }
+    }));
+    let mut stream = face.watch(watch(10)).await.expect("opens").into_inner();
+    f.publish(1);
+    let first = stream.next().await.expect("a frame").expect("not refused");
+    assert_eq!(events_in(&first), 1, "what was read before the revoke is sent");
+
+    hold.revoke();
+    let ended = anemnez_clock::Clock::system()
+        .timeout(PARK, async {
+            loop {
+                match stream.next().await.expect("the stream says its end") {
+                    Ok(_) => {}
+                    Err(status) => break status,
+                }
+            }
+        })
+        .await
+        .expect("the revoke ended the stream, not the token's life");
+    assert_eq!(ended.code(), tonic::Code::PermissionDenied);
+    assert!(ended.message().starts_with("unauthorized"), "{}", ended.message());
+    assert!(stream.next().await.is_none(), "nothing after the end");
+    until_no_watches(&face).await;
+}
+
+/// a-watch-ends-when-its-authorization-does: a watch admitted until a grant's end, short of its token's life,
+/// ends `unauthorized` when that end passes on the injected clock, not `expired` at the token's.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_watch_admitted_until_an_end_ends_unauthorized_at_it() {
+    let f = fixture();
+    let clock = f.manual.clock();
+    let face = f.face(Authorize::holding(move |_| {
+        let until = clock.now_mono() + Duration::from_secs(30);
+        async move { Ok(Admit::admitted().until(until)) }
+    }));
+    let mut stream = face.watch(watch(10)).await.expect("opens").into_inner();
+    let reading = tokio::spawn(async move {
+        let mut last = None;
+        while let Some(item) = stream.next().await {
+            last = Some(item);
+        }
+        last
+    });
+    assert!(f.manual.until_waiting(2, PARK).await, "the stream waits on the grant's end and its token's expiry");
+    f.manual.advance(Duration::from_secs(29)).await;
+    f.manual.settle().await;
+    assert!(!reading.is_finished(), "still held short of the end");
+    f.manual.advance(Duration::from_secs(1)).await;
+    let ended = anemnez_clock::Clock::system()
+        .timeout(PARK, reading)
+        .await
+        .expect("the grant's end ended the stream")
+        .expect("joins")
+        .expect("an end")
+        .expect_err("ended by name");
+    assert_eq!(ended.code(), tonic::Code::PermissionDenied);
+    assert!(ended.message().starts_with("unauthorized"), "{}", ended.message());
+    until_no_watches(&face).await;
 }
