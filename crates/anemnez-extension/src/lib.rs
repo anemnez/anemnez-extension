@@ -84,6 +84,9 @@ pub mod refusal {
     pub const EVENTS_WATCH_BUSY: &str = "events-watch-busy";
     /// `Events/Call` whose read on the product's log didn't answer within the face's bound: Unclear, retry.
     pub const EVENTS_CALL_UNANSWERED: &str = "events-call-unanswered";
+    /// `Events/Call` past the most concurrent reads a product's log face holds (each holds a blocking thread
+    /// while it reads): refused at once, never queued; retry later (CONTRACT.md, the log face).
+    pub const EVENTS_CALL_BUSY: &str = "events-call-busy";
     /// The product's own authorization of an `Events/Call` or `Events/Watch` refused it, or didn't answer within
     /// its bound: nothing of the log is served (CONTRACT.md, the log face). The reason follows the name.
     pub const UNAUTHORIZED: &str = "unauthorized";

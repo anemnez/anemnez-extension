@@ -175,6 +175,8 @@ spoken_for("a-products-events-are-read-through-one-call (round trip)", "events::
 spoken_for("a-products-events-are-read-through-one-call (parity)", "parity_tests::the_events_call_messages_are_the_protos")
 spoken_for("a-product-serves-its-own-log-through-the-face", "log_events_tests::a_call_reads_the_log_only_once_authorized")
 spoken_for("a-product-serves-its-own-log-through-the-face (bound)", "log_events_tests::an_unanswered_authorization_is_refused_at_its_bound")
+spoken_for("a-call-is-bounded-by-one-deadline", "log_events_tests::a_late_authorization_leaves_the_read_only_what_remains")
+spoken_for("a-call-is-bounded-by-one-deadline (cap)", "log_events_tests::calls_past_the_cap_are_refused_at_once")
 spoken_for("a-log-watch-is-bounded-and-ends-stopped (kernel)", "watch_tests::every_exit_stops_the_wire_watch_first_and_once")
 spoken_for("a-log-watch-is-bounded-and-ends-stopped (drain)", "log_events_tests::a_drain_ends_a_watch_draining_and_its_thread")
 spoken_for("a-log-watch-is-bounded-and-ends-stopped (gone)", "log_events_tests::a_consumer_gone_stops_its_watch")

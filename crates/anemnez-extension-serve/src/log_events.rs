@@ -6,9 +6,12 @@
 //! - **Authorized first.** A call's principal token is checked by the one [`Verifier`], then the product's own
 //!   [`Authorize`] decides, inside [`AUTHORIZE_WITHIN`], before a byte of the log is read. There is no default:
 //!   a product passes [`Authorize::allow_all`] by name if its log is everyone's.
-//! - **Bounded.** A call reads on the blocking pool inside [`CALL_WITHIN`]. Each watch is a thread of its own,
-//!   and a face holds at most [`WATCHES_MAX`] at once (overridable); past it a watch is refused
-//!   `events-watch-busy` at once.
+//! - **Bounded, by one deadline.** A call's whole time on the face is one deadline started at admit
+//!   ([`FACE_WITHIN`], a caller's minute less a hop), and the product's authorization and the log's read each take
+//!   what remains of it, so the two never pass the caller's own bound and the stage that ran out is the one named.
+//!   A call reads on the blocking pool, and a face holds at most [`CALLS_MAX`] reads at once (overridable); past
+//!   it a call is refused `events-call-busy` at once. Each watch is a thread of its own, and a face holds at most
+//!   [`WATCHES_MAX`] at once (overridable); past it a watch is refused `events-watch-busy` at once.
 //! - **A slow consumer stalls only its own stream.** The thread pushes into a bounded channel; the log's writer
 //!   never waits on it.
 //! - **Every exit stops the watch.** The stream is the [`crate::watch`] kernel's, which stops the wire watch
@@ -38,10 +41,19 @@ use crate::watch::{Driver, End, Input, Output};
 
 /// The most watches one face holds at once, unless the product says otherwise ([`LogEvents::with_watches_max`]).
 pub const WATCHES_MAX: usize = 16;
-/// How long a call's read on the log may take: the wire's own longest read wait, plus a hop.
+/// How long a call's read on the log may take at most: the wire's own longest read wait, plus a hop. A read gets
+/// less when the call's [`FACE_WITHIN`] has less left.
 pub const CALL_WITHIN: Duration = WITHIN_MAX.saturating_add(HOP_MARGIN);
+/// The bound a caller holds on one call or watch-open: a minute.
+pub const CALLER_WITHIN: Duration = Duration::from_secs(60);
+/// One call's whole time on the face, from admit: the caller's minute less a hop, so the face always answers
+/// before the caller's own bound passes and names its own stage (rule 4: an inner bound is shorter).
+pub const FACE_WITHIN: Duration = CALLER_WITHIN.saturating_sub(HOP_MARGIN);
+/// The most reads one face holds at once, unless the product says otherwise ([`LogEvents::with_calls_max`]): a
+/// read past its bound keeps its blocking thread until the read ends, so they are counted (D m/20673).
+pub const CALLS_MAX: usize = 16;
 /// How long the product's [`Authorize`] may take, unless the product says otherwise: room for a person's card
-/// (an Ask bound is 45 s), inside a caller's minute.
+/// (an Ask bound is 45 s). It is capped by what remains of the call's [`FACE_WITHIN`].
 pub const AUTHORIZE_WITHIN: Duration = Duration::from_secs(50);
 /// The frames a watch thread may read ahead of its consumer.
 pub const WATCH_BUFFER: usize = 4;
@@ -104,8 +116,10 @@ pub struct LogEvents {
     authorize: Authorize,
     clock: Clock,
     watches_max: usize,
+    calls_max: usize,
     authorize_within: Duration,
     open: Arc<AtomicUsize>,
+    reading: Arc<AtomicUsize>,
     closed: Arc<Notify>,
 }
 
@@ -119,8 +133,10 @@ impl LogEvents {
             authorize,
             clock,
             watches_max: WATCHES_MAX,
+            calls_max: CALLS_MAX,
             authorize_within: AUTHORIZE_WITHIN,
             open: Arc::new(AtomicUsize::new(0)),
+            reading: Arc::new(AtomicUsize::new(0)),
             closed: Arc::new(Notify::new()),
         }
     }
@@ -130,6 +146,19 @@ impl LogEvents {
     pub fn with_watches_max(mut self, max: usize) -> LogEvents {
         self.watches_max = max;
         self
+    }
+
+    /// At most `max` reads at once, instead of [`CALLS_MAX`].
+    #[must_use]
+    pub fn with_calls_max(mut self, max: usize) -> LogEvents {
+        self.calls_max = max;
+        self
+    }
+
+    /// The reads holding a blocking thread now.
+    #[must_use]
+    pub fn calls_open(&self) -> usize {
+        self.reading.load(Ordering::SeqCst)
     }
 
     /// The product's [`Authorize`] answers within `within`, instead of [`AUTHORIZE_WITHIN`].
@@ -151,46 +180,59 @@ impl LogEvents {
         Arc::clone(&self.closed)
     }
 
-    /// The token checked, then the product's decision, within its bound: the verified principal, or the
-    /// refusal by name.
+    /// What remains of a call's one deadline.
+    fn left(&self, deadline: Mono) -> Duration {
+        deadline.saturating_since(self.clock.now_mono())
+    }
+
+    /// The token checked, then the product's decision, within what remains of `deadline` (and at most
+    /// [`AUTHORIZE_WITHIN`]): the verified principal, or the refusal by name.
     #[allow(clippy::result_large_err)] // A tonic Status is the handler's own error, returned as is.
     async fn admit<M>(
         &self,
         path: &str,
         method: Method,
         request: &tonic::Request<M>,
+        deadline: Mono,
     ) -> Result<Option<Admitted>, tonic::Status> {
         let admitted = self.verifier.check_grpc(path, request).await.map_err(|r| crate::principal::status(&r))?;
         let asked = Asked { method, judged: crate::accepted::judged(request).cloned(), admitted: admitted.clone() };
-        match self.clock.timeout(self.authorize_within, (self.authorize.0)(asked)).await {
+        let within = self.authorize_within.min(self.left(deadline));
+        match self.clock.timeout(within, (self.authorize.0)(asked)).await {
             Ok(Ok(())) => Ok(admitted),
             Ok(Err(why)) => Err(tonic::Status::permission_denied(format!("{}: {why}", refusal::UNAUTHORIZED))),
             Err(_) => Err(tonic::Status::unavailable(format!(
-                "{}: the product's authorization didn't answer within {:?}",
+                "{}: the product's authorization didn't answer within {within:?}",
                 refusal::UNAUTHORIZED,
-                self.authorize_within
             ))),
         }
     }
 
     fn take_slot(&self) -> Option<Slot> {
-        let mut now = self.open.load(Ordering::SeqCst);
+        Slot::take(&self.open, self.watches_max, &self.closed)
+    }
+}
+
+/// One watch's or read's place under its cap, freed when its thread ends.
+struct Slot {
+    open: Arc<AtomicUsize>,
+    closed: Arc<Notify>,
+}
+
+impl Slot {
+    /// A place under `max` in `open`, or `None` at the cap: compare-and-swap, never queued.
+    fn take(open: &Arc<AtomicUsize>, max: usize, closed: &Arc<Notify>) -> Option<Slot> {
+        let mut now = open.load(Ordering::SeqCst);
         loop {
-            if now >= self.watches_max {
+            if now >= max {
                 return None;
             }
-            match self.open.compare_exchange(now, now + 1, Ordering::SeqCst, Ordering::SeqCst) {
-                Ok(_) => return Some(Slot { open: Arc::clone(&self.open), closed: Arc::clone(&self.closed) }),
+            match open.compare_exchange(now, now + 1, Ordering::SeqCst, Ordering::SeqCst) {
+                Ok(_) => return Some(Slot { open: Arc::clone(open), closed: Arc::clone(closed) }),
                 Err(seen) => now = seen,
             }
         }
     }
-}
-
-/// One watch's place under the cap, freed when its thread ends.
-struct Slot {
-    open: Arc<AtomicUsize>,
-    closed: Arc<Notify>,
 }
 
 impl Drop for Slot {
@@ -295,7 +337,8 @@ impl pb::events_server::Events for LogEvents {
         &self,
         request: tonic::Request<pb::WatchRequest>,
     ) -> Result<tonic::Response<Self::WatchStream>, tonic::Status> {
-        let admitted = self.admit(WATCH_METHOD, Method::Watch, &request).await?;
+        let deadline = self.clock.now_mono() + FACE_WITHIN;
+        let admitted = self.admit(WATCH_METHOD, Method::Watch, &request, deadline).await?;
         // A stream admitted without a token still ends within a token's life, so it re-opens, and is authorized
         // again, at least that often.
         let expires = admitted.map_or_else(
@@ -364,14 +407,27 @@ impl pb::events_server::Events for LogEvents {
         &self,
         request: tonic::Request<pb::CallRequest>,
     ) -> Result<tonic::Response<pb::CallReply>, tonic::Status> {
-        self.admit(CALL_METHOD, Method::Call, &request).await?;
+        let deadline = self.clock.now_mono() + FACE_WITHIN;
+        self.admit(CALL_METHOD, Method::Call, &request, deadline).await?;
+        let slot = Slot::take(&self.reading, self.calls_max, &self.closed).ok_or_else(|| {
+            tonic::Status::resource_exhausted(format!(
+                "{}: this product holds {} reads, the most it may; retry",
+                refusal::EVENTS_CALL_BUSY,
+                self.calls_max
+            ))
+        })?;
         let (log, bytes) = (Arc::clone(&self.log), request.into_inner().request);
-        let read = tokio::task::spawn_blocking(move || wire::serve(&log, &bytes));
-        match self.clock.timeout(CALL_WITHIN, read).await {
+        let read = tokio::task::spawn_blocking(move || {
+            // Held while the thread reads, so a read past its bound still counts until it ends.
+            let _slot = slot;
+            wire::serve(&log, &bytes)
+        });
+        let within = CALL_WITHIN.min(self.left(deadline));
+        match self.clock.timeout(within, read).await {
             Ok(Ok(reply)) => Ok(tonic::Response::new(pb::CallReply { reply })),
             Ok(Err(e)) => Err(tonic::Status::internal(format!("the log's read ended: {e}"))),
             Err(_) => Err(tonic::Status::unavailable(format!(
-                "{}: the log's read didn't answer within {CALL_WITHIN:?}",
+                "{}: the log's read didn't answer within {within:?}, what the call's {FACE_WITHIN:?} had left",
                 refusal::EVENTS_CALL_UNANSWERED
             ))),
         }
