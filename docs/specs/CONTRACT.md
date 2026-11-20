@@ -155,6 +155,13 @@ is a kernel's (`watch::Driver`): the instance's drain ends it `draining` after w
 token's expiry (a stream admitted without one, at `MAX_TTL_MS`). Re-opened, it is authorized again, so a grant
 revoked while it ran is refused `unauthorized` at that renewal.
 
+<!-- claim: a-watch-ends-when-its-authorization-does -->
+**A watch ends when the product's authorization does, sooner than its token** (I m/20723). A product whose decision
+can end before the token's life admits a watch with `Authorize::holding`, answering an `Admit`: `until` a grant's end
+on the face's clock, and `revoked_by` a `Revoke` it keeps. When either comes, the stream ends `unauthorized` after what
+was already sent, and nothing more is: the kernel's `Revoked` and `Lapsed` inputs stop the wire watch first, as every
+end does. `Authorize::new` holds for the token's life, as before. A call is one read, so it ignores both.
+
 <!-- claim: a-products-events-are-pushed-through-one-watch -->
 **A product's events are pushed through one watch** (A, D, H, 2026-11-14; house rule 14: no long
 polls). `Events/Watch(WatchRequest{request}) -> stream WatchFrame{frame}` is the same face's push:

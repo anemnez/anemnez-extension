@@ -18,6 +18,10 @@
 //!   before any end: the drain (`draining`, after what was read), the token's expiry (`expired`), the consumer
 //!   gone, or the producer's own end. A stream is authorized again each time it re-opens after its token's
 //!   expiry, so a revoked grant stops a watch within one token's life.
+//! - **An authorization can end sooner.** A product that admits a watch with [`Authorize::holding`] may say how
+//!   long its answer holds ([`Admit::until`]) and keep a [`Revoke`] for it ([`Admit::revoked_by`]). Either ends
+//!   the open stream `unauthorized` after what was already sent, stopping the wire watch first, so a grant that
+//!   is revoked or reaches its end stops the reading at once, not at the token's next renewal.
 
 use std::collections::VecDeque;
 use std::future::Future;
@@ -79,7 +83,82 @@ pub struct Asked {
     pub admitted: Option<Admitted>,
 }
 
-type Decision = Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'static>>;
+/// The product's hold on an authorization it gave a watch: [`Revoke::revoke`] ends every stream admitted under it,
+/// `unauthorized`, after what was already sent. Clones share one hold. A call is one read, so it ignores it.
+#[derive(Clone, Debug, Default)]
+pub struct Revoke(Arc<RevokeInner>);
+
+#[derive(Debug, Default)]
+struct RevokeInner {
+    revoked: std::sync::atomic::AtomicBool,
+    said: Notify,
+}
+
+impl Revoke {
+    /// A hold not yet revoked.
+    #[must_use]
+    pub fn new() -> Revoke {
+        Revoke::default()
+    }
+
+    /// Revoke it: every stream admitted under it ends. Revoking twice is revoking once.
+    pub fn revoke(&self) {
+        self.0.revoked.store(true, Ordering::SeqCst);
+        self.0.said.notify_waiters();
+    }
+
+    /// Whether it is revoked.
+    #[must_use]
+    pub fn is_revoked(&self) -> bool {
+        self.0.revoked.load(Ordering::SeqCst)
+    }
+
+    /// Resolves once it is revoked (at once if it already is).
+    async fn revoked(&self) {
+        loop {
+            let said = self.0.said.notified();
+            tokio::pin!(said);
+            said.as_mut().enable();
+            if self.is_revoked() {
+                return;
+            }
+            said.await;
+        }
+    }
+}
+
+/// What a product's [`Authorize::holding`] answers when it admits: how long the answer holds for a watch. The
+/// default holds for the stream's token's life.
+#[derive(Clone, Debug, Default)]
+pub struct Admit {
+    until: Option<Mono>,
+    revoke: Option<Revoke>,
+}
+
+impl Admit {
+    /// Admitted, holding for the token's life.
+    #[must_use]
+    pub fn admitted() -> Admit {
+        Admit::default()
+    }
+
+    /// Holding until `until` on the face's clock (a grant's end, as the product reads it): past it, an open watch
+    /// ends `unauthorized`. The token's own expiry still ends it sooner, `expired`.
+    #[must_use]
+    pub fn until(mut self, until: Mono) -> Admit {
+        self.until = Some(until);
+        self
+    }
+
+    /// Holding until `revoke` is revoked: then an open watch ends `unauthorized`.
+    #[must_use]
+    pub fn revoked_by(mut self, revoke: Revoke) -> Admit {
+        self.revoke = Some(revoke);
+        self
+    }
+}
+
+type Decision = Pin<Box<dyn Future<Output = Result<Admit, String>> + Send + 'static>>;
 
 /// The product's own decision on each `Events/Call` and `Events/Watch`. A refusal's reason is served after
 /// `unauthorized`. There is no default: [`Authorize::allow_all`] is a value a product passes by name.
@@ -87,11 +166,24 @@ type Decision = Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'static
 pub struct Authorize(Arc<dyn Fn(Asked) -> Decision + Send + Sync>);
 
 impl Authorize {
-    /// The product's decision.
+    /// The product's decision, holding for the token's life once given.
     pub fn new<F, Fut>(decide: F) -> Authorize
     where
         F: Fn(Asked) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<(), String>> + Send + 'static,
+    {
+        Authorize::holding(move |asked| {
+            let decided = decide(asked);
+            async move { decided.await.map(|()| Admit::admitted()) }
+        })
+    }
+
+    /// The product's decision, saying how long it holds for a watch: [`Admit::until`] a grant's end, and
+    /// [`Admit::revoked_by`] a [`Revoke`] the product keeps. Either ends an open watch `unauthorized`.
+    pub fn holding<F, Fut>(decide: F) -> Authorize
+    where
+        F: Fn(Asked) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<Admit, String>> + Send + 'static,
     {
         Authorize(Arc::new(move |asked| Box::pin(decide(asked))))
     }
@@ -194,12 +286,12 @@ impl LogEvents {
         method: Method,
         request: &tonic::Request<M>,
         deadline: Mono,
-    ) -> Result<Option<Admitted>, tonic::Status> {
+    ) -> Result<(Option<Admitted>, Admit), tonic::Status> {
         let admitted = self.verifier.check_grpc(path, request).await.map_err(|r| crate::principal::status(&r))?;
         let asked = Asked { method, judged: crate::accepted::judged(request).cloned(), admitted: admitted.clone() };
         let within = self.authorize_within.min(self.left(deadline));
         match self.clock.timeout(within, (self.authorize.0)(asked)).await {
-            Ok(Ok(())) => Ok(admitted),
+            Ok(Ok(admit)) => Ok((admitted, admit)),
             Ok(Err(why)) => Err(tonic::Status::permission_denied(format!("{}: {why}", refusal::UNAUTHORIZED))),
             Err(_) => Err(tonic::Status::unavailable(format!(
                 "{}: the product's authorization didn't answer within {within:?}",
@@ -252,6 +344,8 @@ struct Watching {
     log: Arc<Events>,
     clock: Clock,
     expires: Mono,
+    until: Option<Mono>,
+    revoke: Option<Revoke>,
     drain: Option<Ended>,
     pending: VecDeque<Result<pb::WatchFrame, tonic::Status>>,
     finished: bool,
@@ -275,7 +369,7 @@ impl Watching {
 
     async fn next_input(&mut self) -> Input {
         let armed = !matches!(self.driver.state(), crate::watch::State::Draining) && self.drain.is_some();
-        let Watching { drain, clock, expires, frames, .. } = self;
+        let Watching { drain, clock, expires, until, revoke, frames, .. } = self;
         let input = tokio::select! {
             biased;
             () = async {
@@ -284,6 +378,18 @@ impl Watching {
                     None => std::future::pending().await,
                 }
             }, if armed => Input::Drain,
+            () = async {
+                match revoke.as_ref() {
+                    Some(revoke) => revoke.revoked().await,
+                    None => std::future::pending().await,
+                }
+            } => Input::Revoked,
+            () = async {
+                match until {
+                    Some(until) => clock.sleep_until(*until).await,
+                    None => std::future::pending().await,
+                }
+            } => Input::Lapsed,
             () = clock.sleep_until(*expires) => Input::Expired,
             frame = frames.recv() => frame.map_or(Input::ProducerEnded, Input::Frame),
         };
@@ -307,6 +413,10 @@ fn status(end: End) -> Option<tonic::Status> {
     match end {
         End::Draining => Some(tonic::Status::unavailable(refusal::DRAINING)),
         End::Expired => Some(crate::journal::Refusal::Expired.status()),
+        End::Unauthorized => Some(tonic::Status::permission_denied(format!(
+            "{}: the product's authorization for this stream ended",
+            refusal::UNAUTHORIZED
+        ))),
         End::Producer | End::ConsumerGone => None,
     }
 }
@@ -338,7 +448,7 @@ impl pb::events_server::Events for LogEvents {
         request: tonic::Request<pb::WatchRequest>,
     ) -> Result<tonic::Response<Self::WatchStream>, tonic::Status> {
         let deadline = self.clock.now_mono() + FACE_WITHIN;
-        let admitted = self.admit(WATCH_METHOD, Method::Watch, &request, deadline).await?;
+        let (admitted, admit) = self.admit(WATCH_METHOD, Method::Watch, &request, deadline).await?;
         // A stream admitted without a token still ends within a token's life, so it re-opens, and is authorized
         // again, at least that often.
         let expires = admitted.map_or_else(
@@ -384,6 +494,8 @@ impl pb::events_server::Events for LogEvents {
             log: Arc::clone(&self.log),
             clock: self.clock.clone(),
             expires,
+            until: admit.until,
+            revoke: admit.revoke,
             drain,
             pending: VecDeque::new(),
             finished: false,

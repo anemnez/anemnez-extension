@@ -3,7 +3,15 @@
 use crate::watch::{Driver, End, Input, Output, State};
 
 fn inputs() -> Vec<Input> {
-    vec![Input::Frame(vec![1]), Input::ProducerEnded, Input::Drain, Input::Expired, Input::ConsumerGone]
+    vec![
+        Input::Frame(vec![1]),
+        Input::ProducerEnded,
+        Input::Drain,
+        Input::Expired,
+        Input::ConsumerGone,
+        Input::Revoked,
+        Input::Lapsed,
+    ]
 }
 
 /// Every way to end stops the wire watch first, exactly once, and nothing is sent or stopped after the end:
@@ -53,6 +61,9 @@ fn clone(d: &Driver) -> Driver {
         State::Ended(End::ConsumerGone) => {
             c.step(Input::ConsumerGone);
         }
+        State::Ended(End::Unauthorized) => {
+            c.step(Input::Revoked);
+        }
     }
     assert_eq!((c.state(), c.stopped()), (d.state(), d.stopped()));
     c
@@ -84,4 +95,25 @@ fn expiry_ends_expired_and_a_gone_consumer_ends_quietly() {
     assert_eq!(gone.step(Input::ConsumerGone), vec![Output::Stop, Output::End(End::ConsumerGone)]);
     assert_eq!(End::ConsumerGone.refusal(), None);
     assert_eq!(gone.step(Input::Frame(vec![9])), Vec::new(), "nothing is sent after the end");
+}
+
+/// a-watch-ends-when-its-authorization-does: the product's revoke, or the end its authorization said at admit,
+/// ends the stream `unauthorized`, stopping the wire watch first; what was sent stays sent and nothing more is,
+/// draining or not.
+#[test]
+fn a_revoke_or_a_lapse_ends_unauthorized_after_what_was_sent() {
+    let mut d = Driver::new();
+    assert_eq!(d.step(Input::Frame(vec![1])), vec![Output::Send(vec![1])]);
+    assert_eq!(d.step(Input::Revoked), vec![Output::Stop, Output::End(End::Unauthorized)]);
+    assert_eq!(d.step(Input::Frame(vec![2])), Vec::new(), "nothing is sent after the end");
+    assert_eq!(End::Unauthorized.refusal(), Some("unauthorized"));
+    let mut lapsed = Driver::new();
+    assert_eq!(lapsed.step(Input::Lapsed), vec![Output::Stop, Output::End(End::Unauthorized)]);
+    let mut draining = Driver::new();
+    draining.step(Input::Drain);
+    assert_eq!(
+        draining.step(Input::Lapsed),
+        vec![Output::End(End::Unauthorized)],
+        "already stopped, so no second stop"
+    );
 }

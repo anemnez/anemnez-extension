@@ -34,7 +34,7 @@ pub use digest::{DigestLayer, RequestDigest};
 pub use edge::FileNonces;
 pub use health::Board;
 pub use journal::{EventsService, Journal, Refusal, StreamEnd, Subscription};
-pub use log_events::{Asked, Authorize, EventsFace, LogEvents, Method};
+pub use log_events::{Admit, Asked, Authorize, EventsFace, LogEvents, Method, Revoke};
 pub use plane::{ApiPlaneLayer, api_admits};
 pub use principal::{
     Absent, Admitted, Carried, KeyRecord, Keys, MemoryNonces, Nonces, PublishedKey, UNPUBLISHED, Unpublished, Verifier,
