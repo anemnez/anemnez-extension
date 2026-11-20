@@ -134,6 +134,15 @@ inside `CALL_WITHIN` (past it, `events-call-unanswered`), `Watch` drives `wire::
 `Authorize` decides within `AUTHORIZE_WITHIN`: a refusal, or no answer, is `unauthorized` with its reason, and nothing
 of the log is served. There is no default: a product whose log is everyone's passes `Authorize::allow_all` by name.
 
+<!-- claim: a-call-is-bounded-by-one-deadline -->
+**A call's time on the face is one deadline, from admit** (E m/20675; rule 4, nested bounds). `FACE_WITHIN` is a
+caller's minute (`CALLER_WITHIN`) less a hop, started when the call is admitted, and the product's `Authorize` and the
+log's read each take what remains of it (and at most `AUTHORIZE_WITHIN` and `CALL_WITHIN`). So the two together never
+pass the caller's own bound, and the stage that ran out is the one named: `unauthorized` for an authorization that
+didn't answer, `events-call-unanswered` for the read. A watch's open is authorized under the same deadline. A read holds
+a blocking thread until it ends, even past its bound, so a face holds at most `CALLS_MAX` reads (the product may set
+another), and the next call is refused `events-call-busy` at once (D m/20673).
+
 <!-- claim: a-log-watch-is-bounded-and-ends-stopped -->
 **A log watch is bounded, and its every end stops it.** Each watch is a thread of its own pushing into a bounded
 channel, so a consumer that holds its stream stalls only that stream and never the log's writer. A face holds at most
