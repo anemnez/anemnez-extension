@@ -73,7 +73,7 @@ impl fmt::Display for Refusal {
 
 impl std::error::Error for Refusal {}
 
-type Ended = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
+pub(crate) type Ended = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
 
 /// A drained stream's end: UNAVAILABLE `draining`, the bare name a caller matches by equality (CONTRACT §8.3, K
 /// m/16116), retryable at another instance. A cursor is its instance's own, so the subscriber subscribes afresh
@@ -100,7 +100,7 @@ impl StreamEnd {
         StreamEnd(Arc::new(move || Box::pin(ended())))
     }
 
-    fn ended(&self) -> Ended {
+    pub(crate) fn ended(&self) -> Ended {
         (self.0)()
     }
 }
@@ -363,6 +363,10 @@ pub struct EventsService {
 
 /// The method an `Events` token names: the gRPC path the product receives.
 pub const EVENTS_METHOD: &str = "/anemnez.extension.v1.Events/Events";
+/// The method an `Events/Call` token names.
+pub const CALL_METHOD: &str = "/anemnez.extension.v1.Events/Call";
+/// The method an `Events/Watch` token names.
+pub const WATCH_METHOD: &str = "/anemnez.extension.v1.Events/Watch";
 
 impl EventsService {
     /// The service, ready for `pb::events_server::EventsServer::new`. The verifier and the journal
@@ -372,7 +376,7 @@ impl EventsService {
     }
 }
 
-type EventStream = std::pin::Pin<Box<dyn Stream<Item = Result<pb::Event, tonic::Status>> + Send + 'static>>;
+pub(crate) type EventStream = std::pin::Pin<Box<dyn Stream<Item = Result<pb::Event, tonic::Status>> + Send + 'static>>;
 
 #[tonic::async_trait]
 impl pb::events_server::Events for EventsService {

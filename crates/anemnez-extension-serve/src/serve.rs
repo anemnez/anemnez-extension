@@ -41,7 +41,8 @@ use tonic::server::NamedService;
 use tonic::service::Routes;
 
 use crate::digest::DigestService;
-use crate::journal::{EVENTS_METHOD, EventsService};
+use crate::journal::{CALL_METHOD, EVENTS_METHOD, WATCH_METHOD};
+use crate::log_events::EventsFace;
 use crate::plane::ApiPlaneService;
 use crate::{Accepted, ApiPlaneLayer, Board, Describe, DigestLayer, pb};
 
@@ -57,13 +58,14 @@ pub const CUT_WITHIN: Duration = Duration::from_secs(1);
 pub struct ApiFaces {
     describe: Describe,
     health: Board,
-    events: EventsService,
+    events: EventsFace,
 }
 
 impl ApiFaces {
-    /// The three faces [`serve`] puts beside the product's calls.
-    pub fn new(describe: Describe, health: Board, events: EventsService) -> ApiFaces {
-        ApiFaces { describe, health, events }
+    /// The three faces [`serve`] puts beside the product's calls. `events` is the product's Journal (an
+    /// `EventsService`, retiring) or its own log (a `LogEvents`), as an [`EventsFace`].
+    pub fn new(describe: Describe, health: Board, events: impl Into<EventsFace>) -> ApiFaces {
+        ApiFaces { describe, health, events: events.into() }
     }
 }
 
@@ -230,7 +232,9 @@ where
         // Unheard only once serve has returned, when there's no one left to tell.
         let _ = stopping.send(());
     };
-    let digested = DigestLayer::for_paths(std::iter::once(EVENTS_METHOD).chain(token_checked.iter().copied()));
+    let digested = DigestLayer::for_paths(
+        [EVENTS_METHOD, CALL_METHOD, WATCH_METHOD].into_iter().chain(token_checked.iter().copied()),
+    );
     let server = tonic::transport::Server::builder()
         .layer(admit)
         .layer(ApiPlaneLayer)

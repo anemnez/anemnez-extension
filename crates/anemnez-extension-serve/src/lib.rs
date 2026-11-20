@@ -22,9 +22,11 @@ pub mod edge;
 pub mod health;
 pub mod journal;
 pub mod key_cache;
+pub mod log_events;
 pub mod plane;
 pub mod principal;
 pub mod serve;
+pub mod watch;
 
 pub use accepted::{Accepted, Judged, judged};
 pub use describe::Describe;
@@ -32,6 +34,7 @@ pub use digest::{DigestLayer, RequestDigest};
 pub use edge::FileNonces;
 pub use health::Board;
 pub use journal::{EventsService, Journal, Refusal, StreamEnd, Subscription};
+pub use log_events::{Asked, Authorize, EventsFace, LogEvents, Method};
 pub use plane::{ApiPlaneLayer, api_admits};
 pub use principal::{
     Absent, Admitted, Carried, KeyRecord, Keys, MemoryNonces, Nonces, PublishedKey, UNPUBLISHED, Unpublished, Verifier,
@@ -55,6 +58,8 @@ mod edge_tests;
 #[cfg(test)]
 mod key_cache_sim_tests;
 #[cfg(test)]
+mod log_events_tests;
+#[cfg(test)]
 mod plane_tests;
 #[cfg(test)]
 mod principal_tests;
@@ -62,3 +67,5 @@ mod principal_tests;
 mod serve_fn_tests;
 #[cfg(test)]
 mod serve_tests;
+#[cfg(test)]
+mod watch_tests;

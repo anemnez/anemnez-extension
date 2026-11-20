@@ -1,0 +1,436 @@
+//! The log face: a product's own hydramq-events log served through the contract's `Events/Call` and
+//! `Events/Watch` (CONTRACT.md `#a-products-events-are-read-through-one-call`,
+//! `#a-products-events-are-pushed-through-one-watch`). It is the Journal's retiring step 2: the face exists here
+//! once (rule 2), and each product moves onto it on its owner's queue.
+//!
+//! - **Authorized first.** A call's principal token is checked by the one [`Verifier`], then the product's own
+//!   [`Authorize`] decides, inside [`AUTHORIZE_WITHIN`], before a byte of the log is read. There is no default:
+//!   a product passes [`Authorize::allow_all`] by name if its log is everyone's.
+//! - **Bounded.** A call reads on the blocking pool inside [`CALL_WITHIN`]. Each watch is a thread of its own,
+//!   and a face holds at most [`WATCHES_MAX`] at once (overridable); past it a watch is refused
+//!   `events-watch-busy` at once.
+//! - **A slow consumer stalls only its own stream.** The thread pushes into a bounded channel; the log's writer
+//!   never waits on it.
+//! - **Every exit stops the watch.** The stream is the [`crate::watch`] kernel's, which stops the wire watch
+//!   before any end: the drain (`draining`, after what was read), the token's expiry (`expired`), the consumer
+//!   gone, or the producer's own end. A stream is authorized again each time it re-opens after its token's
+//!   expiry, so a revoked grant stops a watch within one token's life.
+
+use std::collections::VecDeque;
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
+
+use anemnez_clock::{Clock, Mono};
+use anemnez_extension::refusal;
+use futures_util::Stream;
+use hydramq_events::Events;
+use hydramq_events::wire::{self, HOP_MARGIN, Stopper, WITHIN_MAX};
+use tokio::sync::Notify;
+
+use crate::accepted::Judged;
+use crate::journal::{CALL_METHOD, EVENTS_METHOD, Ended, EventStream, StreamEnd, WATCH_METHOD};
+use crate::pb;
+use crate::principal::{Admitted, Verifier};
+use crate::watch::{Driver, End, Input, Output};
+
+/// The most watches one face holds at once, unless the product says otherwise ([`LogEvents::with_watches_max`]).
+pub const WATCHES_MAX: usize = 16;
+/// How long a call's read on the log may take: the wire's own longest read wait, plus a hop.
+pub const CALL_WITHIN: Duration = WITHIN_MAX.saturating_add(HOP_MARGIN);
+/// How long the product's [`Authorize`] may take, unless the product says otherwise: room for a person's card
+/// (an Ask bound is 45 s), inside a caller's minute.
+pub const AUTHORIZE_WITHIN: Duration = Duration::from_secs(50);
+/// The frames a watch thread may read ahead of its consumer.
+pub const WATCH_BUFFER: usize = 4;
+
+/// Which of the log face's methods is asked for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Method {
+    /// `Events/Call`: one read of the log.
+    Call,
+    /// `Events/Watch`: the log, pushed.
+    Watch,
+}
+
+/// What the product's [`Authorize`] is asked about: the method, the peer the accept judged, and the verified
+/// principal (`None` when the rollout rule admitted a call that carried no token).
+#[derive(Clone, Debug)]
+pub struct Asked {
+    /// The method.
+    pub method: Method,
+    /// The connection's judged peer, when it came in on an accepted connection.
+    pub judged: Option<Judged>,
+    /// The verified principal token's claims.
+    pub admitted: Option<Admitted>,
+}
+
+type Decision = Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'static>>;
+
+/// The product's own decision on each `Events/Call` and `Events/Watch`. A refusal's reason is served after
+/// `unauthorized`. There is no default: [`Authorize::allow_all`] is a value a product passes by name.
+#[derive(Clone)]
+pub struct Authorize(Arc<dyn Fn(Asked) -> Decision + Send + Sync>);
+
+impl Authorize {
+    /// The product's decision.
+    pub fn new<F, Fut>(decide: F) -> Authorize
+    where
+        F: Fn(Asked) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<(), String>> + Send + 'static,
+    {
+        Authorize(Arc::new(move |asked| Box::pin(decide(asked))))
+    }
+
+    /// Every verified caller may read the log: for a log that is everyone's, said by name.
+    #[must_use]
+    pub fn allow_all() -> Authorize {
+        Authorize::new(|_| async { Ok(()) })
+    }
+}
+
+impl std::fmt::Debug for Authorize {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Authorize")
+    }
+}
+
+/// A product's own log, served through the contract's `Events` face.
+pub struct LogEvents {
+    log: Arc<Events>,
+    verifier: Verifier,
+    authorize: Authorize,
+    clock: Clock,
+    watches_max: usize,
+    authorize_within: Duration,
+    open: Arc<AtomicUsize>,
+    closed: Arc<Notify>,
+}
+
+impl LogEvents {
+    /// `log` served to callers `verifier` admits and `authorize` allows. `clock` should be the verifier's, so a
+    /// stream's expiry is a deadline on it.
+    pub fn new(log: Arc<Events>, verifier: Verifier, authorize: Authorize, clock: Clock) -> LogEvents {
+        LogEvents {
+            log,
+            verifier,
+            authorize,
+            clock,
+            watches_max: WATCHES_MAX,
+            authorize_within: AUTHORIZE_WITHIN,
+            open: Arc::new(AtomicUsize::new(0)),
+            closed: Arc::new(Notify::new()),
+        }
+    }
+
+    /// At most `max` watches at once, instead of [`WATCHES_MAX`].
+    #[must_use]
+    pub fn with_watches_max(mut self, max: usize) -> LogEvents {
+        self.watches_max = max;
+        self
+    }
+
+    /// The product's [`Authorize`] answers within `within`, instead of [`AUTHORIZE_WITHIN`].
+    #[must_use]
+    pub fn with_authorize_within(mut self, within: Duration) -> LogEvents {
+        self.authorize_within = within;
+        self
+    }
+
+    /// The watch threads running now.
+    #[must_use]
+    pub fn watches_open(&self) -> usize {
+        self.open.load(Ordering::SeqCst)
+    }
+
+    /// Wakes whenever a watch thread ends (for a host, or a row, waiting on [`LogEvents::watches_open`]).
+    #[must_use]
+    pub fn watch_ended(&self) -> Arc<Notify> {
+        Arc::clone(&self.closed)
+    }
+
+    /// The token checked, then the product's decision, within its bound: the verified principal, or the
+    /// refusal by name.
+    #[allow(clippy::result_large_err)] // A tonic Status is the handler's own error, returned as is.
+    async fn admit<M>(
+        &self,
+        path: &str,
+        method: Method,
+        request: &tonic::Request<M>,
+    ) -> Result<Option<Admitted>, tonic::Status> {
+        let admitted = self.verifier.check_grpc(path, request).await.map_err(|r| crate::principal::status(&r))?;
+        let asked = Asked { method, judged: crate::accepted::judged(request).cloned(), admitted: admitted.clone() };
+        match self.clock.timeout(self.authorize_within, (self.authorize.0)(asked)).await {
+            Ok(Ok(())) => Ok(admitted),
+            Ok(Err(why)) => Err(tonic::Status::permission_denied(format!("{}: {why}", refusal::UNAUTHORIZED))),
+            Err(_) => Err(tonic::Status::unavailable(format!(
+                "{}: the product's authorization didn't answer within {:?}",
+                refusal::UNAUTHORIZED,
+                self.authorize_within
+            ))),
+        }
+    }
+
+    fn take_slot(&self) -> Option<Slot> {
+        let mut now = self.open.load(Ordering::SeqCst);
+        loop {
+            if now >= self.watches_max {
+                return None;
+            }
+            match self.open.compare_exchange(now, now + 1, Ordering::SeqCst, Ordering::SeqCst) {
+                Ok(_) => return Some(Slot { open: Arc::clone(&self.open), closed: Arc::clone(&self.closed) }),
+                Err(seen) => now = seen,
+            }
+        }
+    }
+}
+
+/// One watch's place under the cap, freed when its thread ends.
+struct Slot {
+    open: Arc<AtomicUsize>,
+    closed: Arc<Notify>,
+}
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        self.open.fetch_sub(1, Ordering::SeqCst);
+        self.closed.notify_waiters();
+    }
+}
+
+type WatchStream = Pin<Box<dyn Stream<Item = Result<pb::WatchFrame, tonic::Status>> + Send + 'static>>;
+
+/// One Watch stream's host: the kernel's inputs gathered, its outputs done.
+struct Watching {
+    driver: Driver,
+    frames: tokio::sync::mpsc::Receiver<Vec<u8>>,
+    stopper: Stopper,
+    log: Arc<Events>,
+    clock: Clock,
+    expires: Mono,
+    drain: Option<Ended>,
+    pending: VecDeque<Result<pb::WatchFrame, tonic::Status>>,
+    finished: bool,
+}
+
+impl Watching {
+    fn apply(&mut self, input: Input) {
+        for out in self.driver.step(input) {
+            match out {
+                Output::Send(frame) => self.pending.push_back(Ok(pb::WatchFrame { frame })),
+                Output::Stop => self.log.stop(&self.stopper),
+                Output::End(end) => {
+                    if let Some(status) = status(end) {
+                        self.pending.push_back(Err(status));
+                    }
+                    self.finished = true;
+                }
+            }
+        }
+    }
+
+    async fn next_input(&mut self) -> Input {
+        let armed = !matches!(self.driver.state(), crate::watch::State::Draining) && self.drain.is_some();
+        let Watching { drain, clock, expires, frames, .. } = self;
+        let input = tokio::select! {
+            biased;
+            () = async {
+                match drain.as_mut() {
+                    Some(asked) => asked.await,
+                    None => std::future::pending().await,
+                }
+            }, if armed => Input::Drain,
+            () = clock.sleep_until(*expires) => Input::Expired,
+            frame = frames.recv() => frame.map_or(Input::ProducerEnded, Input::Frame),
+        };
+        if input == Input::Drain {
+            *drain = None;
+        }
+        input
+    }
+}
+
+impl Drop for Watching {
+    /// The consumer dropped the stream: the kernel stops the wire watch, unless it already has.
+    fn drop(&mut self) {
+        if !self.finished {
+            self.apply(Input::ConsumerGone);
+        }
+    }
+}
+
+fn status(end: End) -> Option<tonic::Status> {
+    match end {
+        End::Draining => Some(tonic::Status::unavailable(refusal::DRAINING)),
+        End::Expired => Some(crate::journal::Refusal::Expired.status()),
+        End::Producer | End::ConsumerGone => None,
+    }
+}
+
+fn unserved() -> tonic::Status {
+    tonic::Status::unimplemented(format!(
+        "{}: this product's events are on its log, read through Events/Call or Events/Watch",
+        refusal::EVENTS_CALL_UNSERVED
+    ))
+}
+
+#[tonic::async_trait]
+impl pb::events_server::Events for LogEvents {
+    type EventsStream = EventStream;
+
+    /// The Journal's stream: a log face doesn't serve it.
+    async fn events(
+        &self,
+        _request: tonic::Request<pb::EventsRequest>,
+    ) -> Result<tonic::Response<Self::EventsStream>, tonic::Status> {
+        let _ = EVENTS_METHOD;
+        Err(unserved())
+    }
+
+    type WatchStream = WatchStream;
+
+    async fn watch(
+        &self,
+        request: tonic::Request<pb::WatchRequest>,
+    ) -> Result<tonic::Response<Self::WatchStream>, tonic::Status> {
+        let admitted = self.admit(WATCH_METHOD, Method::Watch, &request).await?;
+        // A stream admitted without a token still ends within a token's life, so it re-opens, and is authorized
+        // again, at least that often.
+        let expires = admitted.map_or_else(
+            || self.clock.now_mono() + Duration::from_millis(anemnez_extension::principal::MAX_TTL_MS),
+            |a| a.expires,
+        );
+        let drain = request.extensions().get::<StreamEnd>().map(StreamEnd::ended);
+        let bytes = request.into_inner().request;
+        // Read the request before taking a thread for it.
+        wire::watch(&self.log, &bytes).map_err(|e| tonic::Status::invalid_argument(e.to_string()))?;
+        let slot = self.take_slot().ok_or_else(|| {
+            tonic::Status::resource_exhausted(format!(
+                "{}: this product holds {} watches, the most it may; retry, or read with Events/Call",
+                refusal::EVENTS_WATCH_BUSY,
+                self.watches_max
+            ))
+        })?;
+        let (tx, frames) = tokio::sync::mpsc::channel(WATCH_BUFFER);
+        let (said, stopper) = tokio::sync::oneshot::channel::<Stopper>();
+        let log = Arc::clone(&self.log);
+        std::thread::Builder::new()
+            .name("events-watch".into())
+            .spawn(move || {
+                let _slot = slot;
+                let Ok(watching) = wire::watch(&log, &bytes) else { return };
+                if said.send(watching.stopper()).is_err() {
+                    return;
+                }
+                for frame in watching {
+                    if tx.blocking_send(frame).is_err() {
+                        return;
+                    }
+                }
+            })
+            .map_err(|e| tonic::Status::resource_exhausted(format!("{}: {e}", refusal::EVENTS_WATCH_BUSY)))?;
+        let stopper = stopper
+            .await
+            .map_err(|_| tonic::Status::internal("the watch ended before it began: its request didn't read"))?;
+        let host = Watching {
+            driver: Driver::new(),
+            frames,
+            stopper,
+            log: Arc::clone(&self.log),
+            clock: self.clock.clone(),
+            expires,
+            drain,
+            pending: VecDeque::new(),
+            finished: false,
+        };
+        let stream = futures_util::stream::unfold(host, |mut host| async move {
+            loop {
+                if let Some(item) = host.pending.pop_front() {
+                    return Some((item, host));
+                }
+                if host.finished {
+                    return None;
+                }
+                let input = host.next_input().await;
+                host.apply(input);
+            }
+        });
+        Ok(tonic::Response::new(Box::pin(stream)))
+    }
+
+    async fn call(
+        &self,
+        request: tonic::Request<pb::CallRequest>,
+    ) -> Result<tonic::Response<pb::CallReply>, tonic::Status> {
+        self.admit(CALL_METHOD, Method::Call, &request).await?;
+        let (log, bytes) = (Arc::clone(&self.log), request.into_inner().request);
+        let read = tokio::task::spawn_blocking(move || wire::serve(&log, &bytes));
+        match self.clock.timeout(CALL_WITHIN, read).await {
+            Ok(Ok(reply)) => Ok(tonic::Response::new(pb::CallReply { reply })),
+            Ok(Err(e)) => Err(tonic::Status::internal(format!("the log's read ended: {e}"))),
+            Err(_) => Err(tonic::Status::unavailable(format!(
+                "{}: the log's read didn't answer within {CALL_WITHIN:?}",
+                refusal::EVENTS_CALL_UNANSWERED
+            ))),
+        }
+    }
+}
+
+/// The product's `Events` face: its Journal (retiring) or its own log.
+pub enum EventsFace {
+    /// A Journal behind `Events/Events`, refusing Call and Watch by name (retiring onto [`EventsFace::Log`]).
+    Journal(crate::journal::EventsService),
+    /// The product's own hydramq-events log behind Call and Watch.
+    Log(LogEvents),
+}
+
+impl From<crate::journal::EventsService> for EventsFace {
+    fn from(service: crate::journal::EventsService) -> Self {
+        EventsFace::Journal(service)
+    }
+}
+
+impl From<LogEvents> for EventsFace {
+    fn from(log: LogEvents) -> Self {
+        EventsFace::Log(log)
+    }
+}
+
+#[tonic::async_trait]
+impl pb::events_server::Events for EventsFace {
+    type EventsStream = EventStream;
+
+    async fn events(
+        &self,
+        request: tonic::Request<pb::EventsRequest>,
+    ) -> Result<tonic::Response<Self::EventsStream>, tonic::Status> {
+        match self {
+            EventsFace::Journal(j) => j.events(request).await,
+            EventsFace::Log(l) => l.events(request).await,
+        }
+    }
+
+    type WatchStream = WatchStream;
+
+    async fn watch(
+        &self,
+        request: tonic::Request<pb::WatchRequest>,
+    ) -> Result<tonic::Response<Self::WatchStream>, tonic::Status> {
+        match self {
+            EventsFace::Journal(j) => j.watch(request).await,
+            EventsFace::Log(l) => l.watch(request).await,
+        }
+    }
+
+    async fn call(
+        &self,
+        request: tonic::Request<pb::CallRequest>,
+    ) -> Result<tonic::Response<pb::CallReply>, tonic::Status> {
+        match self {
+            EventsFace::Journal(j) => j.call(request).await,
+            EventsFace::Log(l) => l.call(request).await,
+        }
+    }
+}
