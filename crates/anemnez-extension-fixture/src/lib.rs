@@ -14,6 +14,7 @@
 //! | `Hold(repo, why)` | a write, ask, keyed `leader("fixture-repo", key = repo)`, `blocks` |
 //! | `Run()` | `runs_to_completion`: bounded only by its own end, with no budget |
 //! | `Wait(timeout_ms)` | owns its budget through the field, not the flag (C) |
+//! | `Snapshot()` | a reply whose bytes fields are tagged `image/png`, one singular, one repeated |
 //! | `Ping()` | no anemnez options: not exposed |
 //!
 //! plus the contract's `Describe`, `Health` and `Events`. Every unary reply carries the caller's
@@ -212,6 +213,14 @@ impl Keys for NoKeysYet {
 const ITEMS: usize = 12;
 const PAGE: usize = 5;
 
+/// A valid 1x1 PNG (one opaque pixel), what `Snapshot` answers in its image-tagged fields.
+pub const PNG_1X1: &[u8] = &[
+    0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00,
+    0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0D, 0x49,
+    0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0xF8, 0xDF, 0xC0, 0xF0, 0x1F, 0x00, 0x06, 0x80, 0x02, 0x7F, 0x10, 0x4C, 0x1B,
+    0xE1, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+];
+
 fn item(i: usize) -> pb::Item {
     pb::Item { id: format!("i{i:02}"), name: format!("item {i}") }
 }
@@ -291,6 +300,15 @@ impl pb::fixture_server::Fixture for Fixture {
         let waited_ms = request.get_ref().timeout_ms;
         self.clock.sleep(Duration::from_millis(waited_ms)).await;
         Ok(reply(&request, pb::WaitReply { waited_ms }))
+    }
+
+    async fn snapshot(
+        &self,
+        request: tonic::Request<pb::SnapshotRequest>,
+    ) -> Result<tonic::Response<pb::SnapshotReply>, tonic::Status> {
+        let page_png = PNG_1X1.to_vec();
+        let frame_pngs = vec![page_png.clone(), page_png.clone()];
+        Ok(reply(&request, pb::SnapshotReply { page_png, frame_pngs, caption: "one pixel".into() }))
     }
 
     async fn ping(

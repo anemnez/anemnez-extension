@@ -55,6 +55,12 @@ service Fixture {
       result: { one: {} } effect: READ presence: INDEX permission: ALLOW callers: AGENT
     };
   }
+  rpc Snapshot(SnapshotRequest) returns (SnapshotReply) {
+    option (anemnez.extension.v1.anemnez_method) = {
+      description: "A tiny PNG, and two frames of it: reply bytes fields tagged as images (CONTRACT.md a-bytes-field-may-say-it-is-an-image)."
+      result: { bound: 2 } effect: READ presence: MINIMAL permission: ALLOW callers: AGENT
+    };
+  }
   // No anemnez options: not offered, so no bridge gives it a face ('not exposed').
   rpc Ping(PingRequest) returns (PingReply);
 }
@@ -95,3 +101,9 @@ message WaitReply {
 }
 message PingRequest {}
 message PingReply {}
+message SnapshotRequest {}
+message SnapshotReply {
+  bytes page_png = 1 [(anemnez.extension.v1.anemnez_field).media = "image/png"];
+  repeated bytes frame_pngs = 2 [(anemnez.extension.v1.anemnez_field).media = "image/png"];
+  string caption = 3;
+}

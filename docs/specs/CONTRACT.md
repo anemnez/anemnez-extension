@@ -238,7 +238,10 @@ top-level field as MCP image content beside the JSON of the rest. The set is clo
 `media-unknown`, one on a field that isn't `bytes` is `media-not-bytes`, and option bytes that don't read are
 `field-options-malformed`, each refusing the descriptor at connect. An untagged `bytes` field stays bytes.
 `media::media_of(set, ".pkg.Message")` and `media::media_fields(set)` are the one reader, and `check_descriptor`
-answers each offered method's `output_media`. Readers first: a bridge reads the option before any product sets it.
+answers each offered method's `output_media`. Readers first: a bridge reads the option before any product sets it. A tagged `repeated bytes`
+field is a list of images: a bridge answers one image content per element, in order (D m/20984, I m/20987). The
+reply's own bound is the only cap on its size or count; a bridge adds none. The fixture's `Snapshot` tags one of
+each, `page_png` and `frame_pngs`, so a bridge's end-to-end row proves it matches the proto's own field names.
 
 ## 2. The serving face: `anemnez-extension-serve`
 
