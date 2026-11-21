@@ -113,8 +113,9 @@ impl fmt::Debug for StreamEnd {
 
 /// The cursor scope of this boot of `instance`: `<inst8>.<boot>`, `inst8` the instance id's last eight characters
 /// (`standalone` when there is none), `boot` the wall clock at the call, as whole unix nanoseconds in hex. A restart
-/// reads a later clock, so a cursor from before it is `cursor-not-mine`; nanoseconds whole never wrap, where a
-/// truncation would let two boots share a scope by chance (K m/22348).
+/// reads a different clock, so a cursor from before it is `cursor-not-mine`; nanoseconds whole never wrap, where a
+/// truncation would let two boots share a scope by chance (K m/22348). Only difference is relied on, never order: the
+/// wall can step back (NTP, a person setting the time), so no reader compares two origins (D m/22352).
 pub fn origin_for(instance: &str, clock: &Clock) -> String {
     let boot = clock.now_wall().unix_nanos();
     if instance.is_empty() {
