@@ -19,6 +19,7 @@ use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 /// What the accept judged about a connection's peer: who it is, read once, and the role its plane's policy
 /// gave it. It is on every request served over an [`Accepted`] connection; read it with [`judged`].
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Judged {
     /// The peer, read once at accept (its pid, the pid's version, and its code identity or why that
     /// couldn't be read).
