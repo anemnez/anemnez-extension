@@ -111,6 +111,20 @@ impl fmt::Debug for StreamEnd {
     }
 }
 
+/// The cursor scope of this boot of `instance`: `<inst8>.<boot>`, `inst8` the instance id's last eight characters
+/// (`standalone` when there is none), `boot` the wall clock at the call, as whole unix nanoseconds in hex. A restart
+/// reads a later clock, so a cursor from before it is `cursor-not-mine`; nanoseconds whole never wrap, where a
+/// truncation would let two boots share a scope by chance (K m/22348).
+pub fn origin_for(instance: &str, clock: &Clock) -> String {
+    let boot = clock.now_wall().unix_nanos();
+    if instance.is_empty() {
+        return format!("standalone.{boot:x}");
+    }
+    let skip = instance.chars().count().saturating_sub(8);
+    let inst8: String = instance.chars().skip(skip).collect();
+    format!("{inst8}.{boot:x}")
+}
+
 /// An extension's events journal. Cloning it shares the one journal.
 #[derive(Clone)]
 pub struct Journal {
@@ -147,6 +161,18 @@ impl Journal {
                 published: Notify::new(),
             }),
         }
+    }
+
+    /// A journal for this boot of `instance`: its origin is [`origin_for`]'s, so every product names its cursor
+    /// scope the one way (rule 2; A m/22350).
+    pub fn for_boot(instance: &str, kept: usize, clock: Clock) -> Journal {
+        let origin = origin_for(instance, &clock);
+        Journal::new(origin, kept, clock)
+    }
+
+    /// The origin this journal's cursors carry.
+    pub fn origin(&self) -> &str {
+        &self.inner.origin
     }
 
     /// How many events the journal keeps.

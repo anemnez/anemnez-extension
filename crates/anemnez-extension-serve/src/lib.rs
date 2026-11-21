@@ -33,7 +33,7 @@ pub use describe::Describe;
 pub use digest::{DigestLayer, RequestDigest};
 pub use edge::FileNonces;
 pub use health::Board;
-pub use journal::{EventsService, Journal, Refusal, StreamEnd, Subscription};
+pub use journal::{EventsService, Journal, Refusal, StreamEnd, Subscription, origin_for};
 pub use log_events::{Admit, Asked, Authorize, EventsFace, LogEvents, Method, Revoke};
 pub use plane::{ApiPlaneLayer, api_admits};
 pub use principal::{

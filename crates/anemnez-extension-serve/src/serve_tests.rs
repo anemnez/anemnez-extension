@@ -535,3 +535,17 @@ async fn the_events_service_ends_a_stream_by_the_end_in_its_request() {
     assert_eq!((ended.code(), ended.message()), (tonic::Code::Unavailable, anemnez_extension::refusal::DRAINING));
     assert!(stream.next().await.is_none(), "and the stream ends");
 }
+
+/// A m/22350, K m/22348: a boot's cursor scope is the instance's last eight and the whole wall clock in hex, so two boots
+/// 2^32 ns apart (where a low-32-bit boot wraps to the same value) never share a scope.
+#[test]
+fn a_boots_origin_never_wraps_onto_another_boots() {
+    let manual = ManualClock::starting_at_unix_secs(1_700_000_000);
+    let first = Journal::for_boot("0123456789abcdef", 8, manual.clock());
+    let nanos = 1_700_000_000_i128 * 1_000_000_000;
+    assert_eq!(first.origin(), format!("89abcdef.{nanos:x}"));
+    manual.sleep_host(Duration::from_nanos(1 << 32));
+    let second = Journal::for_boot("0123456789abcdef", 8, manual.clock());
+    assert_ne!(first.origin(), second.origin(), "a later boot is another scope");
+    assert_eq!(crate::origin_for("", &manual.clock()).split_once('.').map(|(i, _)| i), Some("standalone"));
+}
