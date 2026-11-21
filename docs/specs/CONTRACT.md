@@ -95,7 +95,8 @@ descriptor declares `cursor_scope`: `swarm` (the events are replicated, so a cur
 instance) or `instance` (a cursor carries its issuing instance and is refused elsewhere by name,
 `cursor-not-mine`; the subscriber starts fresh at the new instance and surfaces the gap to its owner,
 never papers over it) (I, B). An instance-scoped cursor also names the instance's boot (K's Typhon:
-`<inst8>.<boot>:<seq>`), so a cursor from before a restart, whose sequence the restart reset, is
+`<inst8>.<boot>:<seq>`; -serve's `Journal::for_boot` builds it, `boot` the whole wall clock in hex, never
+truncated), so a cursor from before a restart, whose sequence the restart reset, is
 `cursor-not-mine` too, never silently resumed. Two more refusals end a stream, each surfaced, never
 silent: `out-of-range`, a cursor older than what is kept (start fresh at the head), and `data-loss`, a
 subscriber fallen behind the live stream (resubscribe from the last cursor seen). The descriptor also states `events_kept`, how many events the product keeps: how far
