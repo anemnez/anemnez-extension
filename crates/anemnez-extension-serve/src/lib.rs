@@ -28,7 +28,7 @@ pub mod principal;
 pub mod serve;
 pub mod watch;
 
-pub use accepted::{Accepted, Judged, judged};
+pub use accepted::{Accepted, Judged, PeerToken, judged, peer_token};
 pub use describe::Describe;
 pub use digest::{DigestLayer, RequestDigest};
 pub use edge::FileNonces;

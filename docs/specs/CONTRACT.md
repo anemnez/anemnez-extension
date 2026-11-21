@@ -625,7 +625,7 @@ crate (`anemnez_extension::peer`), since both halves already depend on it. Each 
 (`#[non_exhaustive]`). The connection type, `Accepted { io, peer, role }`, lives in -serve beside `serve()`, its one
 reader. It implements tonic's `Connected` with `ConnectInfo = Judged { peer, role }`, so tonic puts both on every
 request with no code path to forget; a router reads it with `judged(&request)`, and a request that came in on any
-other connection reads `None`, an unjudged peer, which a router refuses wherever a judged one is needed. -serve's router acts on the `Role` the accept decided and never holds the trust table
+other connection reads `None`, an unjudged peer, which a router refuses wherever a judged one is needed. An accept that hands in the whole audit token it judged (`Accepted::with_token`) puts it on every request too, read with `peer_token(&request)` (M m/21926): the one read at accept, handed on to whoever judges a caller by it (Agora's WhoIs), never a second read of the socket. Words that don't name the peer's pid and pid version are kept as no token, and a caller that needs one and finds none refuses by name, never falling back to a stamp. 0.8's `Peer.token` may later subsume it, readers first. -serve's router acts on the `Role` the accept decided and never holds the trust table
 or matches a team or identifier itself. The peer token is read **once, at accept**, and kept with the connection:
 macOS answers LOCAL_PEERTOKEN for whoever holds the socket's peer pid when it is asked, so `pidversion` guards
 against a reused pid, and nothing reads the token again per request. `Peer` is made by `Peer::from_token`, which takes the pair from the token's own words 5 and 7, so the two can
