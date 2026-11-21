@@ -74,6 +74,7 @@ pub enum Method {
 /// What the product's [`Authorize`] is asked about: the method, the peer the accept judged, and the verified
 /// principal (`None` when the rollout rule admitted a call that carried no token).
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct Asked {
     /// The method.
     pub method: Method,
@@ -81,6 +82,10 @@ pub struct Asked {
     pub judged: Option<Judged>,
     /// The verified principal token's claims.
     pub admitted: Option<Admitted>,
+    /// The request's metadata, as the call carried it: what a product attributes the call to beside its principal
+    /// (Agora's stamp naming the lane, `mcp::Stamp`). It attributes, never authorizes: a decision reads `judged` and
+    /// `admitted`.
+    pub metadata: tonic::metadata::MetadataMap,
 }
 
 /// The product's hold on an authorization it gave a watch: [`Revoke::revoke`] ends every stream admitted under it,
@@ -288,7 +293,12 @@ impl LogEvents {
         deadline: Mono,
     ) -> Result<(Option<Admitted>, Admit), tonic::Status> {
         let admitted = self.verifier.check_grpc(path, request).await.map_err(|r| crate::principal::status(&r))?;
-        let asked = Asked { method, judged: crate::accepted::judged(request).cloned(), admitted: admitted.clone() };
+        let asked = Asked {
+            method,
+            judged: crate::accepted::judged(request).cloned(),
+            admitted: admitted.clone(),
+            metadata: request.metadata().clone(),
+        };
         let within = self.authorize_within.min(self.left(deadline));
         match self.clock.timeout(within, (self.authorize.0)(asked)).await {
             Ok(Ok(admit)) => Ok((admitted, admit)),

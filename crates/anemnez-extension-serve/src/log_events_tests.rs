@@ -444,3 +444,23 @@ async fn a_watch_admitted_until_an_end_ends_unauthorized_at_it() {
     assert!(ended.message().starts_with("unauthorized"), "{}", ended.message());
     until_no_watches(&face).await;
 }
+
+/// The product's authorization is handed the request's metadata as the call carried it, so it can attribute the
+/// call (Agora's stamp naming the lane) beside the principal it decides on.
+#[tokio::test(flavor = "multi_thread")]
+async fn authorize_is_handed_the_requests_metadata() {
+    let f = fixture();
+    let lanes = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let seen = Arc::clone(&lanes);
+    let face = f.face(Authorize::new(move |a| {
+        seen.lock()
+            .unwrap()
+            .push(a.metadata.get("anemnez-caller-lane").and_then(|v| v.to_str().ok()).map(String::from));
+        async { Err("attributed only".to_owned()) }
+    }));
+    let mut request =
+        tonic::Request::new(pb::CallRequest { request: read_request(&from_start(), 10, Duration::ZERO).unwrap() });
+    request.metadata_mut().insert("anemnez-caller-lane", "K".parse().unwrap());
+    let _ = face.call(request).await;
+    assert_eq!(*lanes.lock().unwrap(), vec![Some("K".to_owned())]);
+}

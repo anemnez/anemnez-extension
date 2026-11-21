@@ -230,6 +230,16 @@ Secure Enclave key; a SEC1 key and a fixed 64-byte `r ‖ s` signature, never DE
 signature and `signed::fresh` the window from `SKEW_MS` and `MAX_TTL_MS`, given the verifier's own
 clock reading. Each schema keeps its own refusal steps (audience, method, nonce) beside these.
 
+<!-- claim: a-bytes-field-may-say-it-is-an-image -->
+**A bytes field may say it is an image** (K, I m/20935, 2026-11-21). A field option,
+`[(anemnez.extension.v1.anemnez_field).media = "image/png"]` (or `"image/jpeg"`), says what a `bytes` field holds,
+so a bridge shows it as an image and never guesses from the bytes: Agora's MCP face answers a reply's tagged
+top-level field as MCP image content beside the JSON of the rest. The set is closed. A tag naming any other media is
+`media-unknown`, one on a field that isn't `bytes` is `media-not-bytes`, and option bytes that don't read are
+`field-options-malformed`, each refusing the descriptor at connect. An untagged `bytes` field stays bytes.
+`media::media_of(set, ".pkg.Message")` and `media::media_fields(set)` are the one reader, and `check_descriptor`
+answers each offered method's `output_media`. Readers first: a bridge reads the option before any product sets it.
+
 ## 2. The serving face: `anemnez-extension-serve`
 
 The kernel crate is pure: types, the protos and the signed framing, with no runtime and no clock

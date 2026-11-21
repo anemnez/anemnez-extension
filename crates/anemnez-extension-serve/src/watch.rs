@@ -12,6 +12,7 @@ use anemnez_extension::refusal;
 
 /// Why a stream ended.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum End {
     /// The producer's watch ended on its own (its last frame said why: compacted, refused, failed).
     Producer,
@@ -52,6 +53,7 @@ pub enum State {
 
 /// What happened, as the host saw it.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Input {
     /// A frame the watch thread read from the log.
     Frame(Vec<u8>),
@@ -71,6 +73,7 @@ pub enum Input {
 
 /// What the host does.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Output {
     /// Send this frame to the consumer.
     Send(Vec<u8>),
