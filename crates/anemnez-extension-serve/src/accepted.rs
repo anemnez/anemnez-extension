@@ -13,7 +13,7 @@ use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use anemnez_extension::peer::{Peer, Role};
+use anemnez_extension::peer::{PID_WORD, PIDVERSION_WORD, Peer, Role};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 /// What the accept judged about a connection's peer: who it is, read once, and the role its plane's policy
@@ -25,6 +25,24 @@ pub struct Judged {
     pub peer: Peer,
     /// The role the plane's policy admitted it as.
     pub role: Role,
+    /// The whole audit token the accept read and judged, when the accepting side handed it in
+    /// ([`Accepted::with_token`]). Read it with [`Judged::token`] or [`peer_token`].
+    token: Option<PeerToken>,
+}
+
+/// The whole audit token of a connection's peer, as its accept read it, once (the token, its code, the token
+/// again: D m/19411). It names the process as the OS knows it, so a product can hand it to another that judges a
+/// caller by it (Agora's WhoIs), never a second read of the socket. Only the accepting side makes one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct PeerToken(pub [u32; 8]);
+
+impl Judged {
+    /// The peer's whole audit token, when the accept handed it in: `None` for a connection built with
+    /// [`Accepted::new`], which a caller that needs the token refuses by name, never falling back to a stamp.
+    #[must_use]
+    pub fn token(&self) -> Option<PeerToken> {
+        self.token
+    }
 }
 
 /// An admitted connection and its judged peer. Only the accepting side makes one, after its plane's
@@ -38,7 +56,18 @@ pub struct Accepted<IO> {
 impl<IO> Accepted<IO> {
     /// `io`, admitted as `role` after its `peer` was read at accept.
     pub fn new(io: IO, peer: Peer, role: Role) -> Self {
-        Accepted { io, judged: Judged { peer, role } }
+        Accepted { io, judged: Judged { peer, role, token: None } }
+    }
+
+    /// `io`, admitted as `role` after its `peer` was read at accept from the audit token `words`, which every
+    /// request on it then carries ([`peer_token`]). The token is the one judged: words that don't name `peer`'s
+    /// pid and pid version are kept as no token at all, so a request never carries a token other than its
+    /// peer's.
+    pub fn with_token(io: IO, peer: Peer, role: Role, words: [u32; 8]) -> Self {
+        let names_peer =
+            words[PID_WORD].cast_signed() == peer.pid && words[PIDVERSION_WORD].cast_signed() == peer.pidversion;
+        let token = names_peer.then_some(PeerToken(words));
+        Accepted { io, judged: Judged { peer, role, token } }
     }
 
     /// What the accept judged.
@@ -64,6 +93,12 @@ impl<IO> tonic::transport::server::Connected for Accepted<IO> {
 /// [`Accepted`] connection. A router reads `None` as an unjudged peer and refuses what needs a judged one.
 pub fn judged<T>(request: &tonic::Request<T>) -> Option<&Judged> {
     request.extensions().get::<Judged>()
+}
+
+/// The whole audit token of the peer a request came in on, or `None` when its connection wasn't accepted with
+/// one ([`Accepted::with_token`]) or wasn't accepted here at all.
+pub fn peer_token<T>(request: &tonic::Request<T>) -> Option<PeerToken> {
+    judged(request).and_then(Judged::token)
 }
 
 impl<IO: AsyncRead + Unpin> AsyncRead for Accepted<IO> {

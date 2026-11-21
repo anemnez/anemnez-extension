@@ -13,7 +13,7 @@ const FUNCTIONAL: &str = "/minion.v1.Minion/AppsList";
 
 fn judged(role: Role) -> Judged {
     let code = Ok(Code { identifier: "ai.anemnez.x".into(), team: "TEAM1".into() });
-    Judged { peer: Peer::from_token([501, 501, 20, 501, 20, 41, 100_001, 7], code), role }
+    Accepted::new((), Peer::from_token([501, 501, 20, 501, 20, 41, 100_001, 7], code), role).judged().clone()
 }
 
 /// A call on a connection not judged at accept is refused by name, whatever it asks and whoever it says it is.
