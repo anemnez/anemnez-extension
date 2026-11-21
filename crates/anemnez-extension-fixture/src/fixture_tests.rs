@@ -24,7 +24,7 @@ fn the_fixture_declares_its_service() {
 fn the_good_fixture_offers_every_method_shape() {
     let methods = check_descriptor(Variant::Good.file_descriptor_set()).expect("admitted");
     let paths: Vec<_> = methods.iter().map(|m| m.path.rsplit('/').next().unwrap_or_default()).collect();
-    assert_eq!(paths, ["Items", "Recent", "Get", "Hold", "Run", "Wait"], "Ping is not exposed");
+    assert_eq!(paths, ["Items", "Recent", "Get", "Hold", "Run", "Wait", "Snapshot"], "Ping is not exposed");
     let by = |name: &str| methods.iter().find(|m| m.path.ends_with(name)).expect(name);
     assert_eq!(by("Items").options.result, ResultShape::Cursor);
     assert_eq!(by("Items").options.route, Route::Any);
@@ -75,7 +75,7 @@ fn the_fixture_flattens_and_its_colliding_names_do_not() {
     let good =
         flatten(&service_of(fds).expect("declared"), &check_descriptor(fds).expect("admitted")).expect("flattens");
     let names: Vec<&str> = good.iter().map(|t| t.name.as_str()).collect();
-    assert_eq!(names, ["items", "recent", "get", "hold", "run", "wait", "events"]);
+    assert_eq!(names, ["items", "recent", "get", "hold", "run", "wait", "snapshot", "events"]);
     let long: Vec<&str> = good.iter().filter(|t| t.long).map(|t| t.name.as_str()).collect();
     assert_eq!(long, ["hold", "run"], "blocks and runs_to_completion are long; Wait owns its budget");
     let fds = Variant::CollidingNames.file_descriptor_set();
@@ -182,4 +182,17 @@ async fn the_fixture_serves_the_contracts_own_services() {
     fixture.hold(pb::HoldRequest { repo: "agora".into(), why: "after as_of".into() }).await.expect("held again");
     let event = events.message().await.expect("reads").expect("the hold's event");
     assert_eq!((event.kind.as_str(), event.payload), ("held", b"agora".to_vec()));
+}
+
+/// Snapshot's reply tags two bytes fields as images, one singular and one repeated, named with two words so a
+/// bridge proves it matches the proto's own field names (CONTRACT.md a-bytes-field-may-say-it-is-an-image).
+#[test]
+fn snapshot_tags_its_image_fields() {
+    use anemnez_extension::media::Media;
+    let methods = check_descriptor(Variant::Good.file_descriptor_set()).expect("admitted");
+    let snapshot = methods.iter().find(|m| m.path.ends_with("/Snapshot")).expect("Snapshot offered");
+    assert_eq!(snapshot.output_media, [("page_png".to_owned(), Media::Png), ("frame_pngs".to_owned(), Media::Png)]);
+    let untagged = methods.iter().filter(|m| !m.path.ends_with("/Snapshot"));
+    assert!(untagged.into_iter().all(|m| m.output_media.is_empty()), "no other reply carries an image");
+    assert!(crate::PNG_1X1.starts_with(b"\x89PNG\r\n\x1a\n") && crate::PNG_1X1.ends_with(b"IEND\xAE\x42\x60\x82"));
 }
