@@ -40,6 +40,9 @@ pub struct Method {
     pub input_type: String,
     /// The reply message's full name.
     pub output_type: String,
+    /// The reply's top-level `bytes` fields that say their media (`anemnez_field.media`), by name: what a bridge
+    /// shows as an image (CONTRACT.md `#a-bytes-field-may-say-it-is-an-image`). Empty when none does.
+    pub output_media: Vec<(String, crate::media::Media)>,
 }
 
 /// One top-level field of a request message.
@@ -171,6 +174,12 @@ pub enum DescriptorRefusal {
     VersionMissing(String),
     /// The service states no cursor scope (the service named).
     CursorScopeMissing(String),
+    /// A field's `anemnez_field` is not a valid `FieldOptions` (the field named, `pkg.Message.field`).
+    FieldOptionsMalformed(String),
+    /// A field says a media not in [`crate::media::Media::ALL`] (the field named, and the media it said).
+    MediaUnknown(String, String),
+    /// A field that isn't `bytes` says a media (the field named): only bytes hold an image.
+    MediaNotBytes(String),
 }
 
 impl DescriptorRefusal {
@@ -197,6 +206,9 @@ impl DescriptorRefusal {
             Self::ContractMissing(_) => "contract-missing",
             Self::VersionMissing(_) => "version-missing",
             Self::CursorScopeMissing(_) => "cursor-scope-missing",
+            Self::FieldOptionsMalformed(_) => "field-options-malformed",
+            Self::MediaUnknown(..) => "media-unknown",
+            Self::MediaNotBytes(_) => "media-not-bytes",
         }
     }
 }
@@ -213,6 +225,9 @@ impl std::fmt::Display for DescriptorRefusal {
                 crate::options::ASK_WITHIN_CAP_SECS
             ),
             Self::ServiceOptionsMissing => f.write_str(self.name()),
+            Self::MediaUnknown(path, media) => {
+                write!(f, "{path}: media-unknown: {media:?} is not one of image/png, image/jpeg")
+            }
             Self::ServiceOptionsTwice(first, second) => {
                 write!(f, "{}: {first} and {second}", self.name())
             }
@@ -229,7 +244,9 @@ impl std::fmt::Display for DescriptorRefusal {
             | Self::ServiceOptionsMalformed(p)
             | Self::ContractMissing(p)
             | Self::VersionMissing(p)
-            | Self::CursorScopeMissing(p) => write!(f, "{p}: {}", self.name()),
+            | Self::CursorScopeMissing(p)
+            | Self::FieldOptionsMalformed(p)
+            | Self::MediaNotBytes(p) => write!(f, "{p}: {}", self.name()),
         }
     }
 }
@@ -249,6 +266,13 @@ pub fn check_descriptor(file_descriptor_set: &[u8]) -> Result<Vec<Method>, Vec<D
     if raw_files.len() != set.file.len() {
         return Err(vec![files_mismatch(set.file.len(), raw_files.len())]);
     }
+    let media = match crate::media::media_fields(file_descriptor_set) {
+        Ok(found) => found,
+        Err(mut found) => {
+            refused.append(&mut found);
+            Vec::new()
+        }
+    };
     for (file, raw_file) in set.file.iter().zip(raw_files) {
         for (service, raw_service) in services_of(file, raw_file).map_err(|r| vec![r])? {
             let raw_methods =
@@ -281,6 +305,11 @@ pub fn check_descriptor(file_descriptor_set: &[u8]) -> Result<Vec<Method>, Vec<D
                         input: fields_of(input),
                         input_type: method.input_type().to_owned(),
                         output_type: method.output_type().to_owned(),
+                        output_media: media
+                            .iter()
+                            .filter(|f| f.message == method.output_type())
+                            .map(|f| (f.field.clone(), f.media))
+                            .collect(),
                     }),
                     Err(mut found) => refused.append(&mut found),
                 }
@@ -530,7 +559,7 @@ fn services_of<'a>(
 /// The bytes of extension `number` in the options message at field `options_field` of a raw
 /// descriptor message, every occurrence joined as protobuf merges them; `None` when it is absent,
 /// and an error for bytes that can't be read, never an absence (a broken option is not a missing one).
-fn extension(raw: &[u8], options_field: u32, number: u32) -> Result<Option<Vec<u8>>, &'static str> {
+pub(crate) fn extension(raw: &[u8], options_field: u32, number: u32) -> Result<Option<Vec<u8>>, &'static str> {
     let mut found: Option<Vec<u8>> = None;
     for block in repeated(raw, options_field)? {
         for bytes in repeated(block, number)? {
@@ -548,7 +577,7 @@ fn method_options(raw_method: &[u8]) -> Result<Option<Vec<u8>>, &'static str> {
 
 /// Every length-delimited occurrence of field `number` in a raw message. Every field read this way
 /// is a message, so `number` with any other wire type is unreadable, never skipped.
-fn repeated(message: &[u8], number: u32) -> Result<Vec<&[u8]>, &'static str> {
+pub(crate) fn repeated(message: &[u8], number: u32) -> Result<Vec<&[u8]>, &'static str> {
     let mut out = Vec::new();
     let mut rest = message;
     while !rest.is_empty() {

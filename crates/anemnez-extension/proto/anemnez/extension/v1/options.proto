@@ -160,6 +160,18 @@ extend google.protobuf.ServiceOptions {
   ServiceOptions anemnez_service = 51702;
 }
 
+// Written on a field (CONTRACT.md #a-bytes-field-may-say-it-is-an-image).
+message FieldOptions {
+  // What a `bytes` field holds, as a media type: only "image/png" or "image/jpeg". A bridge shows such a field
+  // as an image (Agora's MCP face, as image content) and never guesses from the bytes. Any other media, or the
+  // option on a field that isn't bytes, refuses the descriptor by name (media-unknown, media-not-bytes).
+  string media = 1;
+}
+
+extend google.protobuf.FieldOptions {
+  FieldOptions anemnez_field = 51703;
+}
+
 // The descriptor, served by the extension itself.
 service Describe {
   rpc Get(DescribeRequest) returns (DescribeReply);

@@ -14,6 +14,7 @@ pub mod exposure;
 pub mod health;
 pub mod label;
 pub mod mcp;
+pub mod media;
 pub mod options;
 pub mod peer;
 pub mod signed;

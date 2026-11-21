@@ -32,6 +32,7 @@ fn method(path: &str, options: MethodOptions, input: Vec<Field>) -> Method {
         input,
         input_type,
         output_type: ".pkg.Reply".into(),
+        output_media: Vec::new(),
     }
 }
 
