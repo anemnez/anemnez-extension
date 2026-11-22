@@ -91,7 +91,11 @@ fn a_carried_call_reaches_reads_only() {
     assert_eq!(carried_admits(Role::Carried, FUNCTIONAL, &reads), Ok(()), "a read");
     assert_eq!(carried_admits(Role::Carried, WRITE, &reads), Err(CARRIED_WRITE_UNBOUND), "a write");
     assert_eq!(carried_admits(Role::Carried, DESCRIBE, &reads), Ok(()), "the contract's faces");
-    assert_eq!(carried_admits(Role::Carried, "/anemnez.extension.v1.Events/Watch", &reads), Ok(()));
+    for events in ["Events", "Call", "Watch"] {
+        let path = format!("/anemnez.extension.v1.Events/{events}");
+        assert_eq!(carried_admits(Role::Carried, &path, &reads), Err(CARRIED_WRITE_UNBOUND), "the log: {path}");
+    }
+    assert_eq!(carried_admits(Role::Carried, "/anemnez.extension.v1.Health/Get", &reads), Ok(()), "Health");
     assert_eq!(carried_admits(Role::Carried, WRITE, &Reads::default()), Err(CARRIED_WRITE_UNBOUND), "no reads known");
     for role in [Role::Other, Role::Agora] {
         assert_eq!(carried_admits(role, WRITE, &reads), Ok(()), "{role:?} is not carried");

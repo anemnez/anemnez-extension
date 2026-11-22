@@ -661,8 +661,9 @@ principal the call then runs as, and whether a grant covers it, stays the produc
 from another host arrives on the far product's API socket from aegisd's process, so the accept judges aegisd, never
 the caller. `Role::Carried` is that peer, judged only by its code identity in the SDK's one constructor. The layer
 admits a carried call only to a method its descriptor says is `read` (`Reads::of`, read once when the plane is
-built from the descriptor it serves), or to the contract's own faces (Describe, Health, the log's Events). Anything
-else is refused `carried-write-unbound` by name, and a stamp a carried call carries is never believed
+built from the descriptor it serves), or to the contract's own Describe and Health. Anything else is refused
+`carried-write-unbound` by name, the log's Events included, since Call carries hydramq-events' request opaquely and a
+commit or ack through it would be a write (E m/23165), and a stamp a carried call carries is never believed
 (`stamp-not-from-agora`). A descriptor the check doesn't admit reads as no reads. The rule lifts for a caller whose
 principal is bound through Aegis (I's binding), and never before.
 

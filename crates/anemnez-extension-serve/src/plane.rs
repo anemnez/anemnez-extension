@@ -7,7 +7,8 @@
 //! - fabricd's peer gets `Describe` only, and any other call is refused `fabricd-reads-describe-only`;
 //! - a call that carries a caller's stamp from any peer but Agora is refused `stamp-not-from-agora`;
 //! - a carried call (Aegis's peer) reaches a method only when its descriptor says `read`, or one of the contract's
-//!   own faces, else it is refused `carried-write-unbound` ([`carried_admits`]; K m/23155).
+//!   own Describe or Health, else it is refused `carried-write-unbound` ([`carried_admits`]; K m/23155). The log's
+//!   Events are refused to a carried call whole, since Call carries an opaque request (E m/23165).
 //!
 //! Which principal a call then runs as, and whether a grant covers it, is the product's own decision
 //! (`one-decision-per-call-at-the-product`); these rules only say who may reach it at all.
@@ -44,14 +45,11 @@ pub fn api_admits(judged: Option<&Judged>, path: &str, carries_stamp: bool) -> R
     }
 }
 
-/// The contract's own faces a carried call may read: Describe, Health and the log's Events.
-const FACE_READS: [&str; 5] = [
-    "/anemnez.extension.v1.Describe/",
-    "/anemnez.extension.v1.Health/",
-    "/anemnez.extension.v1.Events/Events",
-    "/anemnez.extension.v1.Events/Call",
-    "/anemnez.extension.v1.Events/Watch",
-];
+/// The contract's own faces a carried call may read: Describe and Health. Never the log's Events: Call carries
+/// hydramq-events' wire request opaquely, so whether one is a read isn't the plane's to know, and a commit or an ack
+/// through it would be a write past the descriptor's effects (E m/23165). A carried read of the log waits on a
+/// rule that decodes it, or the caller's binding.
+const FACE_READS: [&str; 2] = ["/anemnez.extension.v1.Describe/", "/anemnez.extension.v1.Health/"];
 
 /// The product's methods a carried call may reach: those its descriptor says are `read`, read once when the plane
 /// is built, never per call. A descriptor `check_descriptor` doesn't admit reads as none, so every carried call to a
