@@ -191,3 +191,16 @@ async fn an_unserved_watch_or_call_is_refused_by_name_not_unclear() {
         other => panic!("a typed refusal, not {other:?}"),
     }
 }
+
+/// A watch ended for renewal is told by its trailer alone (A m/25170, D m/25187): the serve side's own `expired` end
+/// renews; the bare message `expired` (a call's, or a producer older than the trailer) and another value never do.
+#[test]
+fn a_renewal_is_read_by_its_trailer_never_its_message() {
+    use anemnez_extension::refusal::{END_METADATA_KEY, EXPIRED, WATCH_RENEW};
+    let served = anemnez_extension_serve::journal::Refusal::Expired.status();
+    assert!(super::renews(&served), "the serve side's expiry end renews");
+    assert!(!super::renews(&tonic::Status::unauthenticated(EXPIRED)), "the message alone never renews");
+    let mut other = tonic::Status::unauthenticated(EXPIRED);
+    other.metadata_mut().insert(END_METADATA_KEY, tonic::metadata::MetadataValue::from_static("drain"));
+    assert!(!super::renews(&other), "only {WATCH_RENEW} renews");
+}

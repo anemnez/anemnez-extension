@@ -61,7 +61,15 @@ impl Refusal {
             Refusal::DataLoss => tonic::Code::DataLoss,
             Refusal::Expired => tonic::Code::Unauthenticated,
         };
-        tonic::Status::new(code, self.name())
+        let mut status = tonic::Status::new(code, self.name());
+        // A stream ended at its token's life is typed by its trailer, never by the message alone (A m/25170, D
+        // m/25187): the consumer re-mints, re-opens and resumes.
+        if *self == Refusal::Expired {
+            status
+                .metadata_mut()
+                .insert(refusal::END_METADATA_KEY, tonic::metadata::MetadataValue::from_static(refusal::WATCH_RENEW));
+        }
+        status
     }
 }
 

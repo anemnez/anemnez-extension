@@ -388,7 +388,11 @@ isn't visible ASCII is a token, refused `malformed`, never read as absent (K, 20
 
 **The refusals reach a caller by name.** A refusal's name is the gRPC status message, under the
 nearest code: `cursor-not-mine` FAILED_PRECONDITION, `out-of-range` OUT_OF_RANGE, `data-loss`
-DATA_LOSS, `expired` UNAUTHENTICATED (retryable: re-mint and resume from the last cursor).
+DATA_LOSS, `expired` UNAUTHENTICATED (retryable: re-mint and resume from the last cursor). A stream the product
+ends at its token's life is also typed by its trailer, `anemnez-end: watch-renew` (`refusal::END_METADATA_KEY`,
+`refusal::WATCH_RENEW`), and a consumer reads that, never the message (`anemnez-extension-client`'s `renews`): a
+call's own `expired` (the Verifier's) carries no trailer, so a reworded message or a refused call never reads as a
+renewal (A m/25170, D m/25187). The trailer is additive: the message stays `expired` for a reader older than it.
 
 Cursors are instance-scoped today (`<inst8>.<boot>:<seq>`); a swarm-scoped journal, whose cursors
 resume at any instance, is the next slice.

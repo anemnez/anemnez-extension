@@ -215,6 +215,11 @@ async fn a_revoke_between_renewals_ends_the_watch_at_the_next() {
     f.manual.advance(Duration::from_millis(anemnez_extension::principal::MAX_TTL_MS)).await;
     let ended = reading.await.expect("joins").expect("an end").expect_err("ended by name");
     assert_eq!((ended.code(), ended.message()), (tonic::Code::Unauthenticated, "expired"));
+    assert_eq!(
+        ended.metadata().get(anemnez_extension::refusal::END_METADATA_KEY).and_then(|v| v.to_str().ok()),
+        Some(anemnez_extension::refusal::WATCH_RENEW),
+        "the end is typed as a renewal by its trailer, never by its message"
+    );
 
     let renewed = face.watch(watch(10)).await.err().expect("refused at renewal");
     assert_eq!(renewed.message(), "unauthorized: the grant was revoked");

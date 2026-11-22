@@ -70,6 +70,13 @@ pub mod refusal {
     pub const CURSOR_NOT_MINE: &str = "cursor-not-mine";
     /// The stream's principal token ran out: re-mint, and resume from the last cursor.
     pub const EXPIRED: &str = "expired";
+    /// The gRPC trailer that types a stream's end, so a consumer never reads it off the message (A m/25170, D
+    /// m/25187): a status carrying [`END_METADATA_KEY`] = [`WATCH_RENEW`] is a watch the product ended at its
+    /// token's life, to be re-minted, re-opened and resumed from the last cursor. A call's own `expired` (the
+    /// Verifier's) never carries it, so the message alone never reads as a renewal.
+    pub const END_METADATA_KEY: &str = "anemnez-end";
+    /// The [`END_METADATA_KEY`] value of a stream ended at its token's life: renew, never a failure.
+    pub const WATCH_RENEW: &str = "watch-renew";
     /// The cursor is older than what the extension still keeps: start fresh at the head, and
     /// surface the gap to the subscriber's owner, never paper over it.
     pub const OUT_OF_RANGE: &str = "out-of-range";

@@ -210,6 +210,11 @@ async fn the_refusals_reach_a_grpc_caller_by_name() {
     manual.advance(Duration::from_secs(60)).await;
     let ended = stream.message().await.expect_err("ended");
     assert_eq!((ended.code(), ended.message()), (tonic::Code::Unauthenticated, "expired"));
+    assert_eq!(
+        ended.metadata().get(anemnez_extension::refusal::END_METADATA_KEY).and_then(|v| v.to_str().ok()),
+        Some(anemnez_extension::refusal::WATCH_RENEW),
+        "the end is typed as a renewal by its trailer, never by its message"
+    );
 }
 
 /// Serve `service` on a socket in a temp dir, with the request-digest layer or without it, and

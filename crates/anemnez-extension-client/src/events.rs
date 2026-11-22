@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use anemnez_clock::Clock;
 use anemnez_extension::describe::{CallReply, CallRequest, WatchFrame, WatchRequest};
-use anemnez_extension::refusal::{EVENTS_CALL_UNSERVED, WATCH_UNSERVED};
+use anemnez_extension::refusal::{END_METADATA_KEY, EVENTS_CALL_UNSERVED, WATCH_RENEW, WATCH_UNSERVED};
 use hydramq_events::EventsError;
 use hydramq_events::wire::Pulled;
 use prost::Message;
@@ -99,6 +99,14 @@ impl hydramq_events::wire::AsyncFrames for EventsFrames {
             }
         }
     }
+}
+
+/// Whether `status` ended a watch for renewal: the product's typed trailer ([`END_METADATA_KEY`] =
+/// [`WATCH_RENEW`]), read by value and never off the message, so a reworded message or a call's own `expired` never
+/// reads as one (A m/25170, D m/25187). The consumer re-mints its token, re-opens, and resumes from its cursor.
+#[must_use]
+pub fn renews(status: &tonic::Status) -> bool {
+    status.metadata().get(END_METADATA_KEY).and_then(|v| v.to_str().ok()) == Some(WATCH_RENEW)
 }
 
 /// A product that does not serve the face's method (an older producer, or a Journal) answers

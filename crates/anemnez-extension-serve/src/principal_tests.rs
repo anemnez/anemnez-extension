@@ -133,7 +133,10 @@ async fn each_step_refuses_by_its_own_name() {
     let stale = mint(&manual, METHOD, [1; 32], 60, 5);
     manual.advance(Duration::from_secs(60 + 31)).await;
     let late = v.verify(&stale, METHOD, &[1; 32]).await;
-    assert_eq!(named(late.expect_err("refused")), (tonic::Code::Unauthenticated, "expired"));
+    let late = late.expect_err("refused");
+    assert_eq!(named(late.clone()), (tonic::Code::Unauthenticated, "expired"));
+    // A call's own `expired` is never a watch's renewal: no END_METADATA_KEY rides it (A m/25170, D m/25187).
+    assert!(status(&late).metadata().get(anemnez_extension::refusal::END_METADATA_KEY).is_none());
 
     let garbage = v.verify("not a token", METHOD, &[1; 32]).await;
     assert_eq!(status(&garbage.expect_err("refused")).code(), tonic::Code::InvalidArgument);
