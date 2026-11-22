@@ -75,7 +75,8 @@ call and never caches it past one read, so a handoff routes the next call to the
 <!-- claim: a-route-a-reader-doesnt-know-is-refused-never-defaulted -->
 **A route a reader doesn't know is refused, never defaulted** (D m/22441, m/22509; readers first, rule 8). `node`
 (oneof field 5) and `keyed_via { group, key, via }` (6) are read as declared, `keyed_via`'s key checked at connect
-as `keyed`'s is, and a `via` inside plain `keyed` is never read. A route present in a variant the reader's build
+as `keyed`'s is, and a `via` inside plain `keyed` is never read. A route naming an empty group or residency fact is
+refused at connect, `route-unnamed`, never resolved as "" (E m/22586). A route present in a variant the reader's build
 doesn't know (prost drops the tag, so `to` is unset) reads as `Route::Unknown`, and a router (route-kernel, Reach,
 Aegis) refuses the call `route-unknown: <method>`, never local-first or any. Only a method with no route at all is
 local-first. `Route` is non-exhaustive, so a variant added later is no break for a reader's match. A descriptor

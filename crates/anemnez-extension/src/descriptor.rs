@@ -152,6 +152,9 @@ pub enum DescriptorRefusal {
     DescriptionMissing(String),
     /// A keyed route whose key is not a top-level, non-repeated string field of the input.
     RouteKey(String, crate::options::RouteKeyRefusal),
+    /// A route names an empty election group or residency fact (`leader`, `keyed`, `keyed_via`): a router would
+    /// resolve a holder of "" (E m/22586). The second string names which part is empty.
+    RouteUnnamed(String, &'static str),
     /// A collection (an output with a repeated field) declared `one`: it must be a cursor or bounded.
     UnboundedCollection(String),
     /// The method's input type is not in the descriptor.
@@ -195,6 +198,7 @@ impl DescriptorRefusal {
             Self::PresenceMissing(_) => "presence-missing",
             Self::DescriptionMissing(_) => "description-missing",
             Self::RouteKey(..) => "route-key",
+            Self::RouteUnnamed(..) => "route-unnamed",
             Self::UnboundedCollection(_) => "unbounded-collection",
             Self::InputUnknown(_) => "input-unknown",
             Self::OptionsMalformed(_) => "options-malformed",
@@ -218,6 +222,7 @@ impl std::fmt::Display for DescriptorRefusal {
         match self {
             Self::Malformed(why) => write!(f, "malformed descriptor: {why}"),
             Self::RouteKey(path, why) => write!(f, "{path}: {why}"),
+            Self::RouteUnnamed(path, part) => write!(f, "{path}: the route's {part} is empty"),
             Self::ExampleMismatch(path, why) => write!(f, "{path}: example-mismatch: {why}"),
             Self::AskBoundOverCap(path, secs) => write!(
                 f,
@@ -368,6 +373,15 @@ fn check_method(
         refused.push(DescriptorRefusal::AskBoundOverCap(p(), secs));
     }
     let mut route_key = None;
+    let unnamed = match &route {
+        Route::Leader(group) | Route::Keyed { group, .. } if group.is_empty() => Some("group"),
+        Route::KeyedVia { group, .. } if group.is_empty() => Some("group"),
+        Route::KeyedVia { via, .. } if via.is_empty() => Some("via"),
+        _ => None,
+    };
+    if let Some(part) = unnamed {
+        refused.push(DescriptorRefusal::RouteUnnamed(p(), part));
+    }
     if let Some(key) = route.key() {
         match input {
             None => refused.push(DescriptorRefusal::InputUnknown(p())),
@@ -1087,6 +1101,23 @@ mod tests {
         let bytes = set(vec![method("Bad", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&bad))]);
         let refused = check_descriptor(&bytes).expect_err("no such field");
         assert_eq!(refused.iter().map(DescriptorRefusal::name).collect::<Vec<_>>(), ["route-key"]);
+
+        // E m/22586: an empty group or residency fact is refused at connect, never resolved as "".
+        let unnamed = |to: wire::To| {
+            let mut m = good();
+            m.route = Some(wire::Route { to: Some(to) });
+            let bytes = set(vec![method("Unnamed", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&m))]);
+            let refused = check_descriptor(&bytes).expect_err("unnamed");
+            (refused[0].name(), refused[0].to_string())
+        };
+        let kv = |group: &str, via: &str| {
+            wire::To::KeyedVia(wire::KeyedVia { group: group.into(), key: "repo".into(), via: via.into() })
+        };
+        assert!(matches!(unnamed(kv("g", "")), ("route-unnamed", why) if why.ends_with("via is empty")));
+        assert!(matches!(unnamed(kv("", "r")), ("route-unnamed", why) if why.ends_with("group is empty")));
+        assert_eq!(unnamed(wire::To::Leader(String::new())).0, "route-unnamed");
+        let keyed = wire::To::Keyed(wire::Leader { group: String::new(), key: "repo".into() });
+        assert_eq!(unnamed(keyed).0, "route-unnamed");
     }
 
     /// Every refusal is answered, not the first, each naming its method.
