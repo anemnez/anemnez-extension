@@ -1,0 +1,9 @@
+# Each extra resolved copy of an anemnez crate in this workspace's Cargo.lock, keyed by crate and the lock's
+# resolved rev, with why it is here, who owns it, what removes it and when the debt ends (E m/9844, D m/9845).
+# The standards' one-version row holds this list shrink-only.
+
+["anemnez-sim-io@7f28dbf0409a"]
+why = "anemnez-sim at its main 6238a2938b03 (dev only: -serve's simulation rows), the one sim on clock e55540286d69, takes sim-io 7f28dbf0409a, while anemnez-layout f5849145c896 and hydramq eb0048717df8 still take sim-io 83a2190b6478, 15 commits behind it. Holding sim back would keep clock 3ed93558f1b7 in the graph instead"
+owner = "K"
+exit = "anemnez-layout and hydramq take sim-io 7f28dbf0409a or later (their next sim-io family bump), and this lock follows"
+ends = "2026-12-06"
