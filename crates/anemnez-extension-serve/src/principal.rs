@@ -61,8 +61,10 @@ pub trait Keys: Send + Sync + 'static {
 /// ([`Keys::admit_absent`]). One interim for every product, so the day Fabric publishes keys there is one lookup to
 /// swap (rule 2; it was typhond's own until Minion needed it too).
 ///
-/// SUNSET: Owner J; exit: anemnez-swarm-client `principals` released and adopted here. Ends 2026-11-21 (J m/15234;
-/// D m/15228, E m/15226). Then the rule is B's swarm-wide auto rule (PRINCIPAL_TOKEN §3). Until then a product on
+/// SUNSET: Owner J; exit: anemnez-swarm-client `principals` released and adopted here. Ends 2026-11-28 (J m/15234;
+/// D m/15228, E m/15226). Renewed 2026-11-22 by its steward (K), the blocker named: `principals` released in
+/// anemnez-swarm-client 0.1.115, and the adoption here (a `Keys` over its `principal_record`, and B's auto rule for
+/// an absent token) is J's, not yet built. Then the rule is B's swarm-wide auto rule (PRINCIPAL_TOKEN §3). Until then a product on
 /// this interim says so in Health ([`UNPUBLISHED`]), and past the date the sunset row in proofs/quality is red by name.
 pub struct Unpublished;
 
