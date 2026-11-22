@@ -104,6 +104,7 @@ spoken_for("health-is-state-with-parts", "serve_tests::a_watcher_reads_health_th
 spoken_for("health-may-say-what-a-restart-costs", "health::tests::a_restart_cost_is_said_once_per_change_and_can_be_taken_back")
 spoken_for("a-product-pushes-events-as-a-stream-it-serves", "serve_tests::a_foreign_cursor_is_not_mine_and_an_old_one_is_out_of_range")
 spoken_for("a-keyed-route-names-a-string-field", "options::tests::a_keyed_route_names_a_top_level_string_field")
+spoken_for("a-route-a-reader-doesnt-know-is-refused-never-defaulted", "descriptor::tests::node_and_keyed_via_are_read_and_an_unknown_route_is_never_local_first")
 spoken_for("the-serving-face-runs-the-whole-principal-ladder", "principal_tests::each_step_refuses_by_its_own_name")
 spoken_for("a-verifiers-waits-are-bounded (keys)", "principal_tests::a_keys_lookup_that_never_answers_is_refused_lookup_unanswered")
 spoken_for("a-verifiers-waits-are-bounded (nonce)", "principal_tests::a_nonce_write_held_past_its_bound_is_refused_and_still_lands")

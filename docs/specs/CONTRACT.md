@@ -49,7 +49,7 @@ outside a caller's range is refused at connect with both versions named, never c
 | `description` | text | what the method does, written for the agent that calls it; its quality is a proof in the product's gate |
 | `result` | `cursor` \| `bound(n)` \| `one` | a collection is a resumable cursor or capped at n; a descriptor with an unbounded collection is refused at connect |
 | `effect` | `read` \| `write` \| `act` | what the call does (D): `read` changes nothing; `write` changes state this product owns, visible in its data afterwards; `act` causes something outside the call's own data (runs a gate, sends a notification, moves a channel, starts a process). `person_act` is orthogonal: who confirms, not what happens |
-| `route` | `leader(group)` \| `leader(group, key)` \| `local-first` \| `any` | where a call goes: the instance leading `group` (its election, fabric SWARM.md), the instance holding the call's `key` in `group` (one leader per key, resolved through Fabric's lock on every call), this host's instance first, or any instance. Default `local-first` |
+| `route` | `leader(group)` \| `leader(group, key)` \| `keyed_via(group, key, via)` \| `node` \| `local-first` \| `any` | where a call goes: the instance leading `group` (its election, fabric SWARM.md), the instance holding the call's `key` in `group` (one leader per key, resolved through Fabric's lock on every call), the holder of the key's resident read through the residency fact `via` (D m/22509), this host's instance or the node the caller's address pins (D m/22425), this host's instance first, or any instance. Default `local-first`; a variant a reader doesn't know is `route-unknown` |
 | `person_act` | bool | the act is a person's: the caller's grant must be Ask-gated, and the product refuses it from an agent principal without one |
 | `presence` | `full` \| `minimal` \| `index` \| `hidden` | how prominently a caller's tool surface lists it (Substrate's four tiers, TOOL_GUIDE) |
 | `permission` | `allow` \| `ask` \| `deny`, **required** | the product's suggested permission, which an agent with no grant of its own for this method reads (Substrate's sparse rule; a role reads it closed). No default: every method states one. A `person_act` method may not say `allow`; the descriptor is refused at connect by name if it does |
@@ -71,6 +71,15 @@ one check, pure, for every bridge alike; it answers the field's number too, so a
 bytes finds the key without decoding the whole call (B). At call time an empty key is refused with
 `no-key` before the call leaves. The bridge resolves the key's holder through Fabric's lock on every
 call and never caches it past one read, so a handoff routes the next call to the new holder (D).
+
+<!-- claim: a-route-a-reader-doesnt-know-is-refused-never-defaulted -->
+**A route a reader doesn't know is refused, never defaulted** (D m/22441, m/22509; readers first, rule 8). `node`
+(oneof field 5) and `keyed_via { group, key, via }` (6) are read as declared, `keyed_via`'s key checked at connect
+as `keyed`'s is, and a `via` inside plain `keyed` is never read. A route present in a variant the reader's build
+doesn't know (prost drops the tag, so `to` is unset) reads as `Route::Unknown`, and a router (route-kernel, Reach,
+Aegis) refuses the call `route-unknown: <method>`, never local-first or any. Only a method with no route at all is
+local-first. `Route` is non-exhaustive, so a variant added later is no break for a reader's match. A descriptor
+declares a new variant only once every reader in service knows it.
 
 <!-- claim: every-bridge-refuses-a-descriptor-alike -->
 **Every bridge refuses a descriptor alike** (B, D, H, 2026-11-07). `descriptor::check_descriptor`

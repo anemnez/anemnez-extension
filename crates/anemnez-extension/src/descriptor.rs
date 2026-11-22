@@ -368,7 +368,7 @@ fn check_method(
         refused.push(DescriptorRefusal::AskBoundOverCap(p(), secs));
     }
     let mut route_key = None;
-    if let Route::Keyed { key, .. } = &route {
+    if let Some(key) = route.key() {
         match input {
             None => refused.push(DescriptorRefusal::InputUnknown(p())),
             Some(input) => match check_route_key(input, key) {
@@ -442,11 +442,16 @@ fn parse(raw: &wire::MethodOptions) -> Parsed {
         Some(wire::Shape::One(_)) => Some(ResultShape::One),
         None => None,
     };
-    let route = match raw.route.clone().and_then(|r| r.to) {
-        Some(wire::To::Leader(group)) => Route::Leader(group),
-        Some(wire::To::Keyed(k)) => Route::Keyed { group: k.group, key: k.key },
-        Some(wire::To::Any(_)) => Route::Any,
-        Some(wire::To::LocalFirst(_)) | None => Route::LocalFirst,
+    // A route present with no variant this build knows is a newer descriptor's: Unknown, never the default (prost
+    // drops an unknown oneof tag, so a present Route with `to` unset is exactly that). No route at all is local-first.
+    let route = match raw.route.clone().map(|r| r.to) {
+        Some(Some(wire::To::Leader(group))) => Route::Leader(group),
+        Some(Some(wire::To::Keyed(k))) => Route::Keyed { group: k.group, key: k.key },
+        Some(Some(wire::To::KeyedVia(k))) => Route::KeyedVia { group: k.group, key: k.key, via: k.via },
+        Some(Some(wire::To::Node(_))) => Route::Node,
+        Some(Some(wire::To::Any(_))) => Route::Any,
+        Some(Some(wire::To::LocalFirst(_))) | None => Route::LocalFirst,
+        Some(None) => Route::Unknown,
     };
     Parsed { callers, permission, effect, presence, session, result, route }
 }
@@ -668,7 +673,7 @@ mod wire {
 
     #[derive(Clone, PartialEq, prost::Message)]
     pub struct Route {
-        #[prost(oneof = "To", tags = "1, 2, 3, 4")]
+        #[prost(oneof = "To", tags = "1, 2, 3, 4, 5, 6")]
         pub to: Option<To>,
     }
 
@@ -682,6 +687,20 @@ mod wire {
         Any(Empty),
         #[prost(message, tag = "4")]
         Keyed(Leader),
+        #[prost(message, tag = "5")]
+        Node(Empty),
+        #[prost(message, tag = "6")]
+        KeyedVia(KeyedVia),
+    }
+
+    #[derive(Clone, PartialEq, prost::Message)]
+    pub struct KeyedVia {
+        #[prost(string, tag = "1")]
+        pub group: String,
+        #[prost(string, tag = "2")]
+        pub key: String,
+        #[prost(string, tag = "3")]
+        pub via: String,
     }
 
     #[derive(Clone, PartialEq, prost::Message)]
@@ -1013,6 +1032,61 @@ mod tests {
         assert_eq!(methods[0].options.examples, [crate::options::Example::new(r#"{"repo": "agora"}"#, "Land agora")]);
         assert_eq!(methods[1].options.result, ResultShape::Cursor);
         assert_eq!(methods[1].options.route, Route::Any);
+    }
+
+    /// D m/22425, m/22441, m/22509: `node` and `keyed_via` are read as declared, keyed_via's key checked at connect
+    /// like keyed's; a route whose variant this build doesn't know (a newer descriptor's, whose tag prost drops) reads
+    /// as Unknown, never local-first, and only no route at all is local-first.
+    #[test]
+    fn node_and_keyed_via_are_read_and_an_unknown_route_is_never_local_first() {
+        use prost::Message as _;
+        let mut node = good();
+        node.route = Some(wire::Route { to: Some(wire::To::Node(wire::Empty {})) });
+        let mut via = good();
+        via.route = Some(wire::Route {
+            to: Some(wire::To::KeyedVia(wire::KeyedVia {
+                group: "substrate-mind".into(),
+                key: "repo".into(),
+                via: "residency".into(),
+            })),
+        });
+        // A variant from a later build: field 7, an empty message. prost drops the tag, so `to` is unset.
+        let later = wire::Route::decode(&[(7 << 3) | 2, 0][..]).expect("decodes");
+        assert_eq!(later.to, None, "an unknown oneof tag is dropped");
+        let mut newer = good();
+        newer.route = Some(later);
+        let mut absent = good();
+        absent.route = None;
+        let bytes = set(vec![
+            method("Pinned", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&node)),
+            method("Via", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&via)),
+            method("Newer", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&newer)),
+            method("Absent", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&absent)),
+        ]);
+        let methods = check_descriptor(&bytes).expect("admitted");
+        let routes: Vec<_> = methods.iter().map(|m| m.options.route.clone()).collect();
+        assert_eq!(
+            routes,
+            [
+                Route::Node,
+                Route::KeyedVia { group: "substrate-mind".into(), key: "repo".into(), via: "residency".into() },
+                Route::Unknown,
+                Route::LocalFirst,
+            ]
+        );
+        assert_eq!(
+            methods[1].route_key,
+            Some(RouteKey { name: "repo".into(), number: 3 }),
+            "keyed_via's key is checked"
+        );
+
+        let mut bad = via.clone();
+        bad.route = Some(wire::Route {
+            to: Some(wire::To::KeyedVia(wire::KeyedVia { group: "g".into(), key: "nope".into(), via: "r".into() })),
+        });
+        let bytes = set(vec![method("Bad", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&bad))]);
+        let refused = check_descriptor(&bytes).expect_err("no such field");
+        assert_eq!(refused.iter().map(DescriptorRefusal::name).collect::<Vec<_>>(), ["route-key"]);
     }
 
     /// Every refusal is answered, not the first, each naming its method.

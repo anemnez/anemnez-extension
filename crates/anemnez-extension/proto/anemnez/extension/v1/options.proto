@@ -85,9 +85,25 @@ message Route {
     // leader("herald-repo", key = "repo")). The bridge reads the key's value from the call and
     // resolves its holder through Fabric's lock on every call, never cached past one read.
     Leader keyed = 4;
+    // This host's instance, or the node the caller's address pins (`minion@<node>`): a pin on any other route is
+    // refused by name (D m/22425). Readers first (rule 8): a reader that doesn't know a variant reads the route as
+    // unknown and refuses the call `route-unknown`, never local-first or any (D m/22441).
+    Node node = 5;
+    // Keyed, with the key resolved through a residency fact first: the holder is keyed by the key's resident, never
+    // the key itself, and a key with no residency is refused (D m/22509). Its own variant, so an older reader says
+    // route-unknown by name; a `via` inside plain `keyed` is never read.
+    KeyedVia keyed_via = 6;
   }
   message LocalFirst {}
   message Any {}
+  message Node {}
+  message KeyedVia {
+    string group = 1;
+    // A top-level string field of the method's input message, checked at connect like `keyed`'s.
+    string key = 2;
+    // The residency fact the key is read through first (route-kernel's residency_of).
+    string via = 3;
+  }
   message Leader {
     string group = 1;
     // A top-level string field of the method's input message; checked at connect

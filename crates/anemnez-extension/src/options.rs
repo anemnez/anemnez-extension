@@ -132,9 +132,11 @@ pub enum ResultShape {
     One,
 }
 
-/// Where a call goes.
+/// Where a call goes. Non-exhaustive: a router matching it handles a variant it doesn't know as [`Route::Unknown`]
+/// does, refusing the call by name, never routing it another way.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum Route {
     /// The instance leading this election group.
     Leader(String),
@@ -150,6 +152,29 @@ pub enum Route {
         group: String,
         key: String,
     },
+    /// This host's instance, or the node the caller's address pins (D m/22425): the only route a pin is taken on.
+    Node,
+    /// Keyed through a residency fact first: the holder of `key`'s resident in `group`, read through `via`
+    /// (D m/22509). `key` is checked at connect as [`Route::Keyed`]'s is.
+    KeyedVia {
+        group: String,
+        key: String,
+        via: String,
+    },
+    /// A route the descriptor declared in a variant this build doesn't know: a newer product's. The call is refused
+    /// [`crate::refusal::ROUTE_UNKNOWN`], naming the method, never sent local-first or anywhere (D m/22441).
+    Unknown,
+}
+
+impl Route {
+    /// The key field a keyed route reads, for either keyed variant.
+    #[must_use]
+    pub fn key(&self) -> Option<&str> {
+        match self {
+            Route::Keyed { key, .. } | Route::KeyedVia { key, .. } => Some(key),
+            _ => None,
+        }
+    }
 }
 
 /// The field a keyed route reads its key from, as [`check_route_key`] found it: the name, and the

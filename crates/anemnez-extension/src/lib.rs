@@ -94,6 +94,9 @@ pub mod refusal {
     /// A keyed-route call carried an empty key: refused by the bridge before the call leaves, since
     /// no holder can be resolved for it.
     pub const NO_KEY: &str = "no-key";
+    /// A call whose method declares a route this build doesn't know (a newer descriptor's variant): refused by name,
+    /// `route-unknown: <method>`, never sent local-first or any (D m/22441).
+    pub const ROUTE_UNKNOWN: &str = "route-unknown";
 }
 
 /// The principal token (CONTRACT.md `#every-call-carries-its-callers-principal`).
