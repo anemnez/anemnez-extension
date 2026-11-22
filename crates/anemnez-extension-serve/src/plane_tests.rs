@@ -2,11 +2,13 @@
 //! end to end through [`ApiPlaneLayer`] on a socket.
 
 use anemnez_extension::mcp::STAMP_METADATA_KEY;
-use anemnez_extension::peer::{Code, FABRICD_READS_DESCRIBE_ONLY, NOT_JUDGED, Peer, Role, STAMP_NOT_FROM_AGORA};
+use anemnez_extension::peer::{
+    CARRIED_WRITE_UNBOUND, Code, FABRICD_READS_DESCRIBE_ONLY, NOT_JUDGED, Peer, Role, STAMP_NOT_FROM_AGORA,
+};
 
 use crate::accepted::{Accepted, Judged};
 use crate::pb;
-use crate::plane::{ApiPlaneLayer, api_admits};
+use crate::plane::{ApiPlaneLayer, Reads, api_admits, carried_admits};
 
 const DESCRIBE: &str = "/anemnez.extension.v1.Describe/Get";
 const FUNCTIONAL: &str = "/minion.v1.Minion/AppsList";
@@ -47,7 +49,7 @@ where
 {
     let (dir, socket, incoming) = crate::serve_tests::listen_as(wrap);
     let server = tonic::transport::Server::builder()
-        .layer(ApiPlaneLayer)
+        .layer(ApiPlaneLayer::default())
         .add_service(pb::describe_server::DescribeServer::new(crate::Describe::new(Vec::new())));
     tokio::spawn(server.serve_with_incoming(incoming));
     (crate::serve_tests::channel_to(socket).await, dir)
@@ -77,4 +79,29 @@ async fn the_layer_applies_the_rules_before_any_service() {
     let agora = |io| Accepted::new(io, judged(Role::Agora).peer, Role::Agora);
     let (channel, _c) = served(agora).await;
     assert_eq!(describe(channel, true).await, Ok(()), "Agora's stamp passes to the product");
+}
+
+/// K m/23155 (D m/22425 §5): a carried call, another host's caller through Aegis, reaches a product method only when
+/// its descriptor says read, and the contract's own faces; anything else is refused carried-write-unbound by name.
+/// A stamp it carries is never believed. No other role is touched by the rule.
+#[test]
+fn a_carried_call_reaches_reads_only() {
+    let reads = Reads(std::sync::Arc::new(std::iter::once(FUNCTIONAL.to_owned()).collect()));
+    const WRITE: &str = "/minion.v1.Minion/AppsLaunch";
+    assert_eq!(carried_admits(Role::Carried, FUNCTIONAL, &reads), Ok(()), "a read");
+    assert_eq!(carried_admits(Role::Carried, WRITE, &reads), Err(CARRIED_WRITE_UNBOUND), "a write");
+    assert_eq!(carried_admits(Role::Carried, DESCRIBE, &reads), Ok(()), "the contract's faces");
+    assert_eq!(carried_admits(Role::Carried, "/anemnez.extension.v1.Events/Watch", &reads), Ok(()));
+    assert_eq!(carried_admits(Role::Carried, WRITE, &Reads::default()), Err(CARRIED_WRITE_UNBOUND), "no reads known");
+    for role in [Role::Other, Role::Agora] {
+        assert_eq!(carried_admits(role, WRITE, &reads), Ok(()), "{role:?} is not carried");
+    }
+    assert_eq!(api_admits(Some(&judged(Role::Carried)), FUNCTIONAL, true), Err(STAMP_NOT_FROM_AGORA), "its stamp");
+}
+
+/// Reads are taken from the descriptor's own effects, once: a descriptor check_descriptor doesn't admit reads as none.
+#[test]
+fn reads_come_from_the_descriptors_effects_and_a_bad_descriptor_reads_none() {
+    assert!(!Reads::of(b"not a descriptor").reads(FUNCTIONAL));
+    assert!(Reads::of(b"not a descriptor").reads(DESCRIBE), "the faces are reads whatever the descriptor");
 }

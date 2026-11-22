@@ -24,6 +24,9 @@ pub const FABRICD_READS_DESCRIBE_ONLY: &str = "fabricd-reads-describe-only";
 /// A call carrying a caller's stamp from a peer that is not Agora, refused by name: a stamp is believed only
 /// from Agora's peer (CONTRACT.md §8.1, `every-api-call-has-a-principal`).
 pub const STAMP_NOT_FROM_AGORA: &str = "stamp-not-from-agora";
+/// A carried call (from Aegis's peer: another host's caller, D m/22425 §5) to a method that isn't a read, refused by
+/// name until the caller's principal is bound through Aegis: the far end admits carried reads only (K m/23155).
+pub const CARRIED_WRITE_UNBOUND: &str = "carried-write-unbound";
 
 /// A product's own service named under a package the contract reserves (`anemnez.extension.`, `anemnez.fabric.`):
 /// the API plane serves the contract's faces itself and never Lifecycle, so a product can't shadow or add one
@@ -90,6 +93,10 @@ pub enum Role {
     Agora,
     /// Any other admitted peer: a local caller, a team-signed door.
     Other,
+    /// The host's Aegis, carrying another host's caller (D m/22425 §4, §5; K m/23155): judged so only by its code
+    /// identity, in the one constructor that admits it. Its calls reach a method only when that method is a read
+    /// ([`CARRIED_WRITE_UNBOUND`]), and a stamp it carries is never believed: the caller it carries is unbound.
+    Carried,
 }
 
 /// A plane's policy's judgment of one connection at accept.

@@ -197,3 +197,5 @@ spoken_for("a-products-events-are-pushed-through-one-watch (journal)", "serve_te
 spoken_for("a-products-events-are-pushed-through-one-watch (unserved)", "events::tests::an_unserved_watch_or_call_is_refused_by_name_not_unclear")
 spoken_for("one-mapping-flattens-a-descriptor (map_entry)", "descriptor::tests::a_map_field_is_known_by_its_entrys_map_entry")
 spoken_for("an-external-caller-is-parsed-here-and-trusted-only-from-its-peer", "mcp::tests::an_external_caller_is_parsed_here_and_trusted_only_from_its_peer")
+
+spoken_for("a-carried-call-reaches-reads-only", "plane_tests::a_carried_call_reaches_reads_only")

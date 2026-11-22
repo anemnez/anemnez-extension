@@ -549,3 +549,15 @@ fn a_boots_origin_never_wraps_onto_another_boots() {
     assert_ne!(first.origin(), second.origin(), "a later boot is another scope");
     assert_eq!(crate::origin_for("", &manual.clock()).split_once('.').map(|(i, _)| i), Some("standalone"));
 }
+
+/// K m/23155: a carried call's reads are the descriptor's own: Land, a write, is never one, so a carried Land is
+/// refused carried-write-unbound by the plane's rule.
+#[test]
+fn a_descriptors_write_is_never_a_carried_read() {
+    let reads = crate::plane::Reads::of(&land_descriptor());
+    assert!(!reads.reads("/h.v1.H/Land"), "a write is not a read");
+    assert_eq!(
+        crate::plane::carried_admits(anemnez_extension::peer::Role::Carried, "/h.v1.H/Land", &reads),
+        Err(anemnez_extension::peer::CARRIED_WRITE_UNBOUND)
+    );
+}

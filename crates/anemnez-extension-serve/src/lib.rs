@@ -35,7 +35,7 @@ pub use edge::FileNonces;
 pub use health::Board;
 pub use journal::{EventsService, Journal, Refusal, StreamEnd, Subscription, origin_for};
 pub use log_events::{Admit, Asked, Authorize, EventsFace, LogEvents, Method, Revoke};
-pub use plane::{ApiPlaneLayer, api_admits};
+pub use plane::{ApiPlaneLayer, Reads, api_admits, carried_admits};
 pub use principal::{
     Absent, Admitted, Carried, KeyRecord, Keys, MemoryNonces, Nonces, PublishedKey, UNPUBLISHED, Unpublished, Verifier,
     carried,

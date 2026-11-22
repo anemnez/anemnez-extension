@@ -656,6 +656,16 @@ Agora's is refused `stamp-not-from-agora`, not ignored. `api_admits` is that dec
 rule has its own row. A role this build doesn't know is not Agora, so its stamp is refused too. Which
 principal the call then runs as, and whether a grant covers it, stays the product's decision (below).
 
+<!-- claim: a-carried-call-reaches-reads-only -->
+**A carried call reaches reads only, until its caller is bound** (K m/23155; D m/22425 §4, §5). A call Aegis carries
+from another host arrives on the far product's API socket from aegisd's process, so the accept judges aegisd, never
+the caller. `Role::Carried` is that peer, judged only by its code identity in the SDK's one constructor. The layer
+admits a carried call only to a method its descriptor says is `read` (`Reads::of`, read once when the plane is
+built from the descriptor it serves), or to the contract's own faces (Describe, Health, the log's Events). Anything
+else is refused `carried-write-unbound` by name, and a stamp a carried call carries is never believed
+(`stamp-not-from-agora`). A descriptor the check doesn't admit reads as no reads. The rule lifts for a caller whose
+principal is bound through Aegis (I's binding), and never before.
+
 <!-- claim: one-function-serves-the-api-plane -->
 **One function serves the API plane** (K, 2026-11-16; D m/15034, E m/15035). -serve's `serve(faces, product,
 token_checked, incoming, stop)` is the only server a product builds for it. It takes the contract's faces as one
