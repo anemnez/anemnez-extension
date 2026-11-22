@@ -31,7 +31,7 @@ anemnez-layout = { git = "ssh://git@github.com/anemnez/anemnez-layout.git", rev 
 anemnez-sim = { git = "ssh://git@github.com/anemnez/anemnez-sim.git", rev = "2c38ab7c80a0", version = "0.1", registry-index = "sparse+http://127.0.0.1:7787/crates/index/" }
 # The one face for every product's events (fabric EVENTS.md §6a): the client reads it over Events/Call.
 # hydramq's leaves in the same dual form, at hydramq main's rev (0.4.98), so their anemnez-clock is the same git copy.
-hydramq-events = { git = "ssh://git@github.com/anemnez/hydramq.git", rev = "7bbd2b738654", version = "0.4", registry-index = "sparse+http://127.0.0.1:7787/crates/index/" }
+hydramq-events = { git = "ssh://git@github.com/anemnez/hydramq.git", rev = "5546585f843d", version = "0.4", registry-index = "sparse+http://127.0.0.1:7787/crates/index/" }
 tonic = "0.12"
 tonic-build = "0.12"
 prost = "0.13"
