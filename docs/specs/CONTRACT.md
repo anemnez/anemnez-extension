@@ -392,7 +392,9 @@ DATA_LOSS, `expired` UNAUTHENTICATED (retryable: re-mint and resume from the las
 ends at its token's life is also typed by its trailer, `anemnez-end: watch-renew` (`refusal::END_METADATA_KEY`,
 `refusal::WATCH_RENEW`), and a consumer reads that, never the message (`anemnez-extension-client`'s `renews`): a
 call's own `expired` (the Verifier's) carries no trailer, so a reworded message or a refused call never reads as a
-renewal (A m/25170, D m/25187). The trailer is additive: the message stays `expired` for a reader older than it.
+renewal (A m/25170, D m/25187). The client's `EventsFrames` hands it to hydramq-events' Watcher as `Pulled::Renew`,
+which answers `Read::Renew { next }` (hydramq 0.5): the consumer re-opens from `next` and is authorized again,
+never reading an Unclear. The trailer is additive: the message stays `expired` for a reader older than it.
 
 Cursors are instance-scoped today (`<inst8>.<boot>:<seq>`); a swarm-scoped journal, whose cursors
 resume at any instance, is the next slice.

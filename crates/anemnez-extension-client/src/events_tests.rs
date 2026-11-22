@@ -119,34 +119,10 @@ async fn a_consumer_reads_a_producers_events_through_one_call() {
 async fn a_consumer_is_pushed_a_producers_events_through_one_watch() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let manual = ManualClock::new();
-    let events = Arc::new(
-        Events::open(
-            &dir.path().join("log"),
-            "agora",
-            "agora/test",
-            hydramq_events::Settings::default(),
-            &manual.clock(),
-        )
-        .expect("the log opens"),
-    );
-    let first = body("agora.server", &[("pid", Field::Int(7))]).expect("encodes");
-    events.publish_next("server/stoa", "started", &first, 1).expect("published");
+    let events = one_event_log(dir.path(), &manual);
 
     let socket = dir.path().join("w.sock");
-    let incoming =
-        tokio_stream::wrappers::UnixListenerStream::new(tokio::net::UnixListener::bind(&socket).expect("binds"));
-    tokio::spawn(
-        tonic::transport::Server::builder()
-            .add_service(pb::events_server::EventsServer::new(Producer(Arc::clone(&events))))
-            .serve_with_incoming(incoming),
-    );
-    let from = Position { log: "agora/test".into(), offset: 0 };
-    let beat = Duration::from_secs(10);
-    let request = hydramq_events::wire::watch_request(&from, 10, beat).expect("a request");
-    let frames = EventsFrames::open(channel(socket).await, manual.clock(), &request, Duration::from_secs(5))
-        .await
-        .expect("the watch opens");
-    let mut watcher = hydramq_events::wire::Watcher::new(frames, from, beat);
+    let mut watcher = watching(&socket, Producer(Arc::clone(&events)), &manual).await;
 
     match watcher.next().await.expect("pushed") {
         Read::Events { events, .. } => assert_eq!(events.len(), 1, "what was there"),
@@ -203,4 +179,87 @@ fn a_renewal_is_read_by_its_trailer_never_its_message() {
     let mut other = tonic::Status::unauthenticated(EXPIRED);
     other.metadata_mut().insert(END_METADATA_KEY, tonic::metadata::MetadataValue::from_static("drain"));
     assert!(!super::renews(&other), "only {WATCH_RENEW} renews");
+}
+
+/// A producer whose watch sends what its log holds, then ends the stream as the serve side does at the token's
+/// life: serve's own `journal::Refusal::Expired` status, its `anemnez-end: watch-renew` trailer included.
+struct Renewing(Arc<Events>);
+
+#[tonic::async_trait]
+impl pb::events_server::Events for Renewing {
+    type EventsStream = tokio_stream::Empty<Result<pb::Event, tonic::Status>>;
+
+    async fn events(
+        &self,
+        _: tonic::Request<pb::EventsRequest>,
+    ) -> Result<tonic::Response<Self::EventsStream>, tonic::Status> {
+        Err(tonic::Status::unimplemented("this producer serves Watch"))
+    }
+
+    type WatchStream = tokio_stream::Iter<std::vec::IntoIter<Result<pb::WatchFrame, tonic::Status>>>;
+
+    async fn watch(
+        &self,
+        request: tonic::Request<pb::WatchRequest>,
+    ) -> Result<tonic::Response<Self::WatchStream>, tonic::Status> {
+        let request = request.into_inner().request;
+        let mut watching = hydramq_events::wire::watch(&self.0, &request)
+            .map_err(|e| tonic::Status::invalid_argument(e.to_string()))?;
+        let first = watching.next().ok_or_else(|| tonic::Status::internal("no first frame"))?;
+        let ended = anemnez_extension_serve::journal::Refusal::Expired.status();
+        Ok(tonic::Response::new(tokio_stream::iter(vec![Ok(pb::WatchFrame { frame: first }), Err(ended)])))
+    }
+
+    async fn call(&self, _: tonic::Request<pb::CallRequest>) -> Result<tonic::Response<pb::CallReply>, tonic::Status> {
+        Err(tonic::Status::unimplemented("this producer serves Watch"))
+    }
+}
+
+/// A watch the product ends at its token's life reaches the consumer as `Read::Renew` from where it reached,
+/// through the client's frames and the face's own Watcher over a real socket: the trailer crosses gRPC, and the
+/// consumer re-opens from `next`, never reading an Unclear (A m/25170, m/25222; D m/25187).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_watch_ended_for_renewal_reaches_the_consumer_as_renew() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let manual = ManualClock::new();
+    let events = one_event_log(dir.path(), &manual);
+    let socket = dir.path().join("r.sock");
+    let mut watcher = watching(&socket, Renewing(Arc::clone(&events)), &manual).await;
+    let Read::Events { next: reached, .. } = watcher.next().await.expect("pushed") else { panic!("events first") };
+    let renewed = watcher.next().await.expect("a renewal is an answer, never an error");
+    assert_eq!(renewed, Read::Renew { next: reached }, "renew from where the events reached");
+}
+
+/// A log at `dir` on `manual`'s clock holding one event, `server/stoa` started.
+fn one_event_log(dir: &std::path::Path, manual: &ManualClock) -> Arc<Events> {
+    let events = Arc::new(
+        Events::open(&dir.join("log"), "agora", "agora/test", hydramq_events::Settings::default(), &manual.clock())
+            .expect("the log opens"),
+    );
+    let first = body("agora.server", &[("pid", Field::Int(7))]).expect("encodes");
+    events.publish_next("server/stoa", "started", &first, 1).expect("published");
+    events
+}
+
+/// `producer` served on `socket`, and a consumer's Watcher over the client's frames, from the log's start.
+async fn watching<P: pb::events_server::Events>(
+    socket: &std::path::Path,
+    producer: P,
+    manual: &ManualClock,
+) -> hydramq_events::wire::Watcher<EventsFrames> {
+    let incoming =
+        tokio_stream::wrappers::UnixListenerStream::new(tokio::net::UnixListener::bind(socket).expect("binds"));
+    tokio::spawn(
+        tonic::transport::Server::builder()
+            .add_service(pb::events_server::EventsServer::new(producer))
+            .serve_with_incoming(incoming),
+    );
+    let from = Position { log: "agora/test".into(), offset: 0 };
+    let beat = Duration::from_secs(10);
+    let request = hydramq_events::wire::watch_request(&from, 10, beat).expect("a request");
+    let frames =
+        EventsFrames::open(channel(socket.to_path_buf()).await, manual.clock(), &request, Duration::from_secs(5))
+            .await
+            .expect("the watch opens");
+    hydramq_events::wire::Watcher::new(frames, from, beat)
 }

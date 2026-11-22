@@ -94,6 +94,9 @@ impl hydramq_events::wire::AsyncFrames for EventsFrames {
                     .map_err(|e| EventsError::Malformed(format!("Events/Watch's frame is not a WatchFrame: {e}")))?;
                 Ok(Pulled::Frame(frame.frame))
             }
+            // The product ended the watch at its token's life, typed by its trailer (never its message): the Watcher
+            // answers Read::Renew, and the consumer re-opens from where it reached (A m/25222).
+            Ok(Err(status)) if renews(&status) => Ok(Pulled::Renew),
             Ok(Err(status)) => {
                 Err(EventsError::Unclear(format!("Events/Watch: {}: {}", status.code(), status.message())))
             }
