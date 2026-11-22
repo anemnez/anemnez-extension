@@ -237,7 +237,7 @@ where
     );
     let server = tonic::transport::Server::builder()
         .layer(admit)
-        .layer(ApiPlaneLayer)
+        .layer(ApiPlaneLayer::new(crate::plane::Reads::of(faces.describe.descriptor())))
         .layer(digested)
         .add_routes(product.routes)
         .add_service(pb::describe_server::DescribeServer::new(faces.describe))

@@ -41,6 +41,12 @@ pub struct Describe {
 }
 
 impl Describe {
+    /// The encoded `FileDescriptorSet` it serves.
+    #[must_use]
+    pub fn descriptor(&self) -> &[u8] {
+        &self.reply.file_descriptor_set
+    }
+
     /// The service for an encoded `FileDescriptorSet`, answering every caller alike (an empty `shown`).
     pub fn new(file_descriptor_set: Vec<u8>) -> Describe {
         let reply = anemnez_extension::describe::reply(file_descriptor_set);
