@@ -97,3 +97,15 @@ async fn only_a_carried_peer_is_read() {
     tokio::io::AsyncReadExt::read_exact(&mut io, &mut got).await.expect("its own bytes");
     assert_eq!(got, bytes, "nothing read from it");
 }
+
+/// A line past MAX_LINE whose newline arrives in the same read is still refused too long (D m/25691): parse refuses
+/// it before reading a field, so the newline's place never lets an overlong line through.
+#[tokio::test]
+async fn an_overlong_line_with_its_newline_in_one_read_is_too_long() {
+    let mut line = b"anemnez-carried/1 ".to_vec();
+    line.extend(vec![b'x'; 9 * 1024]);
+    line.push(b'\n');
+    let (mut far, _near) = sent(&line).await;
+    let ended = read(&mut far, &ManualClock::new().clock(), PREFACE_WITHIN).await;
+    assert_eq!(ended, Err(PrefaceEnd::Refused(PrefaceRefusal::TooLong)));
+}
