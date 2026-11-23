@@ -686,7 +686,7 @@ silent past the bound goes on bare. A preface that began and didn't finish (`pre
 parse (`preface-version-unknown`, `preface-too-long`, `preface-malformed`), closes its connection, said in the
 product's log by name. Every other peer's bytes go straight to HTTP/2 and never meet the reader. The other way round, a new
 aegisd never writes to an older reader: a product whose serving face reads the preface says so in its manifest's
-contracts, `anemnez.carried-preface` at `1` (`carried::CONTRACT`, set by the SDK's manifest builder for every API
+contracts, `anemnez_carried_preface` at `1.0.0` (`carried::CONTRACT`, spelled as any contract is: M m/26321, set by the SDK's manifest builder for every API
 plane, never by hand), and aegisd writes a preface only to a target whose discovered contracts name it (I m/25694,
 M m/25699). `carried::encode` refuses at the writer, by the same name, every field `parse` would refuse.
 

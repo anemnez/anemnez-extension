@@ -26,7 +26,8 @@ pub const PREFIX: &[u8] = b"anemnez-carried/";
 /// manifest builder sets it for every product with an API plane, never by hand, and aegisd writes a preface only to a
 /// target whose discovered contracts name it at this version. A target that doesn't is sent none, and its carried
 /// calls stay unbound, as before.
-pub const CONTRACT: (&str, &str) = ("anemnez.carried-preface", "1");
+/// Spelled as any contract is (M m/26321): one Lua identifier, and MAJOR.MINOR.PATCH whose MAJOR is the line's version.
+pub const CONTRACT: (&str, &str) = ("anemnez_carried_preface", "1.0.0");
 
 /// The longest preface line accepted, its newline included: a longer one is refused [`PrefaceRefusal::TooLong`].
 pub const MAX_LINE: usize = 8 * 1024;

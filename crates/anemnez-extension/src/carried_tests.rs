@@ -109,6 +109,10 @@ fn encode_refuses_what_parse_would_by_the_same_name() {
 /// The contract a reader declares, one constant for the SDK that sets it and aegisd that reads it.
 #[test]
 fn the_reader_declares_one_contract() {
-    assert_eq!(CONTRACT, ("anemnez.carried-preface", "1"));
-    assert!(VERSION.ends_with(&format!("/{}", CONTRACT.1)), "the declared version is the line's");
+    assert_eq!(CONTRACT, ("anemnez_carried_preface", "1.0.0"));
+    let (name, version) = CONTRACT;
+    assert!(name.bytes().all(|b| b.is_ascii_lowercase() || b == b'_'), "one Lua identifier: {name}");
+    let parts: Vec<&str> = version.split('.').collect();
+    assert_eq!(parts.len(), 3, "MAJOR.MINOR.PATCH: {version}");
+    assert!(VERSION.ends_with(&format!("/{}", parts[0])), "the declared MAJOR is the line's version");
 }
