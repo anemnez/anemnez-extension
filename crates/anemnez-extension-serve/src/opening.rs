@@ -12,7 +12,8 @@
 //! at most [`OPENING_AT_MOST_PER_PEER`] read at once per judged peer, keyed by its pid and pidversion; its others wait
 //! their turn within the same bound, so a burst is only slowed. A peer whose identity couldn't be read shares one small
 //! bucket ([`OPENING_AT_MOST_UNREADABLE`]), so staying anonymous escapes nothing. A turn that doesn't come in time
-//! closes the opening, `opening-crowded`.
+//! closes the opening, `opening-crowded`, and so does one past [`OPENING_WAITING_AT_MOST`] waiting, at once: a queue
+//! is fair only while it's bounded (D m/26948).
 //!
 //! Every byte read is handed back to HTTP/2 through the connection's `Accepted`, so HTTP/2 reads all its peer sent.
 //! Readers first: an aegisd older than the preface opens with HTTP/2 at once, told apart on its first bytes.
@@ -42,6 +43,10 @@ pub const OPENING_AT_MOST_PER_PEER: usize = 8;
 /// How many openings every peer whose identity couldn't be read may read at once, together.
 pub const OPENING_AT_MOST_UNREADABLE: usize = 2;
 
+/// How many openings may wait their turn beyond those being read, per bucket: a peer's next one closes
+/// `opening-crowded` at once, so a flood holds no more descriptors than this (D m/26948).
+pub const OPENING_WAITING_AT_MOST: usize = 64;
+
 /// Why a connection was closed at its opening, by name.
 #[derive(Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -54,7 +59,8 @@ pub enum OpeningEnd {
     PrefaceUnanswered,
     /// A carried peer's preface line didn't parse.
     Refused(PrefaceRefusal),
-    /// Its turn among its peer's openings didn't come within the bound: the peer's own other openings held it.
+    /// Its turn among its peer's openings didn't come within the bound, or its peer already has as many waiting as it
+    /// may: the peer's own other openings held it.
     Crowded,
     /// The connection failed while its opening was read.
     Io(String),
@@ -91,6 +97,27 @@ enum Bucket {
 #[derive(Clone, Debug, Default)]
 pub struct Openings {
     turns: Arc<Mutex<HashMap<Bucket, Arc<tokio::sync::Semaphore>>>>,
+    /// Openings each bucket has in hand, being read or waiting, so the waiting are bounded in count, not only time.
+    in_hand: Arc<Mutex<HashMap<Bucket, usize>>>,
+}
+
+/// One opening counted in its bucket until it ends.
+struct InHand {
+    in_hand: Arc<Mutex<HashMap<Bucket, usize>>>,
+    bucket: Bucket,
+}
+
+impl Drop for InHand {
+    fn drop(&mut self) {
+        if let Ok(mut in_hand) = self.in_hand.lock()
+            && let Some(n) = in_hand.get_mut(&self.bucket)
+        {
+            *n -= 1;
+            if *n == 0 {
+                in_hand.remove(&self.bucket);
+            }
+        }
+    }
 }
 
 impl Openings {
@@ -100,12 +127,28 @@ impl Openings {
         Openings::default()
     }
 
-    /// The turns `bucket` waits in.
-    fn turns(&self, bucket: Bucket) -> Result<Arc<tokio::sync::Semaphore>, OpeningEnd> {
-        let share = match bucket {
+    /// How many of `bucket`'s openings are read at once.
+    fn share(bucket: Bucket) -> usize {
+        match bucket {
             Bucket::Peer(..) => OPENING_AT_MOST_PER_PEER,
             Bucket::Unreadable => OPENING_AT_MOST_UNREADABLE,
-        };
+        }
+    }
+
+    /// Count one more opening in `bucket`'s hand, or refuse it at once when its share and its waiting are full.
+    fn take(&self, bucket: Bucket) -> Result<InHand, OpeningEnd> {
+        let mut in_hand = self.in_hand.lock().map_err(|e| OpeningEnd::Io(e.to_string()))?;
+        let n = in_hand.entry(bucket).or_insert(0);
+        if *n >= Self::share(bucket) + OPENING_WAITING_AT_MOST {
+            return Err(OpeningEnd::Crowded);
+        }
+        *n += 1;
+        Ok(InHand { in_hand: Arc::clone(&self.in_hand), bucket })
+    }
+
+    /// The turns `bucket` waits in.
+    fn turns(&self, bucket: Bucket) -> Result<Arc<tokio::sync::Semaphore>, OpeningEnd> {
+        let share = Self::share(bucket);
         let mut turns = self.turns.lock().map_err(|e| OpeningEnd::Io(e.to_string()))?;
         Ok(Arc::clone(turns.entry(bucket).or_insert_with(|| Arc::new(tokio::sync::Semaphore::new(share)))))
     }
@@ -134,6 +177,7 @@ impl Openings {
             Ok(_) => Bucket::Peer(judged.peer.pid, judged.peer.pidversion),
             Err(_) => Bucket::Unreadable,
         };
+        let _in_hand = self.take(bucket)?;
         let turns = self.turns(bucket)?;
         let accepted_at = clock.now_mono();
         let read = {

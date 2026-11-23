@@ -151,14 +151,7 @@ async fn a_burst_from_one_peer_all_opens() {
 async fn silence_holds_only_its_senders_turns() {
     let manual = ManualClock::new();
     let openings = Openings::new();
-    let open = |bytes: &'static [u8], who: Peer| {
-        let (openings, clock) = (openings.clone(), manual.clock());
-        tokio::spawn(async move {
-            let (far, near) = sent(bytes).await;
-            let _near = near;
-            openings.open(Accepted::new(far, who, Role::Other), &clock).await.map(|_| ())
-        })
-    };
+    let open = |bytes: &'static [u8], who: Peer| spawn_open(&openings, &manual, bytes, who);
     let silent: Vec<_> = (0..OPENING_AT_MOST_PER_PEER).map(|_| open(b"", peer(41, true))).collect();
     manual.parked(OPENING_AT_MOST_PER_PEER).await;
     manual.advance(Duration::from_secs(1)).await;
@@ -196,6 +189,46 @@ async fn a_turn_that_never_comes_closes_crowded_and_the_unreadable_share_one() {
         manual.advance(OPENING_WITHIN).await;
         assert_eq!(opening.await.expect("joins"), Err(OpeningEnd::Crowded), "{bucket:?}");
     }
+}
+
+/// The waiting are bounded in count, not only time (D m/26948): a peer's opening past its share and its waiting closes
+/// opening-crowded at once, while another peer opens.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_peers_opening_past_its_waiting_closes_at_once() {
+    let manual = ManualClock::new();
+    let openings = Openings::new();
+    let open = |bytes: &'static [u8], who: Peer| spawn_open(&openings, &manual, bytes, who);
+    let held = OPENING_AT_MOST_PER_PEER + OPENING_WAITING_AT_MOST;
+    let silent: Vec<_> = (0..held).map(|_| open(b"", peer(41, true))).collect();
+    // The share are reading (each parked on its bound) and the rest wait their turn (each parked on the bound too).
+    manual.parked(held).await;
+    let mut past = open(HTTP2_PREFACE, peer(41, true));
+    // Closed at once is an answer before any wait: had it waited its turn, it would park one more timer on the clock,
+    // which fails by name.
+    tokio::select! {
+        done = &mut past => assert_eq!(done.expect("joins"), Err(OpeningEnd::Crowded)),
+        () = manual.parked(held + 1) => panic!("the 73rd waited its turn instead of closing at once"),
+    }
+    assert_eq!(open(HTTP2_PREFACE, peer(42, true)).await.expect("joins"), Ok(()), "another peer opens");
+    manual.advance(OPENING_WITHIN).await;
+    for s in silent {
+        assert!(s.await.expect("joins").is_err());
+    }
+}
+
+/// An opening of `bytes` from `who`, spawned on `manual`'s clock: Ok once opened, or how it closed.
+fn spawn_open(
+    openings: &Openings,
+    manual: &ManualClock,
+    bytes: &'static [u8],
+    who: Peer,
+) -> tokio::task::JoinHandle<Result<(), OpeningEnd>> {
+    let (openings, clock) = (openings.clone(), manual.clock());
+    tokio::spawn(async move {
+        let (far, near) = sent(bytes).await;
+        let _near = near;
+        openings.open(Accepted::new(far, who, Role::Other), &clock).await.map(|_| ())
+    })
 }
 
 /// Each end says its name first.
