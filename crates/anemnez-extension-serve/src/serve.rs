@@ -220,19 +220,20 @@ where
     IE: Into<Box<dyn std::error::Error + Send + Sync>>,
     F: Future<Output = ()>,
 {
-    // A Carried peer's preface is read first (crate::carried), one connection at a time off the accept loop and
-    // bounded, so a slow aegisd holds only its own connection. A refused one is closed and said, by name.
+    // Every connection's opening is read first (crate::opening): a carried peer's preface line, then HTTP/2's client
+    // preface, within OPENING_WITHIN on the clock, each in its own bounded read with no global cap, and at most a few
+    // per peer, so silence holds only its sender. One that doesn't open is closed and said, by name.
     let incoming = {
-        let clock = stop.clock.clone();
+        let (clock, openings) = (stop.clock.clone(), crate::opening::Openings::new());
         incoming
             .map(move |accepted| {
-                let clock = clock.clone();
+                let (clock, openings) = (clock.clone(), openings.clone());
                 async move {
                     match accepted {
-                        Ok(accepted) => match crate::carried::prefaced(accepted, &clock).await {
-                            Ok(prefaced) => Some(Ok(prefaced)),
+                        Ok(accepted) => match openings.open(accepted, &clock).await {
+                            Ok(opened) => Some(Ok(opened)),
                             Err(end) => {
-                                tracing::warn!(%end, "a carried connection was closed at accept");
+                                tracing::warn!(%end, "a connection was closed at its opening");
                                 None
                             }
                         },
@@ -240,7 +241,7 @@ where
                     }
                 }
             })
-            .buffer_unordered(crate::carried::PREFACING_AT_MOST)
+            .buffer_unordered(usize::MAX)
             .filter_map(std::future::ready)
     };
     let (cut, cutting) = tokio::sync::watch::channel(false);

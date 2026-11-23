@@ -677,18 +677,31 @@ principal is bound through Aegis (I's binding), and never before.
 **A carried connection says where it came from once, at accept** (K m/25625; M m/25661; D m/25623). aegisd writes
 one line before the product's HTTP/2, `anemnez-carried/1 <node> <base64 DER> <unique_id>:<boot>`, through the one
 codec in the kernel crate (`anemnez_extension::carried`). -serve's accept reads it only from a peer judged
-`Role::Carried`, one connection at a time off the accept loop and bounded (`carried::PREFACE_WITHIN` on the injected
-clock, at most `MAX_LINE` bytes), and hands it on as `Judged::carried` on every request of that connection. It is a
+`Role::Carried`, as part of the connection's opening (`a-connection-opens-within-its-bound`: at most `MAX_LINE`
+bytes), and hands it on as `Judged::carried` on every request of that connection. It is a
 claim, never a verdict: the SDK's carried verify judges it against the caller's token, and a call with no preface, or
 one the verify refuses, stays under `a-carried-call-reaches-reads-only`. Readers first: an aegisd older than the
-preface opens with HTTP/2, told apart on its first bytes, and is served as it came with no preface. A connection
-silent past the bound goes on bare. A preface that began and didn't finish (`preface-unanswered`), or that doesn't
+preface opens with HTTP/2, told apart on its first bytes, and is served as it came with no preface. A carried
+connection silent past the opening's bound closes, never served bare. A preface that began and didn't finish (`preface-unanswered`), or that doesn't
 parse (`preface-version-unknown`, `preface-too-long`, `preface-malformed`), closes its connection, said in the
-product's log by name. Every other peer's bytes go straight to HTTP/2 and never meet the reader. The other way round, a new
+product's log by name. Every other peer's bytes must open with HTTP/2's client preface: a preface line from them closes
+`not-http2`. The other way round, a new
 aegisd never writes to an older reader: a product whose serving face reads the preface says so in its manifest's
 contracts, `anemnez_carried_preface` at `1.0.0` (`carried::CONTRACT`, spelled as any contract is: M m/26321, set by the SDK's manifest builder for every API
 plane, never by hand), and aegisd writes a preface only to a target whose discovered contracts name it (I m/25694,
 M m/25699). `carried::encode` refuses at the writer, by the same name, every field `parse` would refuse.
+
+<!-- claim: a-connection-opens-within-its-bound -->
+**A connection gives its whole opening within its bound, or it closes by name** (rule 4; M m/26881, K m/26883,
+D m/26884, m/26885). -serve's accept (`opening::Openings`, which the SDK's control `Incoming` runs too) reads every
+connection's opening within `OPENING_WITHIN` (10 s) on the injected clock: a carried peer's preface line, when it
+begins one, then HTTP/2's 24-byte client connection preface (`HTTP2_PREFACE`). Silence, or a part and then silence,
+closes `no-http2-preface`; an opening that isn't HTTP/2 closes `not-http2`. Every byte read is handed back to HTTP/2.
+**Its scope is the opening alone:** past it, an open, quiet HTTP/2 connection is normal for a client that keeps its
+channel, and HTTP/2 keepalive covers a dead one. **Silence costs only its sender:** openings run with no global cap,
+at most `OPENING_AT_MOST_PER_PEER` (8) read at once per judged peer (by pid and pidversion) and the rest wait their turn
+within the same bound, so a burst is only slowed; every peer whose identity couldn't be read shares one bucket of
+`OPENING_AT_MOST_UNREADABLE` (2). A turn that doesn't come within the bound closes `opening-crowded`.
 
 <!-- claim: one-function-serves-the-api-plane -->
 **One function serves the API plane** (K, 2026-11-16; D m/15034, E m/15035). -serve's `serve(faces, product,
