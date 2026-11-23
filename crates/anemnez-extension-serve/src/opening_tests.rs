@@ -234,12 +234,47 @@ fn spawn_open(
 /// Each end says its name first.
 #[test]
 fn each_end_says_its_name_first() {
-    for (end, name) in [
-        (OpeningEnd::NoHttp2Preface, "no-http2-preface: "),
-        (OpeningEnd::NotHttp2, "not-http2: "),
-        (OpeningEnd::PrefaceUnanswered, "preface-unanswered: "),
-        (OpeningEnd::Crowded, "opening-crowded: "),
-    ] {
-        assert!(end.to_string().starts_with(name), "{end}");
+    let ends = [
+        OpeningEnd::NoHttp2Preface,
+        OpeningEnd::NotHttp2,
+        OpeningEnd::PrefaceUnanswered,
+        OpeningEnd::Refused(PrefaceRefusal::TooLong),
+        OpeningEnd::Crowded,
+        OpeningEnd::Io("reset".into()),
+    ];
+    let names: Vec<&str> = ends.iter().map(OpeningEnd::name).collect();
+    assert_eq!(
+        names,
+        [
+            "no-http2-preface",
+            "not-http2",
+            "preface-unanswered",
+            "preface-too-long",
+            "opening-crowded",
+            "opening-unread"
+        ]
+    );
+    for end in ends {
+        assert!(end.to_string().starts_with(&format!("{}: ", end.name())), "{end}");
     }
+}
+
+/// D m/27832, M m/27896: a plane's closes are said at warn at most once per SAID_EVERY, as the counts by end since the
+/// last, the first at once, from a pure tally on the clock's mono.
+#[test]
+fn closes_are_said_at_most_once_a_minute_as_counts_by_end() {
+    let start = ManualClock::new().now();
+    let mut tally = Tally::default();
+    let said = |s: Option<Said>| s.map(|s| s.to_string());
+    assert_eq!(said(tally.closed(&OpeningEnd::NoHttp2Preface, start)).as_deref(), Some("no-http2-preface=1"));
+    for k in 1..=5 {
+        let at = start + Duration::from_secs(k);
+        assert_eq!(tally.closed(&OpeningEnd::NoHttp2Preface, at), None, "{k}s after a warn: only counted");
+    }
+    let early = start + (SAID_EVERY - Duration::from_millis(1));
+    assert_eq!(tally.closed(&OpeningEnd::NotHttp2, early), None, "a tick early");
+    let due = said(tally.closed(&OpeningEnd::NotHttp2, start + SAID_EVERY));
+    assert_eq!(due.as_deref(), Some("no-http2-preface=5, not-http2=2"), "the minute's closes, by end");
+    let next = start + SAID_EVERY + Duration::from_secs(1);
+    assert_eq!(tally.closed(&OpeningEnd::Crowded, next), None, "the next minute runs from that warn");
 }

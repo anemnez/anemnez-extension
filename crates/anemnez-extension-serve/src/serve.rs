@@ -222,18 +222,23 @@ where
 {
     // Every connection's opening is read first (crate::opening): a carried peer's preface line, then HTTP/2's client
     // preface, within OPENING_WITHIN on the clock, each in its own bounded read with no global cap, and at most a few
-    // per peer, so silence holds only its sender. One that doesn't open is closed and said, by name.
+    // per peer, so silence holds only its sender. One that doesn't open is closed, said at debug by name and at warn
+    // only as the plane's counts by end, at most once per SAID_EVERY.
     let incoming = {
         let (clock, openings) = (stop.clock.clone(), crate::opening::Openings::new());
+        let tally = Arc::new(std::sync::Mutex::new(crate::opening::Tally::default()));
         incoming
             .map(move |accepted| {
-                let (clock, openings) = (clock.clone(), openings.clone());
+                let (clock, openings, tally) = (clock.clone(), openings.clone(), Arc::clone(&tally));
                 async move {
                     match accepted {
                         Ok(accepted) => match openings.open(accepted, &clock).await {
                             Ok(opened) => Some(Ok(opened)),
                             Err(end) => {
-                                tracing::warn!(%end, "a connection was closed at its opening");
+                                tracing::debug!(%end, "a connection was closed at its opening");
+                                if let Ok(Some(said)) = tally.lock().map(|mut t| t.closed(&end, clock.now_mono())) {
+                                    tracing::warn!(closed = %said, "connections closed at their opening, by end");
+                                }
                                 None
                             }
                         },

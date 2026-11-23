@@ -701,7 +701,10 @@ closes `no-http2-preface`; an opening that isn't HTTP/2 closes `not-http2`. Ever
 channel, and HTTP/2 keepalive covers a dead one. **Silence costs only its sender:** openings run with no global cap,
 at most `OPENING_AT_MOST_PER_PEER` (8) read at once per judged peer (by pid and pidversion) and the rest wait their turn
 within the same bound, so a burst is only slowed; every peer whose identity couldn't be read shares one bucket of
-`OPENING_AT_MOST_UNREADABLE` (2). A turn that doesn't come within the bound closes `opening-crowded`.
+`OPENING_AT_MOST_UNREADABLE` (2). A turn that doesn't come within the bound closes `opening-crowded`. **A close is said
+quietly:** at debug by its name (`OpeningEnd::name`), and at warn only as the plane's counts by end since the last
+(`opening::Tally`, a pure kernel on the clock's mono), at most once per `SAID_EVERY` (60 s), so silent peers cost the
+log one line a minute per plane (D m/27832, M m/27896). The SDK's control plane says them through the same tally.
 
 <!-- claim: one-function-serves-the-api-plane -->
 **One function serves the API plane** (K, 2026-11-16; D m/15034, E m/15035). -serve's `serve(faces, product,

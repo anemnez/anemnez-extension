@@ -15,16 +15,19 @@
 //! closes the opening, `opening-crowded`, and so does one past [`OPENING_WAITING_AT_MOST`] waiting, at once: a queue
 //! is fair only while it's bounded (D m/26948).
 //!
+//! A close is said at debug, and at warn only as a [`Tally`]'s counts by end, at most once per [`SAID_EVERY`] per
+//! plane, so silent peers can't flood the log.
+//!
 //! Every byte read is handed back to HTTP/2 through the connection's `Accepted`, so HTTP/2 reads all its peer sent.
 //! Readers first: an aegisd older than the preface opens with HTTP/2 at once, told apart on its first bytes.
 //!
 //! [`Judged::carried`]: crate::Judged::carried
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use anemnez_clock::Clock;
+use anemnez_clock::{Clock, Mono};
 use anemnez_extension::carried::{self, MAX_LINE, Opening, PrefaceRefusal};
 use anemnez_extension::peer::Role;
 use tokio::io::{AsyncRead, AsyncReadExt as _};
@@ -66,22 +69,78 @@ pub enum OpeningEnd {
     Io(String),
 }
 
+impl OpeningEnd {
+    /// The end's name, as said at the head of its display: what a count of closes is kept by.
+    #[must_use]
+    pub fn name(&self) -> &'static str {
+        match self {
+            OpeningEnd::NoHttp2Preface => "no-http2-preface",
+            OpeningEnd::NotHttp2 => "not-http2",
+            OpeningEnd::PrefaceUnanswered => "preface-unanswered",
+            OpeningEnd::Refused(r) => r.name(),
+            OpeningEnd::Crowded => "opening-crowded",
+            OpeningEnd::Io(_) => "opening-unread",
+        }
+    }
+}
+
 impl std::fmt::Display for OpeningEnd {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = self.name();
         match self {
             OpeningEnd::NoHttp2Preface => {
-                write!(f, "no-http2-preface: the connection's opening didn't arrive within {OPENING_WITHIN:?}")
+                write!(f, "{name}: the connection's opening didn't arrive within {OPENING_WITHIN:?}")
             }
-            OpeningEnd::NotHttp2 => write!(f, "not-http2: the connection didn't open with HTTP/2's client preface"),
+            OpeningEnd::NotHttp2 => write!(f, "{name}: the connection didn't open with HTTP/2's client preface"),
             OpeningEnd::PrefaceUnanswered => {
-                write!(f, "preface-unanswered: a carried preface began and didn't end within {OPENING_WITHIN:?}")
+                write!(f, "{name}: a carried preface began and didn't end within {OPENING_WITHIN:?}")
             }
             OpeningEnd::Refused(r) => write!(f, "{r}"),
             OpeningEnd::Crowded => {
-                write!(f, "opening-crowded: this peer's other openings held its turn past {OPENING_WITHIN:?}")
+                write!(f, "{name}: this peer's other openings held its turn past {OPENING_WITHIN:?}")
             }
-            OpeningEnd::Io(why) => write!(f, "opening-unread: {why}"),
+            OpeningEnd::Io(why) => write!(f, "{name}: {why}"),
         }
+    }
+}
+
+/// How often closed openings are said at warn, at most: each is said at debug, and at warn only as a count by end
+/// since the last (D m/27832, M m/27896), so a flood of silent peers costs the log one line a minute per plane.
+pub const SAID_EVERY: Duration = Duration::from_secs(60);
+
+/// The closes of one plane's openings, counted by end and said at most once per [`SAID_EVERY`]: a pure kernel fed each
+/// close and the clock's [`Mono`] (rule 1). The first close is said at once.
+#[derive(Debug, Default)]
+pub struct Tally {
+    last: Option<Mono>,
+    since: BTreeMap<&'static str, u64>,
+}
+
+impl Tally {
+    /// Count `end`, closed at `now`, answering the counts to say at warn when they're due.
+    pub fn closed(&mut self, end: &OpeningEnd, now: Mono) -> Option<Said> {
+        *self.since.entry(end.name()).or_default() += 1;
+        if self.last.is_some_and(|last| now.saturating_since(last) < SAID_EVERY) {
+            return None;
+        }
+        self.last = Some(now);
+        Some(Said(std::mem::take(&mut self.since)))
+    }
+}
+
+/// The closes since the last said, by end: `no-http2-preface=5, not-http2=2`.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Said(BTreeMap<&'static str, u64>);
+
+impl std::fmt::Display for Said {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (n, (end, count)) in self.0.iter().enumerate() {
+            if n > 0 {
+                f.write_str(", ")?;
+            }
+            write!(f, "{end}={count}")?;
+        }
+        Ok(())
     }
 }
 

@@ -212,3 +212,4 @@ spoken_for("a-connection-opens-within-its-bound (not HTTP/2)", "opening::tests::
 spoken_for("a-connection-opens-within-its-bound (a burst)", "opening::tests::a_burst_from_one_peer_all_opens")
 spoken_for("a-connection-opens-within-its-bound (silence holds only its sender)", "opening::tests::silence_holds_only_its_senders_turns")
 spoken_for("a-connection-opens-within-its-bound (crowded, unreadable share one)", "opening::tests::a_turn_that_never_comes_closes_crowded_and_the_unreadable_share_one")
+spoken_for("a-connection-opens-within-its-bound (a close is said quietly)", "opening::tests::closes_are_said_at_most_once_a_minute_as_counts_by_end")
