@@ -177,7 +177,7 @@ async fn the_planes_rules_apply_to_the_products_calls() {
     let channel = plane.channel.clone();
     let describe = pb::describe_client::DescribeClient::new(channel.clone()).get(pb::DescribeRequest::default()).await;
     assert!(describe.is_ok(), "fabricd reads Describe: {describe:?}");
-    let refused = Err((tonic::Code::PermissionDenied, FABRICD_READS_DESCRIBE_ONLY.to_string()));
+    let refused = Err((tonic::Code::PermissionDenied, crate::plane::said(FABRICD_READS_DESCRIBE_ONLY)));
     assert_eq!(call(&channel, CHECKED).await, refused, "the product's call");
     assert_eq!(call(&channel, "/anemnez.extension.v1.Health/Get").await, refused, "the Health twin");
 }

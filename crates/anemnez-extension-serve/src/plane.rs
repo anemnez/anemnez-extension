@@ -84,8 +84,26 @@ pub fn carried_admits(role: Role, path: &str, reads: &Reads) -> Result<(), &'sta
     }
 }
 
+/// A plane refusal as the caller reads it, in the house form `<name>: <why>` (M m/25549, G m/25537): the name first,
+/// so a reader matches it by its name (anemnez-service `reach::named`), and why, so a person reads more than the name.
+#[must_use]
+pub fn said(name: &'static str) -> String {
+    let why = match name {
+        // Already a sentence a person reads, and unchanged on the wire.
+        NOT_JUDGED => return name.to_owned(),
+        FABRICD_READS_DESCRIBE_ONLY => "fabricd reads Describe on the API plane and nothing else",
+        STAMP_NOT_FROM_AGORA => "a caller's stamp is believed only from Agora's judged peer",
+        CARRIED_WRITE_UNBOUND => {
+            "a call carried from another host reaches reads only, until its caller's principal is bound end to end"
+        }
+        _ => "refused by the API plane",
+    };
+    format!("{name}: {why}")
+}
+
 /// The API plane's rules as a layer on the product's server: each call is admitted by [`api_admits`] and
-/// [`carried_admits`] or answered PERMISSION_DENIED with the refusal's name, before any service sees it.
+/// [`carried_admits`] or answered PERMISSION_DENIED with the refusal's name and why ([`said`]), before any service
+/// sees it.
 #[derive(Clone, Debug, Default)]
 pub struct ApiPlaneLayer {
     reads: Reads,
@@ -138,7 +156,7 @@ where
         let admitted = api_admits(judged, path, carries_stamp)
             .and_then(|()| judged.map_or(Ok(()), |j| carried_admits(j.role, path, &self.reads)));
         match admitted {
-            Err(name) => Either::Left(std::future::ready(Ok(tonic::Status::permission_denied(name).into_http()))),
+            Err(name) => Either::Left(std::future::ready(Ok(tonic::Status::permission_denied(said(name)).into_http()))),
             Ok(()) => Either::Right(self.inner.call(request)),
         }
     }

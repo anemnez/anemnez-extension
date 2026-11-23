@@ -8,7 +8,7 @@ use anemnez_extension::peer::{
 
 use crate::accepted::{Accepted, Judged};
 use crate::pb;
-use crate::plane::{ApiPlaneLayer, Reads, api_admits, carried_admits};
+use crate::plane::{ApiPlaneLayer, Reads, api_admits, carried_admits, said};
 
 const DESCRIBE: &str = "/anemnez.extension.v1.Describe/Get";
 const FUNCTIONAL: &str = "/minion.v1.Minion/AppsList";
@@ -69,12 +69,12 @@ async fn describe(channel: tonic::transport::Channel, stamp: bool) -> Result<(),
 #[tokio::test(flavor = "multi_thread")]
 async fn the_layer_applies_the_rules_before_any_service() {
     let (unjudged, _a) = served(|io| io).await;
-    assert_eq!(describe(unjudged, false).await, Err(NOT_JUDGED.to_string()));
+    assert_eq!(describe(unjudged, false).await, Err(said(NOT_JUDGED)));
 
     let fabricd = |io| Accepted::new(io, judged(Role::Fabricd).peer, Role::Fabricd);
     let (channel, _b) = served(fabricd).await;
     assert_eq!(describe(channel.clone(), false).await, Ok(()), "fabricd reads Describe");
-    assert_eq!(describe(channel, true).await, Err(STAMP_NOT_FROM_AGORA.to_string()));
+    assert_eq!(describe(channel, true).await, Err(said(STAMP_NOT_FROM_AGORA)));
 
     let agora = |io| Accepted::new(io, judged(Role::Agora).peer, Role::Agora);
     let (channel, _c) = served(agora).await;
@@ -108,4 +108,17 @@ fn a_carried_call_reaches_reads_only() {
 fn reads_come_from_the_descriptors_effects_and_a_bad_descriptor_reads_none() {
     assert!(!Reads::of(b"not a descriptor").reads(FUNCTIONAL));
     assert!(Reads::of(b"not a descriptor").reads(DESCRIBE), "the faces are reads whatever the descriptor");
+}
+
+/// Every plane refusal is said in the house form, `<name>: <why>` (M m/25549): the name first, as a reader matches it,
+/// and a why of its own, never the bare name a reader can't tell from a lower layer's word.
+#[test]
+fn every_plane_refusal_is_said_as_its_name_then_why() {
+    assert_eq!(said(NOT_JUDGED), NOT_JUDGED, "already a sentence, unchanged on the wire");
+    for name in [FABRICD_READS_DESCRIBE_ONLY, STAMP_NOT_FROM_AGORA, CARRIED_WRITE_UNBOUND] {
+        let said = said(name);
+        let (named, why) = said.split_once(": ").expect("the house form");
+        assert_eq!(named, name);
+        assert!(!why.is_empty() && why != "refused by the API plane", "{name} says why of its own: {said}");
+    }
 }
