@@ -220,6 +220,29 @@ where
     IE: Into<Box<dyn std::error::Error + Send + Sync>>,
     F: Future<Output = ()>,
 {
+    // A Carried peer's preface is read first (crate::carried), one connection at a time off the accept loop and
+    // bounded, so a slow aegisd holds only its own connection. A refused one is closed and said, by name.
+    let incoming = {
+        let clock = stop.clock.clone();
+        incoming
+            .map(move |accepted| {
+                let clock = clock.clone();
+                async move {
+                    match accepted {
+                        Ok(accepted) => match crate::carried::prefaced(accepted, &clock).await {
+                            Ok(prefaced) => Some(Ok(prefaced)),
+                            Err(end) => {
+                                tracing::warn!(%end, "a carried connection was closed at accept");
+                                None
+                            }
+                        },
+                        Err(e) => Some(Err(e)),
+                    }
+                }
+            })
+            .buffer_unordered(crate::carried::PREFACING_AT_MOST)
+            .filter_map(std::future::ready)
+    };
     let (cut, cutting) = tokio::sync::watch::channel(false);
     let open = Arc::new(AtomicUsize::new(0));
     let incoming = {

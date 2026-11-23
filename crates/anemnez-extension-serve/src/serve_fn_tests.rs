@@ -330,3 +330,83 @@ async fn an_admission_layer_is_outermost_and_sees_every_call() {
         "before fabricd-reads-describe-only"
     );
 }
+
+/// An admission layer that records, for each request, the node its connection's preface named (`Judged::carried`).
+#[derive(Clone, Default)]
+struct SeesCarried(Arc<std::sync::Mutex<Vec<Option<String>>>>);
+
+impl<S> tower_layer::Layer<S> for SeesCarried {
+    type Service = SeeingCarried<S>;
+    fn layer(&self, inner: S) -> SeeingCarried<S> {
+        SeeingCarried { inner, seen: self.clone() }
+    }
+}
+
+#[derive(Clone)]
+struct SeeingCarried<S> {
+    inner: S,
+    seen: SeesCarried,
+}
+
+impl<S: tower_service::Service<http::Request<BoxBody>>> tower_service::Service<http::Request<BoxBody>>
+    for SeeingCarried<S>
+{
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future = S::Future;
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), S::Error>> {
+        self.inner.poll_ready(cx)
+    }
+    fn call(&mut self, request: http::Request<BoxBody>) -> S::Future {
+        let node = request.extensions().get::<Judged>().and_then(|j| j.carried.as_ref().map(|p| p.node.clone()));
+        if let Ok(mut seen) = self.seen.0.lock() {
+            seen.push(node);
+        }
+        self.inner.call(request)
+    }
+}
+
+/// A Carried connection's preface is read once at accept and rides every request on it as `Judged::carried`, and
+/// HTTP/2 after it is served as it came. An aegisd older than the preface (HTTP/2 at once) is served the same, with
+/// no preface (K m/25625, M m/25661).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_carried_connections_preface_rides_its_requests_and_http2_after_it_is_served() {
+    use anemnez_extension::carried::{Holder, Preface, encode};
+    let preface = Preface {
+        node: "node-far".into(),
+        cert_der: vec![0x30, 0x01, 0x02],
+        holder: Holder { unique_id: 7, boot: "1795300000.1".into() },
+    };
+    for (sent, expect) in [(Some(encode(&preface)), Some("node-far".to_owned())), (None, None)] {
+        let manual = ManualClock::new();
+        let journal = Journal::new("a1b2c3d4.boot1", 8, manual.clock());
+        let events = EventsService::new(journal.clone(), crate::principal_tests::verifier(&manual, false));
+        let faces = ApiFaces::new(Describe::new(Vec::new()), Board::new(journal), events);
+        let (_dir, socket, incoming) =
+            crate::serve_tests::listen_as(|io| Accepted::new(io, peer(Role::Carried), Role::Carried));
+        let seen = SeesCarried::default();
+        let stop = Stop { signal: std::future::pending::<()>(), within: WINDOW, clock: manual.clock() };
+        tokio::spawn(serve_admitted(seen.clone(), faces, ProductRoutes::new(), &[], incoming, stop));
+        let channel = tonic::transport::Endpoint::from_static("http://[::]:50051")
+            .connect_with_connector(tower::service_fn(move |_: tonic::transport::Uri| {
+                let (path, sent) = (socket.clone(), sent.clone());
+                async move {
+                    use tokio::io::AsyncWriteExt as _;
+                    let mut io = tokio::net::UnixStream::connect(path).await?;
+                    if let Some(sent) = sent {
+                        io.write_all(&sent).await?;
+                    }
+                    Ok::<_, std::io::Error>(hyper_util::rt::TokioIo::new(io))
+                }
+            }))
+            .await
+            .expect("connects");
+        let described = pb::describe_client::DescribeClient::new(channel).get(pb::DescribeRequest::default()).await;
+        assert!(described.is_ok(), "HTTP/2 after the preface is served: {described:?}");
+        assert_eq!(
+            seen.0.lock().expect("seen").as_slice(),
+            std::slice::from_ref(&expect),
+            "the preface on the request"
+        );
+    }
+}

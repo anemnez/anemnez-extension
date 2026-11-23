@@ -199,3 +199,8 @@ spoken_for("one-mapping-flattens-a-descriptor (map_entry)", "descriptor::tests::
 spoken_for("an-external-caller-is-parsed-here-and-trusted-only-from-its-peer", "mcp::tests::an_external_caller_is_parsed_here_and_trusted_only_from_its_peer")
 
 spoken_for("a-carried-call-reaches-reads-only", "plane_tests::a_carried_call_reaches_reads_only")
+spoken_for("a-carried-connection-says-its-preface-once", "serve_fn_tests::a_carried_connections_preface_rides_its_requests_and_http2_after_it_is_served")
+spoken_for("a-carried-connection-says-its-preface-once (only a carried peer)", "carried::tests::only_a_carried_peer_is_read")
+spoken_for("a-carried-connection-says-its-preface-once (older aegisd)", "carried::tests::http2_at_once_carries_no_preface_and_loses_no_byte")
+spoken_for("a-carried-connection-says-its-preface-once (bounded)", "carried::tests::silence_goes_on_bare_and_an_unfinished_preface_is_refused")
+spoken_for("a-carried-connection-says-its-preface-once (codec)", "carried::tests::each_field_that_wont_parse_is_refused_by_name")

@@ -16,6 +16,7 @@
 //! [`Clock`]: anemnez_clock::Clock
 
 pub mod accepted;
+pub mod carried;
 pub mod describe;
 pub mod digest;
 pub mod edge;

@@ -673,6 +673,19 @@ commit or ack through it would be a write (E m/23165), and a stamp a carried cal
 (`stamp-not-from-agora`). A descriptor the check doesn't admit reads as no reads. The rule lifts for a caller whose
 principal is bound through Aegis (I's binding), and never before.
 
+<!-- claim: a-carried-connection-says-its-preface-once -->
+**A carried connection says where it came from once, at accept** (K m/25625; M m/25661; D m/25623). aegisd writes
+one line before the product's HTTP/2, `anemnez-carried/1 <node> <base64 DER> <unique_id>:<boot>`, through the one
+codec in the kernel crate (`anemnez_extension::carried`). -serve's accept reads it only from a peer judged
+`Role::Carried`, one connection at a time off the accept loop and bounded (`carried::PREFACE_WITHIN` on the injected
+clock, at most `MAX_LINE` bytes), and hands it on as `Judged::carried` on every request of that connection. It is a
+claim, never a verdict: the SDK's carried verify judges it against the caller's token, and a call with no preface, or
+one the verify refuses, stays under `a-carried-call-reaches-reads-only`. Readers first: an aegisd older than the
+preface opens with HTTP/2, told apart on its first bytes, and is served as it came with no preface. A connection
+silent past the bound goes on bare. A preface that began and didn't finish (`preface-unanswered`), or that doesn't
+parse (`preface-version-unknown`, `preface-too-long`, `preface-malformed`), closes its connection, said in the
+product's log by name. Every other peer's bytes go straight to HTTP/2 and never meet the reader.
+
 <!-- claim: one-function-serves-the-api-plane -->
 **One function serves the API plane** (K, 2026-11-16; D m/15034, E m/15035). -serve's `serve(faces, product,
 token_checked, incoming, stop)` is the only server a product builds for it. It takes the contract's faces as one

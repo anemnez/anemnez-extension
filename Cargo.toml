@@ -6,7 +6,7 @@ members = ["crates/*"]
 edition = "2024"
 repository = "https://github.com/anemnez/anemnez-extension"
 license = "MIT OR Apache-2.0"
-version = "0.9.0"
+version = "0.9.2"
 # Released to Artichoke only for now (the User, 2026-11-05); crates.io comes when third-party
 # extensibility is advertised, and then Herald publishes each version to both, same bytes
 # (fabric CONVERGENCE.md §0 (7)).
@@ -21,7 +21,7 @@ serde_json = "1"
 
 # The serving face (crates/anemnez-extension-serve): the gRPC stack matches Substrate's and
 # anemnez-service's (tonic 0.12 / prost 0.13), so a product pulls in no second copy.
-anemnez-extension = { path = "crates/anemnez-extension", version = "0.9.0", registry-index = "sparse+http://127.0.0.1:7787/crates/index/" }
+anemnez-extension = { path = "crates/anemnez-extension", version = "0.9.2", registry-index = "sparse+http://127.0.0.1:7787/crates/index/" }
 # The one clock, in the dual form at the rev every git-built closure shares (D m/16149: one crate, one source,
 # one rev; M m/16161): 3ed93558f1b7, as the SDK and hydramq pin it, so cargo builds one copy. The version is loose
 # ("0.1") because the git tree says 0.1.0; Herald rewrites it to the release at that rev when it publishes.
@@ -38,6 +38,7 @@ prost = "0.13"
 prost-types = "0.13"
 tokio = { version = "1", features = ["sync", "macros"] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
+tracing = "0.1"
 sha2 = "0.10"
 # The request-digest layer below tonic's codec: the traits tonic 0.12's Server::layer takes.
 http = "1"

@@ -13,6 +13,7 @@ use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+use anemnez_extension::carried::Preface;
 use anemnez_extension::peer::{PID_WORD, PIDVERSION_WORD, Peer, Role};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
@@ -29,6 +30,10 @@ pub struct Judged {
     /// The whole audit token the accept read and judged, when the accepting side handed it in
     /// ([`Accepted::with_token`]). Read it with [`Judged::token`] or [`peer_token`].
     token: Option<PeerToken>,
+    /// What aegisd's preface said, for a [`Role::Carried`] peer that sent one (`anemnez_extension::carried`): the
+    /// node the call came from, the far caller's certificate and its holder, read once at accept. A claim, never a
+    /// verdict: the SDK's carried verify judges it. `None` for every other peer, and for an aegisd that sent none.
+    pub carried: Option<Preface>,
 }
 
 /// The whole audit token of a connection's peer, as its accept read it, once (the token, its code, the token
@@ -52,12 +57,15 @@ impl Judged {
 pub struct Accepted<IO> {
     io: IO,
     judged: Judged,
+    /// Bytes the accept read ahead of the connection's HTTP/2 (a carried peer's preface read, `crate::carried`),
+    /// handed back first, so HTTP/2 reads every byte its peer sent.
+    ahead: Vec<u8>,
 }
 
 impl<IO> Accepted<IO> {
     /// `io`, admitted as `role` after its `peer` was read at accept.
     pub fn new(io: IO, peer: Peer, role: Role) -> Self {
-        Accepted { io, judged: Judged { peer, role, token: None } }
+        Accepted { io, judged: Judged { peer, role, token: None, carried: None }, ahead: Vec::new() }
     }
 
     /// `io`, admitted as `role` after its `peer` was read at accept from the audit token `words`, which every
@@ -68,7 +76,7 @@ impl<IO> Accepted<IO> {
         let names_peer =
             words[PID_WORD].cast_signed() == peer.pid && words[PIDVERSION_WORD].cast_signed() == peer.pidversion;
         let token = names_peer.then_some(PeerToken(words));
-        Accepted { io, judged: Judged { peer, role, token } }
+        Accepted { io, judged: Judged { peer, role, token, carried: None }, ahead: Vec::new() }
     }
 
     /// What the accept judged.
@@ -76,9 +84,19 @@ impl<IO> Accepted<IO> {
         &self.judged
     }
 
+    /// Its IO and what the accept judged, apart, so the accept can read a carried peer's preface off the IO.
+    pub(crate) fn into_parts(self) -> (IO, Judged) {
+        (self.io, self.judged)
+    }
+
+    /// A connection from its IO, what was judged of it, and the bytes read `ahead` of its HTTP/2.
+    pub(crate) fn from_parts(io: IO, judged: Judged, ahead: Vec<u8>) -> Self {
+        Accepted { io, judged, ahead }
+    }
+
     /// The same connection, judged the same, its IO wrapped by `wrap` (the API plane's cut on a stop).
     pub(crate) fn map_io<J>(self, wrap: impl FnOnce(IO) -> J) -> Accepted<J> {
-        Accepted { io: wrap(self.io), judged: self.judged }
+        Accepted { io: wrap(self.io), judged: self.judged, ahead: self.ahead }
     }
 }
 
@@ -104,6 +122,12 @@ pub fn peer_token<T>(request: &tonic::Request<T>) -> Option<PeerToken> {
 
 impl<IO: AsyncRead + Unpin> AsyncRead for Accepted<IO> {
     fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
+        if !self.ahead.is_empty() {
+            let n = buf.remaining().min(self.ahead.len());
+            buf.put_slice(&self.ahead[..n]);
+            self.ahead.drain(..n);
+            return Poll::Ready(Ok(()));
+        }
         Pin::new(&mut self.io).poll_read(cx, buf)
     }
 }
