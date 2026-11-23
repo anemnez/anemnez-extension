@@ -23,7 +23,7 @@ async fn sent(bytes: &[u8]) -> (tokio::io::DuplexStream, tokio::io::DuplexStream
 
 #[tokio::test]
 async fn a_preface_is_read_and_the_bytes_after_it_are_kept() {
-    let mut bytes = encode(&preface());
+    let mut bytes = encode(&preface()).expect("encodes");
     bytes.extend_from_slice(H2);
     let (mut far, _near) = sent(&bytes).await;
     let manual = ManualClock::new();
@@ -83,7 +83,7 @@ async fn a_preface_that_wont_parse_is_refused_by_name() {
 #[tokio::test]
 async fn only_a_carried_peer_is_read() {
     use anemnez_extension::peer::{Code, Peer, Role};
-    let bytes = encode(&preface());
+    let bytes = encode(&preface()).expect("encodes");
     let (far, _near) = sent(&bytes).await;
     let peer = Peer::from_token(
         [501, 501, 20, 501, 20, 41, 100_001, 7],

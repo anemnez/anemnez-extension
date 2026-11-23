@@ -22,6 +22,12 @@ pub const VERSION: &str = "anemnez-carried/1";
 /// What every preface line opens with, of any version.
 pub const PREFIX: &[u8] = b"anemnez-carried/";
 
+/// The contract a product's manifest names when its serving face reads the preface (I m/25694, M m/25699): the SDK's
+/// manifest builder sets it for every product with an API plane, never by hand, and aegisd writes a preface only to a
+/// target whose discovered contracts name it at this version. A target that doesn't is sent none, and its carried
+/// calls stay unbound, as before.
+pub const CONTRACT: (&str, &str) = ("anemnez.carried-preface", "1");
+
 /// The longest preface line accepted, its newline included: a longer one is refused [`PrefaceRefusal::TooLong`].
 pub const MAX_LINE: usize = 8 * 1024;
 
@@ -105,12 +111,33 @@ pub fn opening(first: &[u8]) -> Opening {
     }
 }
 
-/// `preface` as its line, newline included.
-#[must_use]
-pub fn encode(preface: &Preface) -> Vec<u8> {
+/// `preface` as its line, newline included, refused at the writer by the same rules [`parse`] reads with, so no
+/// line aegisd writes is one the accept would refuse.
+///
+/// # Errors
+/// The [`PrefaceRefusal`] its field would meet at [`parse`], by name.
+pub fn encode(preface: &Preface) -> Result<Vec<u8>, PrefaceRefusal> {
+    if !word(&preface.node) {
+        return Err(PrefaceRefusal::Malformed("node"));
+    }
+    if preface.cert_der.is_empty() {
+        return Err(PrefaceRefusal::Malformed("cert"));
+    }
+    if !word(&preface.holder.boot) {
+        return Err(PrefaceRefusal::Malformed("holder"));
+    }
     let der = base64::engine::general_purpose::STANDARD.encode(&preface.cert_der);
     let Holder { unique_id, boot } = &preface.holder;
-    format!("{VERSION} {} {der} {unique_id}:{boot}\n", preface.node).into_bytes()
+    let line = format!("{VERSION} {} {der} {unique_id}:{boot}\n", preface.node).into_bytes();
+    if line.len() > MAX_LINE {
+        return Err(PrefaceRefusal::TooLong);
+    }
+    Ok(line)
+}
+
+/// A node or a boot: non-empty, printable ASCII, no space.
+fn word(s: &str) -> bool {
+    !s.is_empty() && s.bytes().all(|b| b.is_ascii_graphic())
 }
 
 /// The preface `line` says, its newline excluded.
@@ -135,7 +162,7 @@ pub fn parse(line: &[u8]) -> Result<Preface, PrefaceRefusal> {
     if version != VERSION {
         return Err(PrefaceRefusal::VersionUnknown);
     }
-    if node.is_empty() || !node.bytes().all(|b| b.is_ascii_graphic()) {
+    if !word(node) {
         return Err(PrefaceRefusal::Malformed("node"));
     }
     let cert_der =
@@ -145,7 +172,7 @@ pub fn parse(line: &[u8]) -> Result<Preface, PrefaceRefusal> {
     }
     let (unique_id, boot) = holder.split_once(':').ok_or(PrefaceRefusal::Malformed("holder"))?;
     let unique_id = unique_id.parse().map_err(|_| PrefaceRefusal::Malformed("holder"))?;
-    if boot.is_empty() || !boot.bytes().all(|b| b.is_ascii_graphic()) {
+    if !word(boot) {
         return Err(PrefaceRefusal::Malformed("holder"));
     }
     Ok(Preface { node: node.to_owned(), cert_der, holder: Holder { unique_id, boot: boot.to_owned() } })

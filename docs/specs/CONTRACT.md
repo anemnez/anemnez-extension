@@ -684,7 +684,11 @@ one the verify refuses, stays under `a-carried-call-reaches-reads-only`. Readers
 preface opens with HTTP/2, told apart on its first bytes, and is served as it came with no preface. A connection
 silent past the bound goes on bare. A preface that began and didn't finish (`preface-unanswered`), or that doesn't
 parse (`preface-version-unknown`, `preface-too-long`, `preface-malformed`), closes its connection, said in the
-product's log by name. Every other peer's bytes go straight to HTTP/2 and never meet the reader.
+product's log by name. Every other peer's bytes go straight to HTTP/2 and never meet the reader. The other way round, a new
+aegisd never writes to an older reader: a product whose serving face reads the preface says so in its manifest's
+contracts, `anemnez.carried-preface` at `1` (`carried::CONTRACT`, set by the SDK's manifest builder for every API
+plane, never by hand), and aegisd writes a preface only to a target whose discovered contracts name it (I m/25694,
+M m/25699). `carried::encode` refuses at the writer, by the same name, every field `parse` would refuse.
 
 <!-- claim: one-function-serves-the-api-plane -->
 **One function serves the API plane** (K, 2026-11-16; D m/15034, E m/15035). -serve's `serve(faces, product,

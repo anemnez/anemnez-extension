@@ -204,3 +204,4 @@ spoken_for("a-carried-connection-says-its-preface-once (only a carried peer)", "
 spoken_for("a-carried-connection-says-its-preface-once (older aegisd)", "carried::tests::http2_at_once_carries_no_preface_and_loses_no_byte")
 spoken_for("a-carried-connection-says-its-preface-once (bounded)", "carried::tests::silence_goes_on_bare_and_an_unfinished_preface_is_refused")
 spoken_for("a-carried-connection-says-its-preface-once (codec)", "carried::tests::each_field_that_wont_parse_is_refused_by_name")
+spoken_for("a-carried-connection-says-its-preface-once (the writer)", "carried::tests::encode_refuses_what_parse_would_by_the_same_name")

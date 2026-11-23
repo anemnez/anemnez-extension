@@ -11,7 +11,7 @@ fn preface() -> Preface {
 }
 
 fn line(p: &Preface) -> Vec<u8> {
-    let mut l = encode(p);
+    let mut l = encode(p).expect("encodes");
     assert_eq!(l.pop(), Some(b'\n'), "a line ends with its newline");
     l
 }
@@ -19,7 +19,7 @@ fn line(p: &Preface) -> Vec<u8> {
 #[test]
 fn a_preface_round_trips_through_its_one_line() {
     let p = preface();
-    let encoded = encode(&p);
+    let encoded = encode(&p).expect("encodes");
     assert!(encoded.starts_with(b"anemnez-carried/1 01a09e7e-"), "{}", String::from_utf8_lossy(&encoded));
     assert_eq!(encoded.iter().filter(|b| **b == b'\n').count(), 1, "one line");
     assert_eq!(parse(&line(&p)), Ok(p));
@@ -32,7 +32,7 @@ fn http2_is_never_a_preface_and_a_preface_is_told_by_its_opening() {
     assert_eq!(opening(b"P"), Opening::NotAPreface, "one byte that isn't the prefix's");
     assert_eq!(opening(b""), Opening::Undecided);
     assert_eq!(opening(b"anemnez-car"), Opening::Undecided);
-    assert_eq!(opening(&encode(&preface())), Opening::Preface);
+    assert_eq!(opening(&encode(&preface()).expect("encodes")), Opening::Preface);
     assert_eq!(opening(b"anemnez-carried/9 x"), Opening::Preface, "any version opens as one, then parse says");
 }
 
@@ -80,4 +80,35 @@ fn each_refusal_says_its_name_first() {
         let said = r.to_string();
         assert!(said.starts_with(&format!("{}: ", r.name())), "{said}");
     }
+}
+
+/// The writer refuses what the reader would (I m/25694): an empty node, a space or a control byte in node or boot,
+/// or an empty cert is refused at encode by the name parse gives the same field, so aegisd never writes a line the
+/// accept would close.
+#[test]
+fn encode_refuses_what_parse_would_by_the_same_name() {
+    let with = |f: &dyn Fn(&mut Preface)| {
+        let mut p = preface();
+        f(&mut p);
+        p
+    };
+    for (bad, field) in [
+        (with(&|p| p.node = String::new()), "node"),
+        (with(&|p| p.node = "two words".into()), "node"),
+        (with(&|p| p.node = "cr\r".into()), "node"),
+        (with(&|p| p.cert_der.clear()), "cert"),
+        (with(&|p| p.holder.boot = String::new()), "holder"),
+        (with(&|p| p.holder.boot = "a b".into()), "holder"),
+    ] {
+        assert_eq!(encode(&bad), Err(PrefaceRefusal::Malformed(field)), "{bad:?}");
+    }
+    let huge = with(&|p| p.cert_der = vec![7; MAX_LINE]);
+    assert_eq!(encode(&huge), Err(PrefaceRefusal::TooLong), "a line past MAX_LINE is never written");
+}
+
+/// The contract a reader declares, one constant for the SDK that sets it and aegisd that reads it.
+#[test]
+fn the_reader_declares_one_contract() {
+    assert_eq!(CONTRACT, ("anemnez.carried-preface", "1"));
+    assert!(VERSION.ends_with(&format!("/{}", CONTRACT.1)), "the declared version is the line's");
 }
