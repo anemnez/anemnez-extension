@@ -146,6 +146,7 @@ spoken_for("an-ask-is-bounded-in-the-call (wire parity)", "serve_tests::the_desc
 spoken_for("guidance-is-a-service-option", "descriptor::tests::guidance_is_read_with_its_summary_and_refused_past_its_bounds")
 spoken_for("guidance-is-a-service-option (instructions)", "mcp::tests::the_orient_tool_says_so_and_the_instructions_are_the_guidance")
 spoken_for("orient-is-one-bounded-read", "descriptor::tests::an_orient_is_one_unary_agent_read_with_no_input_and_a_bound")
+spoken_for("orient-is-one-bounded-read (wire parity)", "serve_tests::the_kernel_reads_an_orient_and_guidance_as_the_proto_writes_them")
 spoken_for("a-nonce-is-durable-before-the-method-runs (group commit)", "edge_tests::a_batch_is_one_sync")
 spoken_for("a-nonce-is-durable-before-the-method-runs (schema)", "edge_tests::a_newer_schema_is_refused_by_name_and_schema_1_opens_said_or_not")
 spoken_for("a-nonce-is-durable-before-the-method-runs (damage)", "edge_tests::a_bad_line_before_the_last_is_refused_by_name")
