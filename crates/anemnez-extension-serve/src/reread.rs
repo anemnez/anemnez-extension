@@ -17,7 +17,7 @@ use std::time::Duration;
 use anemnez_clock::{Clock, Condvar};
 use hydramq_events::{Event, Events, EventsError, Face, Position, Read};
 
-use crate::log_events::{Busy, Log};
+use crate::log_events::{Log, Unopened};
 
 /// A log's changes as its owner sees them: a generation it bumps on every write it learns of, waited on through the
 /// clock's own condvar, so a row drives it on a ManualClock.
@@ -94,6 +94,7 @@ pub struct ReRead {
     changes: Arc<Changes>,
     sourced: bool,
     busy: Mutex<Option<String>>,
+    unreadable: Mutex<Option<String>>,
 }
 
 impl ReRead {
@@ -106,13 +107,19 @@ impl ReRead {
             None => (Changes::new(clock), false),
         };
         let name = log.name().to_owned();
-        ReRead { log, name, open_within, changes, sourced, busy: Mutex::new(None) }
+        ReRead { log, name, open_within, changes, sourced, busy: Mutex::new(None), unreadable: Mutex::new(None) }
     }
 
     /// Why a read found the log's writer holding it, if one did.
     #[must_use]
     pub fn busy(&self) -> Option<String> {
         self.busy.lock().ok().and_then(|b| b.clone())
+    }
+
+    /// Why the log couldn't be read at all, if a read found it so: never retried (D m/32403).
+    #[must_use]
+    pub fn unreadable(&self) -> Option<String> {
+        self.unreadable.lock().ok().and_then(|u| u.clone())
     }
 
     /// Whether the log has a source of changes: without one, a wait wakes only at its bound.
@@ -124,13 +131,21 @@ impl ReRead {
     fn opened<T>(&self, read: impl FnOnce(&Events) -> Result<T, EventsError>) -> Result<T, EventsError> {
         let mut read = Some(read);
         let mut out = None;
-        let opened = self.log.with(self.open_within, &mut |events| {
+        let opened = self.log.open_with(self.open_within, &mut |events| {
             if let Some(read) = read.take() {
                 out = Some(read(events));
             }
         });
         match opened {
-            Err(Busy(why)) => {
+            Err(Unopened::Unreadable(why)) => {
+                tracing::warn!(log = %self.name, %why, "a log that can't be read: answered by name, never retried");
+                let said = format!("{}: {why}", anemnez_extension::refusal::EVENTS_LOG_UNREADABLE);
+                if let Ok(mut unreadable) = self.unreadable.lock() {
+                    *unreadable = Some(why);
+                }
+                Err(EventsError::Refused(hydramq_events::Refused::ByProducer { why: said }))
+            }
+            Err(Unopened::Busy(why)) => {
                 let said =
                     format!("{}: the log's writer holds it ({why})", anemnez_extension::refusal::EVENTS_CALL_BUSY);
                 if let Ok(mut busy) = self.busy.lock() {

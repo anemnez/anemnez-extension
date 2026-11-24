@@ -507,6 +507,41 @@ impl crate::log_events::Log for PerRead {
     }
 }
 
+/// A log that won't open at all (D m/32403): it says so through `open_with`.
+struct Damaged;
+
+impl crate::log_events::Log for Damaged {
+    fn name(&self) -> &str {
+        LOG
+    }
+
+    fn with(&self, _within: Duration, _read: &mut dyn FnMut(&Events)) -> Result<(), crate::log_events::Busy> {
+        unreachable!("the face reads through open_with")
+    }
+
+    fn open_with(&self, _within: Duration, _read: &mut dyn FnMut(&Events)) -> Result<(), crate::log_events::Unopened> {
+        Err(crate::log_events::Unopened::Unreadable("its index doesn't read: a record past its end".into()))
+    }
+}
+
+/// D m/32403: a log that can't be read is answered events-log-unreadable, FAILED_PRECONDITION, by name and with its
+/// reason: never events-call-busy, so a follower doesn't retry a broken log forever as if it were load.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_log_that_cannot_be_read_is_unreadable_by_name_never_busy() {
+    let f = fixture();
+    let verifier = crate::principal_tests::verifier(&f.manual, true);
+    let face = LogEvents::over(Arc::new(Damaged), verifier, Authorize::allow_all(), f.manual.clock());
+    let read =
+        tonic::Request::new(pb::CallRequest { request: read_request(&from_start(), 10, Duration::ZERO).unwrap() });
+    let refused = face.call(read).await.expect_err("it can't be read");
+    assert_eq!(refused.code(), tonic::Code::FailedPrecondition, "{}", refused.message());
+    assert!(
+        refused.message().starts_with("events-log-unreadable: its index doesn't read"),
+        "by name, with its reason: {}",
+        refused.message()
+    );
+}
+
 /// L m/30712: a log opened for each read serves Call through one open per call, handed what the call has left, and a
 /// log its writer holds is events-call-busy by name, nothing read; its Watch is served through the same re-read
 /// (m/31024), its first frame the log's event.

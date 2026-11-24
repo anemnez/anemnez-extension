@@ -167,3 +167,37 @@ fn a_followed_file_wakes_a_waiter_through_a_replace_and_after_it() {
     std::io::Write::write_all(&mut file, b"three").unwrap();
     assert!(changes.wait_past(seen, PARK, None), "the new file's write wakes: the watch followed it");
 }
+
+/// A log that won't open (D m/32403).
+struct Unreadable;
+
+impl Log for Unreadable {
+    fn name(&self) -> &str {
+        "audit"
+    }
+
+    fn with(&self, _within: Duration, _read: &mut dyn FnMut(&Events)) -> Result<(), Busy> {
+        unreachable!("ReRead reads through open_with")
+    }
+
+    fn open_with(&self, _within: Duration, _read: &mut dyn FnMut(&Events)) -> Result<(), crate::log_events::Unopened> {
+        Err(crate::log_events::Unopened::Unreadable("it won't open".into()))
+    }
+}
+
+/// D m/32403: a Watch's re-read of a log that can't be read is refused by name (Refused, which hydramq never retries),
+/// never Unclear-and-busy; the ReRead says it was unreadable and not busy.
+#[test]
+fn a_reread_of_an_unreadable_log_is_refused_by_name_not_busy() {
+    let manual = ManualClock::new();
+    let reread = ReRead::new(Arc::new(Unreadable), Duration::ZERO, &manual.clock());
+    let from = Position { log: "audit".into(), offset: 0 };
+    let got = reread.read(&from, 10).expect_err("it can't be read");
+    assert!(
+        matches!(&got, hydramq_events::EventsError::Refused(hydramq_events::Refused::ByProducer { why })
+            if why.starts_with("events-log-unreadable: it won't open")),
+        "{got:?}"
+    );
+    assert_eq!(reread.unreadable().as_deref(), Some("it won't open"));
+    assert_eq!(reread.busy(), None, "unreadable is never busy");
+}

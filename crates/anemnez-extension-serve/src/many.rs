@@ -40,6 +40,11 @@ impl Faced {
         self.rereads.iter().find_map(|r| r.busy())
     }
 
+    /// Why a read found a log it couldn't read at all, if one did.
+    pub fn unreadable(&self) -> Option<String> {
+        self.rereads.iter().find_map(|r| r.unreadable())
+    }
+
     /// Whether every log opened per read has a source of changes: without one, a wait wakes only at its bound.
     pub fn sourced(&self) -> bool {
         self.rereads.iter().all(|r| r.sourced())
