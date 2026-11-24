@@ -206,9 +206,42 @@ impl std::fmt::Debug for Authorize {
     }
 }
 
+/// Where [`LogEvents`] reads a product's log (L m/30712): held open for the server's whole life (`Arc<Events>`, every
+/// product's today), or opened for each read under its writer's lock, as horaid opens Horai's logs, whose writer is
+/// Horai's CLI and whose library is one process per log (horai HORAID.md §4).
+pub trait Log: Send + Sync + 'static {
+    /// Run `read` once with the log open, opening it within `within` when it isn't held.
+    ///
+    /// # Errors
+    /// [`Busy`] when the log couldn't be opened within `within`: its writer holds it.
+    fn with(&self, within: Duration, read: &mut dyn FnMut(&Events)) -> Result<(), Busy>;
+
+    /// The log, when it is held open: what a Watch streams from. A log opened for each read has none, so its Watch is
+    /// refused `events-call-unserved` until a Watch's re-read is served (ergon:K/log-events-seam, its second step).
+    fn held(&self) -> Option<Arc<Events>> {
+        None
+    }
+}
+
+/// A log that couldn't be opened within its bound, and why, as its [`Log`] says it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Busy(pub String);
+
+/// A log held open for the server's life: every read is at once, and its Watch streams from it.
+impl Log for Arc<Events> {
+    fn with(&self, _within: Duration, read: &mut dyn FnMut(&Events)) -> Result<(), Busy> {
+        read(self);
+        Ok(())
+    }
+
+    fn held(&self) -> Option<Arc<Events>> {
+        Some(Arc::clone(self))
+    }
+}
+
 /// A product's own log, served through the contract's `Events` face.
 pub struct LogEvents {
-    log: Arc<Events>,
+    log: Arc<dyn Log>,
     verifier: Verifier,
     authorize: Authorize,
     clock: Clock,
@@ -224,6 +257,12 @@ impl LogEvents {
     /// `log` served to callers `verifier` admits and `authorize` allows. `clock` should be the verifier's, so a
     /// stream's expiry is a deadline on it.
     pub fn new(log: Arc<Events>, verifier: Verifier, authorize: Authorize, clock: Clock) -> LogEvents {
+        LogEvents::over(Arc::new(log), verifier, authorize, clock)
+    }
+
+    /// As [`LogEvents::new`], reading the log through `log` (L m/30712): each Call opens it once, within what the
+    /// call has left, and one that can't be opened in time is `events-call-busy` by name.
+    pub fn over(log: Arc<dyn Log>, verifier: Verifier, authorize: Authorize, clock: Clock) -> LogEvents {
         LogEvents {
             log,
             verifier,
@@ -466,9 +505,16 @@ impl pb::events_server::Events for LogEvents {
             |a| a.expires,
         );
         let drain = request.extensions().get::<StreamEnd>().map(StreamEnd::ended);
+        // A log opened for each read has no Watch yet: said as a Journal says it, so the client reads watch-unserved.
+        let Some(log) = self.log.held() else {
+            return Err(tonic::Status::unimplemented(format!(
+                "{}: this product's log is opened for each read, so its Watch isn't served yet; read it with Events/Call",
+                refusal::EVENTS_CALL_UNSERVED
+            )));
+        };
         let bytes = request.into_inner().request;
         // Read the request before taking a thread for it.
-        wire::watch(&self.log, &bytes).map_err(|e| tonic::Status::invalid_argument(e.to_string()))?;
+        wire::watch(&log, &bytes).map_err(|e| tonic::Status::invalid_argument(e.to_string()))?;
         let slot = self.take_slot().ok_or_else(|| {
             tonic::Status::resource_exhausted(format!(
                 "{}: this product holds {} watches, the most it may; retry, or read with Events/Call",
@@ -478,12 +524,12 @@ impl pb::events_server::Events for LogEvents {
         })?;
         let (tx, frames) = tokio::sync::mpsc::channel(WATCH_BUFFER);
         let (said, stopper) = tokio::sync::oneshot::channel::<Stopper>();
-        let log = Arc::clone(&self.log);
+        let watched = Arc::clone(&log);
         std::thread::Builder::new()
             .name("events-watch".into())
             .spawn(move || {
                 let _slot = slot;
-                let Ok(watching) = wire::watch(&log, &bytes) else { return };
+                let Ok(watching) = wire::watch(&watched, &bytes) else { return };
                 if said.send(watching.stopper()).is_err() {
                     return;
                 }
@@ -501,7 +547,7 @@ impl pb::events_server::Events for LogEvents {
             driver: Driver::new(),
             frames,
             stopper,
-            log: Arc::clone(&self.log),
+            log,
             clock: self.clock.clone(),
             expires,
             until: admit.until,
@@ -539,14 +585,20 @@ impl pb::events_server::Events for LogEvents {
             ))
         })?;
         let (log, bytes) = (Arc::clone(&self.log), request.into_inner().request);
+        let within = CALL_WITHIN.min(self.left(deadline));
         let read = tokio::task::spawn_blocking(move || {
             // Held while the thread reads, so a read past its bound still counts until it ends.
             let _slot = slot;
-            wire::serve(&log, &bytes)
+            let mut served = None;
+            log.with(within, &mut |events| served = Some(wire::serve(events, &bytes))).map(|()| served)
         });
-        let within = CALL_WITHIN.min(self.left(deadline));
         match self.clock.timeout(within, read).await {
-            Ok(Ok(reply)) => Ok(tonic::Response::new(pb::CallReply { reply })),
+            Ok(Ok(Ok(Some(reply)))) => Ok(tonic::Response::new(pb::CallReply { reply })),
+            Ok(Ok(Ok(None))) => Err(tonic::Status::internal("the log was opened and its read never ran")),
+            Ok(Ok(Err(Busy(why)))) => Err(tonic::Status::resource_exhausted(format!(
+                "{}: the log's writer holds it ({why}); retry",
+                refusal::EVENTS_CALL_BUSY
+            ))),
             Ok(Err(e)) => Err(tonic::Status::internal(format!("the log's read ended: {e}"))),
             Err(_) => Err(tonic::Status::unavailable(format!(
                 "{}: the log's read didn't answer within {within:?}, what the call's {FACE_WITHIN:?} had left",

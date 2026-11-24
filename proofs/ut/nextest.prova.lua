@@ -234,3 +234,4 @@ spoken_for("a-products-http-routes-ride-the-plane (a carried peer never opens HT
 spoken_for("a-products-http-routes-ride-the-plane (expect-continue, a streamed upload)", "serve::http_routes_tests::an_expect_continue_upload_streams_to_the_handler")
 spoken_for("a-products-http-routes-ride-the-plane (length and chunked smuggle nothing)", "serve::http_routes_tests::a_request_with_both_length_and_chunked_smuggles_nothing")
 spoken_for("a-products-http-routes-ride-the-plane (the opening's HTTP/1 by name)", "opening::tests::an_http1_plane_opens_a_whole_request_head_and_refuses_the_rest_by_name")
+spoken_for("a-log-is-read-through-one-seam", "log_events_tests::a_log_opened_per_read_serves_call_once_per_call_and_says_busy")

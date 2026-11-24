@@ -155,6 +155,14 @@ didn't answer, `events-call-unanswered` for the read. A watch's open is authoriz
 a blocking thread until it ends, even past its bound, so a face holds at most `CALLS_MAX` reads (the product may set
 another), and the next call is refused `events-call-busy` at once (D m/20673).
 
+<!-- claim: a-log-is-read-through-one-seam -->
+**A log is read through one seam, held or opened per read** (L m/30712). `LogEvents::new` takes a log held open for
+the server's life; `LogEvents::over` takes any `Log`, whose `with(within, read)` opens it once for a read, within what
+the call has left, so a product whose log has another writer (horaid, over Horai's flock'd logs) serves the same face
+and never a private one (rule 2). A log its writer holds is `events-call-busy` by name, "the log's writer holds it",
+nothing read. A log opened per read has no Watch yet, and refuses it as a Journal does (`events-call-unserved`, which
+the client reads as `watch-unserved`), until a Watch's re-read is served.
+
 <!-- claim: a-log-watch-is-bounded-and-ends-stopped -->
 **A log watch is bounded, and its every end stops it.** Each watch is a thread of its own pushing into a bounded
 channel, so a consumer that holds its stream stalls only that stream and never the log's writer. A face holds at most
