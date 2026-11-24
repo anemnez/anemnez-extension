@@ -402,6 +402,10 @@ pub const EVENTS_METHOD: &str = "/anemnez.extension.v1.Events/Events";
 pub const CALL_METHOD: &str = "/anemnez.extension.v1.Events/Call";
 /// The method an `Events/Watch` token names.
 pub const WATCH_METHOD: &str = "/anemnez.extension.v1.Events/Watch";
+/// Every streaming method of the contract's own faces, named once (J m/30414, rule 2): what a drain must tell End,
+/// since a stream never finishes by itself. The SDK's drain layer takes this list, so a new streaming face is held
+/// through no window. A row holds it to the contract's protos.
+pub const STREAM_METHODS: &[&str] = &[EVENTS_METHOD, WATCH_METHOD];
 
 impl EventsService {
     /// The service, ready for `pb::events_server::EventsServer::new`. The verifier and the journal
@@ -462,3 +466,7 @@ impl pb::events_server::Events for EventsService {
         )))
     }
 }
+
+#[cfg(test)]
+#[path = "journal_streams_tests.rs"]
+mod streams_tests;
