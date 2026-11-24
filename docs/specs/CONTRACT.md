@@ -791,7 +791,18 @@ takes a line without it, written by an older aegisd, as unproven, never as any p
 m/32716, B m/32798): aegisd sends a preface at all to a target whose contract's MAJOR is the line's, as before, and
 sends the fifth part only to a target declaring `1.1.0` or later, by MINOR, since a 1.0 reader refuses a five-part
 line as `preface-malformed` (fields) and closes the connection. A product admits a carried `callers = PRODUCT` call only on a
-present, team-signed code identity (`product-caller-unproven` otherwise).
+present, team-signed code identity (`product-caller-unproven` otherwise). **A preface is constructed, never a
+literal** (D m/33174): `Preface` is `#[non_exhaustive]` from 0.10.0, built with `Preface::new(node, cert_der, holder)`
+and, when the near aegisd proved one, `.with_code(CodeIdentity)`, so a part a later contract adds breaks no caller (the
+`code` field broke the SDK's literal, E m/33164).
+
+<!-- claim: the-trust-anchor-takes-no-dependency -->
+**The house's trust anchor lives here and takes no dependency** (D m/32487, moved from the SDK by D m/33174).
+`anemnez-trust` holds `ANEMNEZ_TEAM`, the Apple team every Anemnez build is signed by, as its team identifier, and
+every check meaning "our team" (the carried product caller above, Herald's signing, fabricd's admission,
+anemnez-secret's trust table, anemnez-consent's floor) reads it from here by name, never a literal of its own. Its
+manifest has an empty `[dependencies]` and no other table of crates, so a pure kernel or a wasm build takes it freely
+(C m/32481). Its first release here is 0.10.0, above every 0.3.x the SDK released of it (E m/33177).
 
 <!-- claim: a-connection-opens-within-its-bound -->
 **A connection gives its whole opening within its bound, or it closes by name** (rule 4; M m/26881, K m/26883,

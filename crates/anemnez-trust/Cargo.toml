@@ -1,0 +1,16 @@
+[package]
+name = "anemnez-trust"
+description = "The house's trust anchor, its one home (rule 2; D m/32487): the Apple team every Anemnez build is signed by"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+# None, ever (C m/32481, D m/32487): a pure kernel, a wasm build or a crate of pure kernels takes the trust anchor and
+# nothing else. The row `the_trust_anchor_takes_no_dependency` reads this manifest and holds it.
+[dependencies]
+
+[lints.clippy]
+wildcard_enum_match_arm = "deny"
+unwrap_used = "deny"

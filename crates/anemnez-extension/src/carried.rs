@@ -60,8 +60,10 @@ pub struct CodeIdentity {
     pub identifier: String,
 }
 
-/// A carried connection's preface.
+/// A carried connection's preface. Constructed with [`Preface::new`], never a literal, so a part a later contract adds
+/// breaks no caller (D m/33174; the `code` field broke Horai's SDK bump, E m/33164).
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Preface {
     /// The node the call was carried from.
     pub node: String,
@@ -71,6 +73,22 @@ pub struct Preface {
     pub holder: Holder,
     /// Who signed that process, when the near aegisd says (contract 1.1). `None` is unproven, never any product.
     pub code: Option<CodeIdentity>,
+}
+
+impl Preface {
+    /// A preface of the node it was carried from, the far caller's certificate (DER) and the process holding its key;
+    /// its code identity unproven until [`Preface::with_code`] says it.
+    #[must_use]
+    pub fn new(node: impl Into<String>, cert_der: Vec<u8>, holder: Holder) -> Self {
+        Preface { node: node.into(), cert_der, holder, code: None }
+    }
+
+    /// The same preface, its caller's code identity said by the near aegisd (contract 1.1).
+    #[must_use]
+    pub fn with_code(mut self, code: CodeIdentity) -> Self {
+        self.code = Some(code);
+        self
+    }
 }
 
 /// Why a preface was refused, by name.
