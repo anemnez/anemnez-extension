@@ -62,6 +62,12 @@ service Fixture {
       result: { bound: 2 } effect: READ presence: MINIMAL permission: ALLOW callers: AGENT
     };
   }
+  rpc Orient(OrientRequest) returns (OrientReply) {
+    option (anemnez.extension.v1.anemnez_method) = {
+      description: "What matters to you now: the fixture's orient, one bounded read."
+      result: { bound: 1 } effect: READ presence: MINIMAL permission: ALLOW callers: AGENT orient: true
+    };
+  }
   // No anemnez options: not offered, so no bridge gives it a face ('not exposed').
   rpc Ping(PingRequest) returns (PingReply);
 }
@@ -99,6 +105,10 @@ message WaitRequest {
 }
 message WaitReply {
   uint64 waited_ms = 1;
+}
+message OrientRequest {}
+message OrientReply {
+  string now = 1;
 }
 message PingRequest {}
 message PingReply {}

@@ -32,12 +32,29 @@ fn the_fixture_carries_guidance_a_host_says_as_its_instructions() {
     assert!(service.guidance.contains("Recent is the newest five"), "{}", service.guidance);
 }
 
+/// The good fixture has an orient the descriptor checks admit (an agent read, no input, bound 1), so a host's orient
+/// fan-out is proven against a native face: flattened, it alone carries the orient mark (D m/33316).
+#[test]
+fn the_good_fixtures_orient_is_admitted_and_alone_marked() {
+    let methods = check_descriptor(Variant::Good.file_descriptor_set()).expect("admitted");
+    let service = service_of(Variant::Good.file_descriptor_set()).expect("declared");
+    let tools = anemnez_extension::mcp::flatten(&service, &methods).expect("flattened");
+    let marked: Vec<String> = tools
+        .iter()
+        .map(anemnez_extension::mcp::Tool::to_json)
+        .filter(|t| t["_meta"]["anemnez"]["orient"].as_bool() == Some(true))
+        .filter_map(|t| t["name"].as_str().map(str::to_owned))
+        .collect();
+    assert_eq!(marked.len(), 1, "{marked:?}");
+    assert!(marked[0].ends_with("orient"), "{marked:?}");
+}
+
 /// The good descriptor offers every method shape, and Ping, with no anemnez options, is not exposed.
 #[test]
 fn the_good_fixture_offers_every_method_shape() {
     let methods = check_descriptor(Variant::Good.file_descriptor_set()).expect("admitted");
     let paths: Vec<_> = methods.iter().map(|m| m.path.rsplit('/').next().unwrap_or_default()).collect();
-    assert_eq!(paths, ["Items", "Recent", "Get", "Hold", "Run", "Wait", "Snapshot"], "Ping is not exposed");
+    assert_eq!(paths, ["Items", "Recent", "Get", "Hold", "Run", "Wait", "Snapshot", "Orient"], "Ping is not exposed");
     let by = |name: &str| methods.iter().find(|m| m.path.ends_with(name)).expect(name);
     assert_eq!(by("Items").options.result, ResultShape::Cursor);
     assert_eq!(by("Items").options.route, Route::Any);
@@ -88,7 +105,7 @@ fn the_fixture_flattens_and_its_colliding_names_do_not() {
     let good =
         flatten(&service_of(fds).expect("declared"), &check_descriptor(fds).expect("admitted")).expect("flattens");
     let names: Vec<&str> = good.iter().map(|t| t.name.as_str()).collect();
-    assert_eq!(names, ["items", "recent", "get", "hold", "run", "wait", "snapshot", "events"]);
+    assert_eq!(names, ["items", "recent", "get", "hold", "run", "wait", "snapshot", "orient", "events"]);
     let long: Vec<&str> = good.iter().filter(|t| t.long).map(|t| t.name.as_str()).collect();
     assert_eq!(long, ["hold", "run"], "blocks and runs_to_completion are long; Wait owns its budget");
     let fds = Variant::CollidingNames.file_descriptor_set();
