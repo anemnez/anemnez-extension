@@ -35,7 +35,9 @@ pub use describe::Describe;
 pub use digest::{DigestLayer, RequestDigest};
 pub use edge::FileNonces;
 pub use health::Board;
-pub use journal::{EventsService, Journal, Refusal, STREAM_METHODS, StreamEnd, Subscription, origin_for};
+pub use journal::{
+    EventsService, Journal, Refusal, STREAM_METHODS, StreamEnd, Subscription, origin_for, until_drained,
+};
 pub use log_events::{Admit, Asked, Authorize, Busy, EventsFace, Log, LogEvents, Method, Revoke};
 pub use plane::{
     ApiPlaneLayer, Claimed, ClaimedMethods, ClaimedWrites, Reads, answer_refusal, api_admits, carried_admits,
