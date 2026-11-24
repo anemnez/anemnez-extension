@@ -215,6 +215,7 @@ spoken_for("a-carried-write-may-be-admitted-for-a-claimed-lane (layer)", "plane_
 spoken_for("a-carried-product-caller-is-proven-by-its-code", "plane_tests::a_carried_product_caller_is_admitted_only_when_proven_the_houses_and_listed")
 spoken_for("a-carried-product-caller-is-proven-by-its-code (descriptor)", "plane_tests::the_methods_products_call_are_read_from_the_descriptor")
 spoken_for("a-carried-product-caller-is-proven-by-its-code (layer)", "plane_tests::the_layer_admits_a_proven_product_and_hands_its_caller_to_the_service")
+spoken_for("a-carried-product-caller-is-proven-by-its-code (another descriptor, the unnamed said)", "plane_tests::another_descriptors_product_methods_merge_and_the_unnamed_are_said")
 spoken_for("a-carried-write-may-be-admitted-for-a-claimed-lane (reads)", "plane_tests::a_carried_read_with_a_stamp_is_admitted_as_a_read_and_its_stamp_unused")
 spoken_for("a-carried-write-may-be-admitted-for-a-claimed-lane (attribution)", "plane_tests::a_listed_carried_read_is_attributed_when_its_claim_holds_and_served_when_it_doesnt")
 spoken_for("a-carried-connection-says-its-preface-once", "serve_fn_tests::a_carried_connections_preface_rides_its_requests_and_http2_after_it_is_served")

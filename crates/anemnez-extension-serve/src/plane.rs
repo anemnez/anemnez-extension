@@ -138,6 +138,27 @@ impl ProductCallers {
     pub fn allowed(&self, path: &str) -> Option<&[String]> {
         self.allowed.get(path).map(Vec::as_slice)
     }
+
+    /// These methods with `other`'s beside them: a product's own descriptor's, and another's it serves (the SDK's
+    /// replica `Open`, A m/33037). A method both name keeps the later list.
+    #[must_use]
+    pub fn merge(self, other: ProductCallers) -> ProductCallers {
+        let mut methods = (*self.methods).clone();
+        methods.extend(other.methods.iter().cloned());
+        let mut allowed = (*self.allowed).clone();
+        allowed.extend(other.allowed.iter().map(|(k, v)| (k.clone(), v.clone())));
+        ProductCallers { methods: Arc::new(methods), allowed: Arc::new(allowed) }
+    }
+
+    /// The `callers = PRODUCT` methods no allow-list names, sorted: each refused at the call
+    /// (`product-callers-unnamed`), said once at build so the gap is seen before a caller meets it (D m/33036).
+    #[must_use]
+    pub fn unnamed(&self) -> Vec<&str> {
+        let mut unnamed: Vec<&str> =
+            self.methods.iter().filter(|m| !self.allowed.contains_key(*m)).map(String::as_str).collect();
+        unnamed.sort_unstable();
+        unnamed
+    }
 }
 
 /// A carried product caller, proven and allowed: the node aegisd said the call came from, and the code identity it

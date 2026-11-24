@@ -583,3 +583,21 @@ async fn the_layer_admits_a_proven_product_and_hands_its_caller_to_the_service()
     assert_eq!(said, None, "a direct call is the plane's ordinary path");
     assert_eq!(seen, Some(None), "with no ProductCaller: a direct caller's code is its own accept's, never a preface");
 }
+
+/// A m/33037: a method of another descriptor the product serves (the SDK's replica Open) is named beside the product's
+/// own, merged, so its allow-list is judged against the descriptor that declares it. D m/33036: the methods no list
+/// names are said, once, at build.
+#[test]
+fn another_descriptors_product_methods_merge_and_the_unnamed_are_said() {
+    use crate::plane::ProductCallers;
+    let land = land_descriptor_with(pb::Effect::Write);
+    let own = ProductCallers::of(b"\xff the product's own, with no PRODUCT method", &[]).expect("none");
+    assert!(ProductCallers::of(b"\xff", &[(LAND, &["ai.anemnez.stoad"])]).is_err(), "not in the product's own");
+    let sdk = ProductCallers::of(&land, &[(LAND, &["ai.anemnez.stoad"])]).expect("in the other descriptor");
+    let merged = own.merge(sdk);
+    assert!(merged.lists(LAND));
+    assert_eq!(merged.allowed(LAND), Some(&["ai.anemnez.stoad".to_owned()][..]));
+    assert!(merged.unnamed().is_empty(), "every method named");
+    let unnamed = ProductCallers::of(&land, &[]).expect("none named");
+    assert_eq!(unnamed.unnamed(), [LAND], "said at build");
+}

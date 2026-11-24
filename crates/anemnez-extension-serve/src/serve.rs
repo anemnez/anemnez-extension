@@ -81,7 +81,23 @@ impl ApiFaces {
     /// [`PRODUCT_CALLERS_NOT_A_PRODUCT_METHOD`](anemnez_extension::peer::PRODUCT_CALLERS_NOT_A_PRODUCT_METHOD) and the
     /// method, for one the descriptor doesn't say `callers = PRODUCT`, or that names no identifier.
     pub fn product_callers(self, allow: &[(&str, &[&str])]) -> Result<ApiFaces, (&'static str, String)> {
-        let products = crate::plane::ProductCallers::of(self.describe.descriptor(), allow)?;
+        let own = crate::plane::ProductCallers::of(self.describe.descriptor(), allow)?;
+        let products = self.products.clone().merge(own);
+        Ok(ApiFaces { products, ..self })
+    }
+
+    /// [`ApiFaces::product_callers`] for methods of another descriptor this product serves beside its own, such as the
+    /// SDK's replica `Open` (`anemnez.replica.v1.Replicate`, A m/33037): `descriptor` names them, `allow` their callers.
+    ///
+    /// # Errors
+    /// As [`ApiFaces::product_callers`], judged against `descriptor`.
+    pub fn product_callers_in(
+        self,
+        descriptor: &[u8],
+        allow: &[(&str, &[&str])],
+    ) -> Result<ApiFaces, (&'static str, String)> {
+        let theirs = crate::plane::ProductCallers::of(descriptor, allow)?;
+        let products = self.products.clone().merge(theirs);
         Ok(ApiFaces { products, ..self })
     }
 
@@ -332,7 +348,13 @@ where
         .layer(
             ApiPlaneLayer::new(crate::plane::Reads::of(faces.describe.descriptor()))
                 .claiming(faces.claimed)
-                .products(faces.products),
+                .products({
+                    // Said once, at build: a method products call that no allow-list names fails closed at the call.
+                    for method in faces.products.unnamed() {
+                        tracing::warn!(%method, "product-callers-unnamed: a carried call to it is refused until the product names who may call it");
+                    }
+                    faces.products
+                }),
         )
         .layer(digested)
         .add_routes(routes)

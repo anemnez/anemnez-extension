@@ -748,7 +748,10 @@ for its own further narrowing (for a replica stream, the assignment). An absent 
 one meaning whether the aegisd is older or its judge refused the caller, never admitted on silence; another team is
 `product-caller-untrusted`; an identifier not listed is `product-caller-not-allowed`; and a method its product named no
 callers for is `product-callers-unnamed`, failing closed. An allow entry for a method that isn't `callers = PRODUCT`,
-or naming no identifier, is refused when the faces are built (`product-callers-not-a-product-method`). A code identity never opens any other
+or naming no identifier, is refused when the faces are built (`product-callers-not-a-product-method`). A method of another
+descriptor the product serves, such as the SDK's replica `Open`, is named with `ApiFaces::product_callers_in`, judged
+against the descriptor that declares it (A m/33037). Each `callers = PRODUCT` method no list names is said once at build,
+a WARN by name, so the gap is seen before a caller meets it (D m/33036). A code identity never opens any other
 method: a carried write from an agent still needs its bound token (`carried-write-unbound`). A direct caller carries no
 `ProductCaller`: its code is the local accept's, never a preface it sent.
 
