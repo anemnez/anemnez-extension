@@ -382,6 +382,7 @@ async fn a_carried_connections_preface_rides_its_requests_and_http2_after_it_is_
         node: "node-far".into(),
         cert_der: vec![0x30, 0x01, 0x02],
         holder: Holder { unique_id: 7, boot: "1795300000.1".into() },
+        code: None,
     };
     for (sent, expect) in [(Some(encode(&preface).expect("encodes")), Some("node-far".to_owned())), (None, None)] {
         let manual = ManualClock::new();

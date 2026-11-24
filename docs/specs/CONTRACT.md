@@ -751,9 +751,14 @@ parse (`preface-version-unknown`, `preface-too-long`, `preface-malformed`), clos
 product's log by name. Every other peer's bytes must open with HTTP/2's client preface: a preface line from them closes
 `not-http2`. The other way round, a new
 aegisd never writes to an older reader: a product whose serving face reads the preface says so in its manifest's
-contracts, `anemnez_carried_preface` at `1.0.0` (`carried::CONTRACT`, spelled as any contract is: M m/26321, set by the SDK's manifest builder for every API
+contracts, `anemnez_carried_preface` at `1.1.0` (`carried::CONTRACT`, spelled as any contract is: M m/26321, set by the SDK's manifest builder for every API
 plane, never by hand), and aegisd writes a preface only to a target whose discovered contracts name it (I m/25694,
-M m/25699). `carried::encode` refuses at the writer, by the same name, every field `parse` would refuse.
+M m/25699). `carried::encode` refuses at the writer, by the same name, every field `parse` would refuse. **Since
+1.1 the line may carry a fifth part, the near caller's code identity** (`<team>:<identifier>`, `carried::CodeIdentity`;
+D m/32662, I m/32656): who signed the process the holder names, as the near aegisd judged it at accept. A reader
+takes a line without it, written by an older aegisd, as unproven, never as any product, and aegisd writes it only to a
+target at 1.1 or later, matched by MAJOR as before. A product admits a carried `callers = PRODUCT` call only on a
+present, team-signed code identity (`product-caller-unproven` otherwise).
 
 <!-- claim: a-connection-opens-within-its-bound -->
 **A connection gives its whole opening within its bound, or it closes by name** (rule 4; M m/26881, K m/26883,

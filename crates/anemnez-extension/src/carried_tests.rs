@@ -7,6 +7,7 @@ fn preface() -> Preface {
         node: "01a09e7e-a00d-7f52-8f09-b5e6bc6f288d".into(),
         cert_der: vec![0x30, 0x82, 0x01, 0x0a, 0xff],
         holder: Holder { unique_id: 4_242_424, boot: "1795300000.123456".into() },
+        code: None,
     }
 }
 
@@ -66,7 +67,8 @@ fn each_field_that_wont_parse_is_refused_by_name() {
         (with(3, "4242"), "holder"),
         (with(3, "x:1795300000"), "holder"),
         (with(3, "4242:"), "holder"),
-        (format!("{good} extra"), "fields"),
+        (format!("{good} extra"), "code"),
+        (format!("{good} P9DJA3JCKP:x extra"), "fields"),
         ("anemnez-carried/1 a b".to_owned(), "fields"),
     ] {
         assert_eq!(parse(bad.as_bytes()), Err(PrefaceRefusal::Malformed(field)), "{bad:?}");
@@ -109,10 +111,32 @@ fn encode_refuses_what_parse_would_by_the_same_name() {
 /// The contract a reader declares, one constant for the SDK that sets it and aegisd that reads it.
 #[test]
 fn the_reader_declares_one_contract() {
-    assert_eq!(CONTRACT, ("anemnez_carried_preface", "1.0.0"));
+    assert_eq!(CONTRACT, ("anemnez_carried_preface", "1.1.0"));
     let (name, version) = CONTRACT;
     assert!(name.bytes().all(|b| b.is_ascii_lowercase() || b == b'_'), "one Lua identifier: {name}");
     let parts: Vec<&str> = version.split('.').collect();
     assert_eq!(parts.len(), 3, "MAJOR.MINOR.PATCH: {version}");
     assert!(VERSION.ends_with(&format!("/{}", parts[0])), "the declared MAJOR is the line's version");
+}
+
+/// D m/32662, I m/32656, readers first: contract 1.1's fifth part, the near caller's code identity, round-trips; a 1.0
+/// line without it still reads, its code None (unproven, never any product); one that isn't `team:identifier` of plain
+/// words is refused by name, at the writer and the reader alike.
+#[test]
+fn a_callers_code_identity_rides_as_the_fifth_part_and_a_line_without_it_still_reads() {
+    let signed = Preface {
+        code: Some(CodeIdentity { team: "P9DJA3JCKP".into(), identifier: "ai.anemnez.stoad".into() }),
+        ..preface()
+    };
+    let l = line(&signed);
+    assert!(String::from_utf8_lossy(&l).ends_with(" P9DJA3JCKP:ai.anemnez.stoad"), "{}", String::from_utf8_lossy(&l));
+    assert_eq!(parse(&l), Ok(signed));
+    assert_eq!(parse(&line(&preface())).map(|p| p.code), Ok(None), "an older aegisd's line: unproven");
+    let base = String::from_utf8(line(&preface())).unwrap();
+    for bad in ["P9DJA3JCKP", ":ai.anemnez.stoad", "P9DJA3JCKP:", "P9DJ!:x", "P9DJA3JCKP:ai\"x"] {
+        assert_eq!(parse(format!("{base} {bad}").as_bytes()), Err(PrefaceRefusal::Malformed("code")), "{bad:?}");
+    }
+    assert!(parse(format!("{base} P9DJA3JCKP:a extra").as_bytes()).is_err(), "never a sixth part");
+    let bad = Preface { code: Some(CodeIdentity { team: "P9 DJ".into(), identifier: "x".into() }), ..preface() };
+    assert_eq!(encode(&bad), Err(PrefaceRefusal::Malformed("code")), "the writer refuses what the reader would");
 }

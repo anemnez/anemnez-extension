@@ -6,8 +6,13 @@
 //! accept reads with [`opening`] and [`parse`]. On the wire it is one line before the product's HTTP/2:
 //!
 //! ```text
-//! anemnez-carried/1 <node> <base64 DER> <unique_id>:<boot>\n
+//! anemnez-carried/1 <node> <base64 DER> <unique_id>:<boot>[ <team>:<identifier>]\n
 //! ```
+//!
+//! The fifth part, since contract 1.1 (D m/32662, I m/32656), is the near caller's code identity, its signature's
+//! team and signing identifier, as the near aegisd judged it at accept: who signed the process, beside which process
+//! it is. Readers first: this build reads a line with or without it, and aegisd writes it only to a target whose
+//! contract is 1.1 or later. A reader takes its absence as unproven, never as any product.
 //!
 //! Readers first: an aegisd older than the preface sends HTTP/2 at once (`PRI * HTTP/2.0`), which [`opening`] tells
 //! apart from a preface on its first bytes, so its connection carries no preface and loses nothing.
@@ -27,7 +32,8 @@ pub const PREFIX: &[u8] = b"anemnez-carried/";
 /// target whose discovered contracts name it at this version. A target that doesn't is sent none, and its carried
 /// calls stay unbound, as before.
 /// Spelled as any contract is (M m/26321): one Lua identifier, and MAJOR.MINOR.PATCH whose MAJOR is the line's version.
-pub const CONTRACT: (&str, &str) = ("anemnez_carried_preface", "1.0.0");
+/// 1.1 reads the optional code identity part.
+pub const CONTRACT: (&str, &str) = ("anemnez_carried_preface", "1.1.0");
 
 /// The longest preface line accepted, its newline included: a longer one is refused [`PrefaceRefusal::TooLong`].
 pub const MAX_LINE: usize = 8 * 1024;
@@ -42,6 +48,17 @@ pub struct Holder {
     pub boot: String,
 }
 
+/// Who signed the near caller's process, as the near aegisd judged it at accept (through anemnez-secret's identity):
+/// its signature's team identifier (the leaf's OU) and its signing identifier. Both plain: ASCII letters, digits, `.`,
+/// `-` and `_`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CodeIdentity {
+    /// The team identifier, `P9DJA3JCKP` for the house (anemnez-trust's `ANEMNEZ_TEAM`).
+    pub team: String,
+    /// The signing identifier, `ai.anemnez.stoad`.
+    pub identifier: String,
+}
+
 /// A carried connection's preface.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Preface {
@@ -51,6 +68,8 @@ pub struct Preface {
     pub cert_der: Vec<u8>,
     /// The process that holds its key.
     pub holder: Holder,
+    /// Who signed that process, when the near aegisd says (contract 1.1). `None` is unproven, never any product.
+    pub code: Option<CodeIdentity>,
 }
 
 /// Why a preface was refused, by name.
@@ -127,13 +146,24 @@ pub fn encode(preface: &Preface) -> Result<Vec<u8>, PrefaceRefusal> {
     if !word(&preface.holder.boot) {
         return Err(PrefaceRefusal::Malformed("holder"));
     }
+    if let Some(code) = &preface.code
+        && !(plain(&code.team) && plain(&code.identifier))
+    {
+        return Err(PrefaceRefusal::Malformed("code"));
+    }
     let der = base64::engine::general_purpose::STANDARD.encode(&preface.cert_der);
     let Holder { unique_id, boot } = &preface.holder;
-    let line = format!("{VERSION} {} {der} {unique_id}:{boot}\n", preface.node).into_bytes();
+    let code = preface.code.as_ref().map(|c| format!(" {}:{}", c.team, c.identifier)).unwrap_or_default();
+    let line = format!("{VERSION} {} {der} {unique_id}:{boot}{code}\n", preface.node).into_bytes();
     if line.len() > MAX_LINE {
         return Err(PrefaceRefusal::TooLong);
     }
     Ok(line)
+}
+
+/// A team or a signing identifier: non-empty, ASCII letters, digits, `.`, `-` and `_`.
+fn plain(s: &str) -> bool {
+    !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_'))
 }
 
 /// A node or a boot: non-empty, printable ASCII, no space.
@@ -151,8 +181,8 @@ pub fn parse(line: &[u8]) -> Result<Preface, PrefaceRefusal> {
     }
     let line = std::str::from_utf8(line).map_err(|_| PrefaceRefusal::Malformed("text"))?;
     let mut parts = line.split(' ');
-    let (Some(version), Some(node), Some(der), Some(holder), None) =
-        (parts.next(), parts.next(), parts.next(), parts.next(), parts.next())
+    let (Some(version), Some(node), Some(der), Some(holder), code, None) =
+        (parts.next(), parts.next(), parts.next(), parts.next(), parts.next(), parts.next())
     else {
         return Err(if line.starts_with(VERSION) {
             PrefaceRefusal::Malformed("fields")
@@ -176,7 +206,17 @@ pub fn parse(line: &[u8]) -> Result<Preface, PrefaceRefusal> {
     if !word(boot) {
         return Err(PrefaceRefusal::Malformed("holder"));
     }
-    Ok(Preface { node: node.to_owned(), cert_der, holder: Holder { unique_id, boot: boot.to_owned() } })
+    let code = match code {
+        None => None,
+        Some(part) => {
+            let (team, identifier) = part.split_once(':').ok_or(PrefaceRefusal::Malformed("code"))?;
+            if !(plain(team) && plain(identifier)) {
+                return Err(PrefaceRefusal::Malformed("code"));
+            }
+            Some(CodeIdentity { team: team.to_owned(), identifier: identifier.to_owned() })
+        }
+    };
+    Ok(Preface { node: node.to_owned(), cert_der, holder: Holder { unique_id, boot: boot.to_owned() }, code })
 }
 
 /// A line of the wrong shape: another version's when it opens as one, else this version's fields.
