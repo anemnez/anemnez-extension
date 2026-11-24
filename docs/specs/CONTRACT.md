@@ -163,6 +163,13 @@ re-tried at each `beat` while it's absent (an event, never a busy loop). It bump
 EVFILT_VNODE on macOS, watching every note the machine acts on. Elsewhere `follow-unsupported` is said by name, and a
 Watch wakes at its beat, as before.
 
+<!-- claim: an-unreadable-log-is-never-busy -->
+**A log that can't be read is never busy** (D m/32403). A `Log` says which way a read failed through `open_with`:
+`Busy`, its writer held it past the bound (`events-call-busy`, RESOURCE_EXHAUSTED, retry), or `Unreadable`, it won't
+open or read at all (`events-log-unreadable`, FAILED_PRECONDITION, with its reason). A Watch's re-read of one is
+`Refused` by that name, which hydramq never retries. So a damaged log is never taken for load and retried forever. A
+`Log` written before `open_with` keeps `with`'s meaning, every failure busy.
+
 <!-- claim: one-face-serves-several-logs-by-name -->
 **One face serves several logs, each by its name** (L m/32091, D m/32100). `LogEvents::over_many` takes a product's
 logs by name (Horai's streams, a book per owner, a channel each): a Call or Watch reads the log its request's
@@ -175,7 +182,8 @@ wire, never routed by a prefix's spelling. Two logs of one name, or an empty one
 the server's life; `LogEvents::over` takes any `Log`, whose `with(within, read)` opens it once for a read, within what
 the call has left, so a product whose log has another writer (horaid, over Horai's flock'd logs) serves the same face
 and never a private one (rule 2). A log its writer holds is `events-call-busy` by name, "the log's writer holds it",
-nothing read. A log opened per read has no Watch yet, and refuses it as a Journal does (`events-call-unserved`, which
+nothing read, and a caller retries it. A log that won't open or read at all is `events-log-unreadable`, never busy,
+and a retry won't read it either (an-unreadable-log-is-never-busy, above). A log opened per read has no Watch yet, and refuses it as a Journal does (`events-call-unserved`, which
 the client reads as `watch-unserved`), until a Watch's re-read is served. A log opened per read is served through `ReRead`, a hydramq-events `Face` over the seam, so Events/Call's
 long-poll and Events/Watch take the one wire path every log takes. Each read is one `with`; finding nothing past the
 cursor, the wait is outside the log's lock (its writer never waits on a caller's `within`, L m/31024), woken by the

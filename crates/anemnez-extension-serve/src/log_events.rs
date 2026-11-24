@@ -219,6 +219,17 @@ pub trait Log: Send + Sync + 'static {
     /// [`Busy`] when the log couldn't be opened within `within`: its writer holds it.
     fn with(&self, within: Duration, read: &mut dyn FnMut(&Events)) -> Result<(), Busy>;
 
+    /// As [`Log::with`], saying which way the log couldn't be read: [`Unopened::Busy`], its writer holds it (retry), or
+    /// [`Unopened::Unreadable`], it won't open or read at all (a retry won't either: D m/32403). The face reads through
+    /// this; a log that can be unreadable says so here. Its default is [`Log::with`], every failure busy, so a [`Log`]
+    /// written before it is unchanged (readers first).
+    ///
+    /// # Errors
+    /// [`Unopened`], by its kind.
+    fn open_with(&self, within: Duration, read: &mut dyn FnMut(&Events)) -> Result<(), Unopened> {
+        self.with(within, read).map_err(Unopened::from)
+    }
+
     /// The log, when it is held open: a Call reads it and a Watch streams from it as they always have. A log opened
     /// for each read has none, and is served through [`crate::reread::ReRead`] instead.
     fn held(&self) -> Option<Arc<Events>> {
@@ -236,6 +247,23 @@ pub trait Log: Send + Sync + 'static {
 /// A log that couldn't be opened within its bound, and why, as its [`Log`] says it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Busy(pub String);
+
+/// Why a [`Log`] couldn't be read, by kind (D m/32403): the face answers each by its own name, so a broken log is never
+/// taken for load. Non-exhaustive, so a third kind is a patch for every caller that matches it (M m/33274).
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Unopened {
+    /// Its writer held it past the bound: `events-call-busy`, retry.
+    Busy(String),
+    /// It won't open or read (a damaged log, a directory that can't be made): `events-log-unreadable`, never retried.
+    Unreadable(String),
+}
+
+impl From<Busy> for Unopened {
+    fn from(Busy(why): Busy) -> Unopened {
+        Unopened::Busy(why)
+    }
+}
 
 /// A log held open for the server's life: every read is at once, and its Watch streams from it.
 impl Log for Arc<Events> {
@@ -633,20 +661,25 @@ impl pb::events_server::Events for LogEvents {
             let _slot = slot;
             // A held log is read as it is; one opened for each read waits outside its lock, so its writer never waits
             // on a caller's within (L m/31024); several are routed by the request's log. A read that found a writer
-            // holding its log is busy, by name.
+            // holding its log is busy, and one that couldn't be read at all is unreadable, each by name.
             let faced = log.faced(within, &clock);
             let reply = wire::serve(&*faced.face, &bytes);
-            match faced.busy() {
-                Some(why) => Err(Busy(why)),
-                None => Ok(Some(reply)),
+            match (faced.unreadable(), faced.busy()) {
+                (Some(why), _) => Err(Unopened::Unreadable(why)),
+                (None, Some(why)) => Err(Unopened::Busy(why)),
+                (None, None) => Ok(Some(reply)),
             }
         });
         match self.clock.timeout(within, read).await {
             Ok(Ok(Ok(Some(reply)))) => Ok(tonic::Response::new(pb::CallReply { reply })),
             Ok(Ok(Ok(None))) => Err(tonic::Status::internal("the log was opened and its read never ran")),
-            Ok(Ok(Err(Busy(why)))) => Err(tonic::Status::resource_exhausted(format!(
+            Ok(Ok(Err(Unopened::Busy(why)))) => Err(tonic::Status::resource_exhausted(format!(
                 "{}: the log's writer holds it ({why}); retry",
                 refusal::EVENTS_CALL_BUSY
+            ))),
+            Ok(Ok(Err(Unopened::Unreadable(why)))) => Err(tonic::Status::failed_precondition(format!(
+                "{}: {why}; a retry won't read it",
+                refusal::EVENTS_LOG_UNREADABLE
             ))),
             Ok(Err(e)) => Err(tonic::Status::internal(format!("the log's read ended: {e}"))),
             Err(_) => Err(tonic::Status::unavailable(format!(

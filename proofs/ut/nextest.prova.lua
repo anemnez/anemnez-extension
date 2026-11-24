@@ -250,3 +250,5 @@ spoken_for("a-followed-log-wakes-its-watch-as-its-file-moves", "follow::tests::a
 spoken_for("a-followed-log-wakes-its-watch-as-its-file-moves (absent)", "follow::tests::a_delete_wakes_at_once_and_a_recreated_file_is_found_at_the_beat")
 spoken_for("a-followed-log-wakes-its-watch-as-its-file-moves (quiet)", "follow::tests::beats_and_stale_notes_wake_nobody")
 spoken_for("a-followed-log-wakes-its-watch-as-its-file-moves (host)", "reread::tests::a_followed_file_wakes_a_waiter_through_a_replace_and_after_it")
+spoken_for("an-unreadable-log-is-never-busy", "log_events_tests::a_log_that_cannot_be_read_is_unreadable_by_name_never_busy")
+spoken_for("an-unreadable-log-is-never-busy (watch)", "reread::tests::a_reread_of_an_unreadable_log_is_refused_by_name_not_busy")
