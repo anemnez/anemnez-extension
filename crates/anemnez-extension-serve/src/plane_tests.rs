@@ -148,6 +148,7 @@ fn carried(node: Option<&str>) -> Judged {
         node: node.into(),
         cert_der: vec![1, 2, 3],
         holder: Holder { unique_id: 7, boot: "1795300000.1".into() },
+        code: None,
     });
     judged
 }

@@ -10,7 +10,12 @@ use tokio::io::AsyncWriteExt as _;
 use super::*;
 
 fn preface() -> Preface {
-    Preface { node: "node-far".into(), cert_der: vec![1, 2, 3], holder: Holder { unique_id: 9, boot: "b1".into() } }
+    Preface {
+        node: "node-far".into(),
+        cert_der: vec![1, 2, 3],
+        holder: Holder { unique_id: 9, boot: "b1".into() },
+        code: None,
+    }
 }
 
 /// The far end of a duplex `bytes` were written into, and its near end, held open so the far reads no end.

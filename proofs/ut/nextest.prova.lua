@@ -220,6 +220,7 @@ spoken_for("a-carried-connection-says-its-preface-once (older aegisd)", "opening
 spoken_for("a-carried-connection-says-its-preface-once (bounded)", "opening::tests::a_carried_opening_that_doesnt_finish_closes_at_the_bound")
 spoken_for("a-carried-connection-says-its-preface-once (codec)", "carried::tests::each_field_that_wont_parse_is_refused_by_name")
 spoken_for("a-carried-connection-says-its-preface-once (the writer)", "carried::tests::encode_refuses_what_parse_would_by_the_same_name")
+spoken_for("a-carried-connection-says-its-preface-once (the caller's code identity, 1.1)", "carried::tests::a_callers_code_identity_rides_as_the_fifth_part_and_a_line_without_it_still_reads")
 spoken_for("a-connection-opens-within-its-bound", "opening::tests::silence_or_a_part_then_silence_closes_at_the_bound")
 spoken_for("a-connection-opens-within-its-bound (in time)", "opening::tests::a_full_http2_preface_in_time_is_handed_on_whole")
 spoken_for("a-connection-opens-within-its-bound (carried line, then HTTP/2)", "opening::tests::a_carried_line_then_the_http2_preface_is_read_whole")
