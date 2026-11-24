@@ -196,7 +196,7 @@ pub enum DescriptorRefusal {
     /// An `orient` method whose request has fields: it takes no argument, so it renders the same for the same
     /// caller and state.
     OrientTakesInput(String),
-    /// An `orient` method whose result isn't `bound` at [`crate::options::ORIENT_BOUND_MAX`] or fewer.
+    /// An `orient` method whose result isn't `bound: 1`: an orient answers one reply (K m/31487).
     OrientUnbounded(String),
     /// An `orient` method whose callers aren't `agent`: it orients an agent.
     OrientNotForAgents(String),
@@ -273,11 +273,7 @@ impl std::fmt::Display for DescriptorRefusal {
                 "{service}: guidance-summary-too-long: its first line is {chars} characters, past {}",
                 crate::options::GUIDANCE_SUMMARY_MAX_CHARS
             ),
-            Self::OrientUnbounded(p) => write!(
-                f,
-                "{p}: orient-unbounded: an orient's result is bound, at {} or fewer",
-                crate::options::ORIENT_BOUND_MAX
-            ),
+            Self::OrientUnbounded(p) => write!(f, "{p}: orient-unbounded: an orient answers one reply: bound 1"),
             Self::CallersMissing(p)
             | Self::PermissionMissing(p)
             | Self::PersonActAllowed(p)
@@ -469,7 +465,7 @@ fn check_method(
         if input.is_some_and(|i| !i.field.is_empty()) {
             refused.push(DescriptorRefusal::OrientTakesInput(p()));
         }
-        if result.is_some() && !matches!(result, Some(ResultShape::Bound(n)) if n <= crate::options::ORIENT_BOUND_MAX) {
+        if result.is_some() && result != Some(ResultShape::Bound(1)) {
             refused.push(DescriptorRefusal::OrientUnbounded(p()));
         }
         if callers.is_some_and(|c| c != crate::options::Callers::Agent) {
@@ -1110,7 +1106,7 @@ mod tests {
     fn orient() -> wire::MethodOptions {
         wire::MethodOptions {
             description: "What matters to you in Herald now: your trains and the approvals they wait on.".into(),
-            result: Some(wire::Result { shape: Some(wire::Shape::Bound(crate::options::ORIENT_BOUND_MAX)) }),
+            result: Some(wire::Result { shape: Some(wire::Shape::Bound(1)) }),
             effect: 1,
             orient: true,
             ..good()
@@ -1152,7 +1148,7 @@ mod tests {
     }
 
     /// orient-is-one-bounded-read: one orient is admitted and read as such; a second, a write, one taking input,
-    /// one unbounded or bound past 1,500, one for products, and one that streams are each refused by name.
+    /// one unbounded or bound to more than one reply, one for products, and one that streams are each refused by name.
     #[test]
     fn an_orient_is_one_unary_agent_read_with_no_input_and_a_bound() {
         let empty = ".herald.v2.OrientRequest";
@@ -1174,7 +1170,8 @@ mod tests {
         };
         assert_eq!(refused(wire::MethodOptions { effect: 2, ..orient() }, empty), ["orient-not-a-read"]);
         assert_eq!(refused(orient(), ".herald.v2.LandRequest"), ["orient-takes-input"]);
-        let past = Some(wire::Result { shape: Some(wire::Shape::Bound(crate::options::ORIENT_BOUND_MAX + 1)) });
+        // A count past one is many replies, never a longer text (K m/31487): 2 is refused as 1,500 always was.
+        let past = Some(wire::Result { shape: Some(wire::Shape::Bound(2)) });
         assert_eq!(refused(wire::MethodOptions { result: past, ..orient() }, empty), ["orient-unbounded"]);
         let one = Some(wire::Result { shape: Some(wire::Shape::One(wire::Empty {})) });
         assert_eq!(refused(wire::MethodOptions { result: one, ..orient() }, empty), ["orient-unbounded"]);

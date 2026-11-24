@@ -56,7 +56,7 @@ method's `description` is.
   read is the product's own `get`. It has `effect: read` and exposure `Agent`.
 - Its bounds are the contract's existing options (K), plus one cap of its own:
   - its result is `bound`, the count of replies, which is a count and never characters. One reply is
-    `bound: 1`. `check_descriptor` refuses an orient with no bound, or one past 1,500;
+    `bound: 1`. `check_descriptor` refuses an orient whose bound is other than 1, or absent (K m/31487);
   - its text, the reply itself, is at most 1,500 characters (`ORIENT_BOUND_MAX`), capped by the product,
     and a cut text says it was cut and where the rest is (AGENTIC_EXPERIENCE.md AX6; Ergon's orient, O);
   - its time is its `ask_within_secs`, the one number a fan-out's inner bound reads.

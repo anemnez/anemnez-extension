@@ -453,7 +453,7 @@ fn the_kernel_reads_an_orient_and_guidance_as_the_proto_writes_them() {
     }
     let orient = pb::MethodOptions {
         description: "What matters to you now.".into(),
-        result: Some(pb::Result { shape: Some(pb::result::Shape::Bound(1_500)) }),
+        result: Some(pb::Result { shape: Some(pb::result::Shape::Bound(1)) }),
         effect: pb::Effect::Read as i32,
         presence: pb::Presence::Full as i32,
         permission: pb::Permission::Allow as i32,

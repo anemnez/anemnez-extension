@@ -131,7 +131,12 @@ pub struct ServiceOptions {
 pub const GUIDANCE_MAX_CHARS: usize = 1_200;
 /// The most characters guidance's first line, its summary, may hold (`guidance-summary-too-long`).
 pub const GUIDANCE_SUMMARY_MAX_CHARS: usize = 160;
-/// The largest `result: Bound` an `orient` method may state (`orient-unbounded`).
+/// The most characters an orient's reply text may hold: the product's own cap, cut with a pointer to the rest
+/// (ORIENTATION.md §2, AGENTIC_EXPERIENCE.md AX6). Its `result` is a count, `bound: 1`, one reply (K m/31487).
+pub const ORIENT_TEXT_MAX: usize = 1_500;
+
+/// Read as a reply count, it was never one: an orient states `bound: 1` ([`ORIENT_TEXT_MAX`] is its text's cap).
+#[deprecated(note = "an orient's result is bound: 1; its text's cap is ORIENT_TEXT_MAX")]
 pub const ORIENT_BOUND_MAX: u32 = 1_500;
 
 impl ServiceOptions {

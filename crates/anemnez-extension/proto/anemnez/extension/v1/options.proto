@@ -41,7 +41,7 @@ message MethodOptions {
   optional uint32 ask_within_secs = 14;
   // This method is the product's orient: what matters to the calling agent now, as counts and pointers, never
   // history (ORIENTATION.md #orient-is-one-bounded-read). At most one per descriptor; a unary agent read that
-  // takes no argument, its result bounded at 1,500 or fewer; refused otherwise, each by name (orient-twice,
+  // takes no argument, its result bound 1 (one reply; its text's cap is the product's, 1,500 characters); refused otherwise, each by name (orient-twice,
   // orient-not-a-read, orient-takes-input, orient-unbounded, orient-not-for-agents, orient-streams).
   bool orient = 15;
 }

@@ -300,7 +300,7 @@ fn an_external_caller_is_parsed_here_and_trusted_only_from_its_peer() {
 fn the_orient_tool_says_so_and_the_instructions_are_the_guidance() {
     let mut now = MethodOptions::new(
         "What matters to you now.",
-        ResultShape::Bound(1_500),
+        ResultShape::Bound(1),
         Effect::Read,
         Presence::Full,
         Permission::Allow,
