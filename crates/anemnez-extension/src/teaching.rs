@@ -218,11 +218,19 @@ pub fn status_details(code: i32, message: &str, teaching: &Teaching) -> Vec<u8> 
     .encode_to_vec()
 }
 
-/// The teaching a Status's details carry, read back. Details that aren't a `google.rpc.Status`, or carry no
-/// [`TEACHING_TYPE_URL`], are [`InDetails::None`]; a teaching that doesn't decode is [`InDetails::Unreadable`].
+/// The teaching a Status's details carry, read back. No details, or a `google.rpc.Status` carrying no
+/// [`TEACHING_TYPE_URL`], is [`InDetails::None`] (an older product). Details that don't decode as a Status, or a
+/// teaching that doesn't, are [`InDetails::Unreadable`]: a broken or foreign sender is said as one, never read as an
+/// old one (E m/30763).
 #[must_use]
 pub fn teaching_in(details: &[u8]) -> InDetails {
-    let Ok(status) = wire::RpcStatus::decode(details) else { return InDetails::None };
+    if details.is_empty() {
+        return InDetails::None;
+    }
+    let status = match wire::RpcStatus::decode(details) {
+        Ok(status) => status,
+        Err(e) => return InDetails::Unreadable(format!("status-details-malformed: {e}")),
+    };
     match status.details.into_iter().find(|any| any.type_url == TEACHING_TYPE_URL) {
         None => InDetails::None,
         Some(any) => match Teaching::decode(&any.value) {
