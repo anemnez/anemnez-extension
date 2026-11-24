@@ -41,6 +41,9 @@ pub const PRODUCT_CALLERS_UNNAMED: &str = "product-callers-unnamed";
 pub const PRODUCT_CALLER_NOT_ALLOWED: &str = "product-caller-not-allowed";
 /// An allow-list entry for a method whose descriptor doesn't say `callers = PRODUCT`, or that names no identifier.
 pub const PRODUCT_CALLERS_NOT_A_PRODUCT_METHOD: &str = "product-callers-not-a-product-method";
+/// A `callers = PRODUCT` method given two allow-lists, from two places (D m/33063): refused when the faces are built,
+/// never one silently over the other.
+pub const PRODUCT_CALLERS_TWICE: &str = "product-callers-twice";
 /// A carried call to a write its product lists for claimed lanes (D m/28960), from an aegisd that said no preface: the
 /// node it came from is unknown, so its claim names no carrier, and it is refused.
 pub const CARRIED_NO_PREFACE: &str = "carried-no-preface";

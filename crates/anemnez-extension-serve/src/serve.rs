@@ -82,7 +82,7 @@ impl ApiFaces {
     /// method, for one the descriptor doesn't say `callers = PRODUCT`, or that names no identifier.
     pub fn product_callers(self, allow: &[(&str, &[&str])]) -> Result<ApiFaces, (&'static str, String)> {
         let own = crate::plane::ProductCallers::of(self.describe.descriptor(), allow)?;
-        let products = self.products.clone().merge(own);
+        let products = self.products.clone().merge(own)?;
         Ok(ApiFaces { products, ..self })
     }
 
@@ -97,7 +97,7 @@ impl ApiFaces {
         allow: &[(&str, &[&str])],
     ) -> Result<ApiFaces, (&'static str, String)> {
         let theirs = crate::plane::ProductCallers::of(descriptor, allow)?;
-        let products = self.products.clone().merge(theirs);
+        let products = self.products.clone().merge(theirs)?;
         Ok(ApiFaces { products, ..self })
     }
 

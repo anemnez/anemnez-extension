@@ -466,6 +466,7 @@ fn every_name_the_plane_refuses_with_is_on_its_one_list() {
         ("PRODUCT_CALLERS_UNNAMED", anemnez_extension::peer::PRODUCT_CALLERS_UNNAMED),
         ("PRODUCT_CALLER_NOT_ALLOWED", anemnez_extension::peer::PRODUCT_CALLER_NOT_ALLOWED),
         ("PRODUCT_CALLERS_NOT_A_PRODUCT_METHOD", anemnez_extension::peer::PRODUCT_CALLERS_NOT_A_PRODUCT_METHOD),
+        ("PRODUCT_CALLERS_TWICE", anemnez_extension::peer::PRODUCT_CALLERS_TWICE),
     ];
     assert!(found.len() >= 6, "the census reads the plane's refusals: {found:?}");
     for name in &found {
@@ -594,7 +595,17 @@ fn another_descriptors_product_methods_merge_and_the_unnamed_are_said() {
     let own = ProductCallers::of(b"\xff the product's own, with no PRODUCT method", &[]).expect("none");
     assert!(ProductCallers::of(b"\xff", &[(LAND, &["ai.anemnez.stoad"])]).is_err(), "not in the product's own");
     let sdk = ProductCallers::of(&land, &[(LAND, &["ai.anemnez.stoad"])]).expect("in the other descriptor");
-    let merged = own.merge(sdk);
+    let merged = own.clone().merge(sdk.clone()).expect("one list each");
+    // A m/33065: either order gives the same set, so no call order can drop a list.
+    let reversed = sdk.clone().merge(own).expect("one list each");
+    assert_eq!((reversed.lists(LAND), reversed.allowed(LAND)), (merged.lists(LAND), merged.allowed(LAND)));
+    // D m/33063: one method, two lists, is two places deciding: refused by name, never the later one silently.
+    let twice = merged.clone().merge(sdk);
+    assert_eq!(
+        twice.map(|_| ()),
+        Err((anemnez_extension::peer::PRODUCT_CALLERS_TWICE, LAND.to_owned())),
+        "refused, never overwritten"
+    );
     assert!(merged.lists(LAND));
     assert_eq!(merged.allowed(LAND), Some(&["ai.anemnez.stoad".to_owned()][..]));
     assert!(merged.unnamed().is_empty(), "every method named");

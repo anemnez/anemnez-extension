@@ -38,8 +38,8 @@ use anemnez_extension::options::Effect;
 use anemnez_extension::peer::{
     CARRIED_CLAIM_NOT_A_LANE, CARRIED_NO_PREFACE, CARRIED_WRITE_UNBOUND, CLAIMED_METHOD_NOT_A_READ_OR_WRITE,
     CLAIMED_WRITE_NOT_A_WRITE, FABRICD_READS_DESCRIBE_ONLY, NOT_JUDGED, PRODUCT_CALLER_NOT_ALLOWED,
-    PRODUCT_CALLER_UNPROVEN, PRODUCT_CALLER_UNTRUSTED, PRODUCT_CALLERS_NOT_A_PRODUCT_METHOD, PRODUCT_CALLERS_UNNAMED,
-    Role, STAMP_NOT_FROM_AGORA,
+    PRODUCT_CALLER_UNPROVEN, PRODUCT_CALLER_UNTRUSTED, PRODUCT_CALLERS_NOT_A_PRODUCT_METHOD, PRODUCT_CALLERS_TWICE,
+    PRODUCT_CALLERS_UNNAMED, Role, STAMP_NOT_FROM_AGORA,
 };
 use anemnez_extension::teaching::{RetryClass, Teaching, Whose, status_details};
 use tonic::body::BoxBody;
@@ -140,14 +140,21 @@ impl ProductCallers {
     }
 
     /// These methods with `other`'s beside them: a product's own descriptor's, and another's it serves (the SDK's
-    /// replica `Open`, A m/33037). A method both name keeps the later list.
-    #[must_use]
-    pub fn merge(self, other: ProductCallers) -> ProductCallers {
+    /// replica `Open`, A m/33037), the same set in either order.
+    ///
+    /// # Errors
+    /// [`PRODUCT_CALLERS_TWICE`] and the method, for one both give an allow-list: two places deciding who may call it,
+    /// never one silently over the other (D m/33063).
+    pub fn merge(self, other: ProductCallers) -> Result<ProductCallers, (&'static str, String)> {
         let mut methods = (*self.methods).clone();
         methods.extend(other.methods.iter().cloned());
         let mut allowed = (*self.allowed).clone();
-        allowed.extend(other.allowed.iter().map(|(k, v)| (k.clone(), v.clone())));
-        ProductCallers { methods: Arc::new(methods), allowed: Arc::new(allowed) }
+        for (method, list) in other.allowed.iter() {
+            if allowed.insert(method.clone(), list.clone()).is_some() {
+                return Err((PRODUCT_CALLERS_TWICE, method.clone()));
+            }
+        }
+        Ok(ProductCallers { methods: Arc::new(methods), allowed: Arc::new(allowed) })
     }
 
     /// The `callers = PRODUCT` methods no allow-list names, sorted: each refused at the call
@@ -369,6 +376,7 @@ pub fn said(name: &'static str) -> String {
         PRODUCT_CALLER_UNTRUSTED => "a carried product caller must be signed by the house's team",
         PRODUCT_CALLERS_UNNAMED => "a method products call admits a carried caller only once its product names who may",
         PRODUCT_CALLER_NOT_ALLOWED => "a carried product caller must be one the method's product names as its caller",
+        PRODUCT_CALLERS_TWICE => "a method products call takes one list of its callers, from one place",
         PRODUCT_CALLERS_NOT_A_PRODUCT_METHOD => {
             "only a method the descriptor says products call may list its callers, and it must name at least one"
         }
@@ -392,7 +400,7 @@ pub fn said_on(name: &'static str, path: &str) -> String {
 
 /// Every name the API plane refuses with, at a call or when the plane is built: the one list [`said`] and [`taught`]
 /// answer for, held by a row that reads this file's own refusals, so a new name can't go untaught (D m/30986).
-pub const PLANE_REFUSALS: [&str; 13] = [
+pub const PLANE_REFUSALS: [&str; 14] = [
     NOT_JUDGED,
     FABRICD_READS_DESCRIBE_ONLY,
     STAMP_NOT_FROM_AGORA,
@@ -406,6 +414,7 @@ pub const PLANE_REFUSALS: [&str; 13] = [
     PRODUCT_CALLERS_UNNAMED,
     PRODUCT_CALLER_NOT_ALLOWED,
     PRODUCT_CALLERS_NOT_A_PRODUCT_METHOD,
+    PRODUCT_CALLERS_TWICE,
 ];
 
 /// A plane refusal of a call to `path` as a teaching (house rule 15, AX3): its name as the code, what `said_on` says
