@@ -12,6 +12,7 @@ service Fixture {
     version: "1.0.0"
     cursor_scope: INSTANCE
     events_kept: 64
+    guidance: "The fixture product: one of each method shape the contract describes.\nItems pages through everything; Recent is the newest five; Get reads one by id."
   };
 
   rpc Items(ItemsRequest) returns (ItemsReply) {
