@@ -307,10 +307,18 @@ async fn a_late_authorization_leaves_the_read_only_what_remains() {
     let (f, log_clock) = held_fixture();
     let late = Duration::from_secs(40);
     let clock = f.manual.clock();
+    // The authorizer says when its sleep has returned, so the one waiter counted after it can only be the read (E
+    // m/31181): counted straight after the advance, the authorizer's own timer could still be the waiter, and the read
+    // would park after the next advance with its deadline past it, never to end.
+    let (slept_tx, slept) = tokio::sync::oneshot::channel::<()>();
+    let slept_tx = Arc::new(std::sync::Mutex::new(Some(slept_tx)));
     let face = Arc::new(f.face(Authorize::new(move |_| {
-        let clock = clock.clone();
+        let (clock, slept_tx) = (clock.clone(), Arc::clone(&slept_tx));
         async move {
             clock.sleep(late).await;
+            if let Some(tx) = slept_tx.lock().expect("unpoisoned").take() {
+                let _ = tx.send(());
+            }
             Ok(())
         }
     })));
@@ -318,8 +326,9 @@ async fn a_late_authorization_leaves_the_read_only_what_remains() {
     let mut call = tokio::spawn(async move { calling.call(held_read()).await });
     let authorizing = f.manual.until_waiting(1, PARK).await;
     f.manual.advance(late).await;
+    let woke = anemnez_clock::Clock::system().timeout(PARK, slept).await.is_ok();
     // The read now waits on its bound: what the deadline has left, never CALL_WITHIN whole.
-    let reading = f.manual.until_waiting(1, PARK).await;
+    let reading = woke && f.manual.until_waiting(1, PARK).await;
     let left = FACE_WITHIN - late;
     f.manual.advance(left - Duration::from_millis(1)).await;
     let early = call.is_finished();
@@ -330,7 +339,10 @@ async fn a_late_authorization_leaves_the_read_only_what_remains() {
     log_clock.advance(Duration::from_secs(30)).await;
     assert!(authorizing && reading, "the authorization, then the read, waited on the face's clock");
     assert!(!early, "the read still had a millisecond");
-    let refused = ended.expect("the call ends at the deadline").expect("joins").expect_err("refused");
+    let refused = ended
+        .expect("the row's hang guard: the manual clock never reached the read's deadline")
+        .expect("joins")
+        .expect_err("refused");
     assert_eq!(refused.code(), tonic::Code::Unavailable);
     assert!(refused.message().starts_with("events-call-unanswered: "), "the read is named: {}", refused.message());
     assert!(late + left < crate::log_events::CALLER_WITHIN, "the face ends inside the caller's minute");
