@@ -193,6 +193,45 @@ impl Teaching {
     }
 }
 
+/// What a Status's details say of its teaching, as a reader finds them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InDetails {
+    /// No teaching rides the Status: an older product, or a refusal that carries none.
+    None,
+    /// The teaching.
+    Taught(Teaching),
+    /// A teaching rides it that this build can't read, and why. It is set aside and said once, never failing the call:
+    /// the Status's own code and its house-form message still stand (readers first, D m/30464).
+    Unreadable(String),
+}
+
+/// A gRPC Status's details (`grpc-status-details-bin`, an encoded `google.rpc.Status`) carrying `teaching` as its one
+/// detail, under [`TEACHING_TYPE_URL`], beside the call's `code` and its house-form `message`. What a face hands
+/// `tonic::Status::with_details`.
+#[must_use]
+pub fn status_details(code: i32, message: &str, teaching: &Teaching) -> Vec<u8> {
+    wire::RpcStatus {
+        code,
+        message: message.to_owned(),
+        details: vec![prost_types::Any { type_url: TEACHING_TYPE_URL.to_owned(), value: teaching.encode() }],
+    }
+    .encode_to_vec()
+}
+
+/// The teaching a Status's details carry, read back. Details that aren't a `google.rpc.Status`, or carry no
+/// [`TEACHING_TYPE_URL`], are [`InDetails::None`]; a teaching that doesn't decode is [`InDetails::Unreadable`].
+#[must_use]
+pub fn teaching_in(details: &[u8]) -> InDetails {
+    let Ok(status) = wire::RpcStatus::decode(details) else { return InDetails::None };
+    match status.details.into_iter().find(|any| any.type_url == TEACHING_TYPE_URL) {
+        None => InDetails::None,
+        Some(any) => match Teaching::decode(&any.value) {
+            Ok(teaching) => InDetails::Taught(teaching),
+            Err(why) => InDetails::Unreadable(why),
+        },
+    }
+}
+
 /// One machine's closed vocabulary of informs: `as_str` is the stable `<namespace>.<teaching>` name a reader
 /// matches on. Each machine keeps its kinds as one enum beside the machine, walked by its own completeness test.
 pub trait InformKind: Copy {
@@ -426,6 +465,17 @@ mod wire {
     pub struct Informs {
         #[prost(message, repeated, tag = "1")]
         pub informs: Vec<Inform>,
+    }
+
+    /// `google.rpc.Status`, the shape gRPC's status details carry (grpc-status-details-bin).
+    #[derive(Clone, PartialEq, prost::Message)]
+    pub struct RpcStatus {
+        #[prost(int32, tag = "1")]
+        pub code: i32,
+        #[prost(string, tag = "2")]
+        pub message: String,
+        #[prost(message, repeated, tag = "3")]
+        pub details: Vec<prost_types::Any>,
     }
 }
 

@@ -116,3 +116,41 @@ fn informs_round_trip_through_their_metadata_value() {
     assert_eq!(decode_informs(&encode_informs(&[])), Ok(Vec::new()));
     assert!(decode_informs(b"\xff\xff").is_err_and(|e| e.starts_with("informs-malformed")));
 }
+
+/// D m/30464: a teaching rides a Status's details as its one google.rpc.Status detail, and reads back; details with no
+/// teaching are None; a teaching this build can't read is Unreadable, said, never failing the call, whose code and
+/// message stand on their own.
+#[test]
+fn a_teaching_rides_a_status_and_one_that_cant_be_read_is_set_aside() {
+    let refused = Teaching::refused(
+        "carried-write-unbound",
+        "a carried call reaches reads only",
+        RetryClass::Blanket,
+        Whose::Caller,
+    );
+    let details = status_details(7, &refused.message(), &refused);
+    assert_eq!(teaching_in(&details), InDetails::Taught(refused.clone()));
+    let status = wire::RpcStatus::decode(details.as_slice()).unwrap();
+    assert_eq!((status.code, status.message.as_str()), (7, "carried-write-unbound: a carried call reaches reads only"));
+
+    let other = wire::RpcStatus {
+        code: 7,
+        message: "m".into(),
+        details: vec![prost_types::Any { type_url: "type.googleapis.com/google.rpc.ErrorInfo".into(), value: vec![] }],
+    };
+    assert_eq!(teaching_in(&other.encode_to_vec()), InDetails::None, "another detail is no teaching");
+    assert_eq!(teaching_in(b""), InDetails::None, "no details at all");
+    assert_eq!(teaching_in(b"\xff\xff\xff"), InDetails::None, "details that aren't a Status");
+
+    let newer = wire::RpcStatus {
+        code: 7,
+        message: "m".into(),
+        details: vec![prost_types::Any {
+            type_url: TEACHING_TYPE_URL.into(),
+            value: wire::Teaching { code: "x".into(), ..Default::default() }.encode_to_vec(),
+        }],
+    };
+    assert!(
+        matches!(teaching_in(&newer.encode_to_vec()), InDetails::Unreadable(why) if why.starts_with("teaching-outcome-unknown"))
+    );
+}
