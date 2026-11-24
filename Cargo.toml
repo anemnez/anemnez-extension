@@ -30,7 +30,7 @@ anemnez-layout = { git = "ssh://git@github.com/anemnez/anemnez-layout.git", rev 
 # The deterministic simulation's runner, dev-only (MACHINES §4; D m/17459): its anemnez-clock is the same rev as ours.
 anemnez-sim = { git = "ssh://git@github.com/anemnez/anemnez-sim.git", rev = "87aa91889129", version = "0.1", registry-index = "sparse+http://127.0.0.1:7787/crates/index/" }
 # The one face for every product's events (fabric EVENTS.md §6a): the client reads it over Events/Call.
-# hydramq's leaves in the same dual form, at hydramq main's rev (0.4.98), so their anemnez-clock is the same git copy.
+# hydramq's leaves in the same dual form, at hydramq's release 0.5.48, so their anemnez-clock is the same git copy.
 hydramq-events = { git = "ssh://git@github.com/anemnez/hydramq.git", rev = "218d27fb1987", version = "0.5", registry-index = "sparse+http://127.0.0.1:7787/crates/index/" }
 tonic = "0.12"
 # A product's own HTTP routes on the API plane (ProductRoutes::http): tonic 0.12's own axum, so a Router converts.

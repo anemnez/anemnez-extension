@@ -11,8 +11,9 @@
 //!
 //! The fifth part, since contract 1.1 (D m/32662, I m/32656), is the near caller's code identity, its signature's
 //! team and signing identifier, as the near aegisd judged it at accept: who signed the process, beside which process
-//! it is. Readers first: this build reads a line with or without it, and aegisd writes it only to a target whose
-//! contract is 1.1 or later. A reader takes its absence as unproven, never as any product.
+//! it is. Readers first: this build reads a line with or without it. aegisd sends a preface at all to a target whose
+//! contract's MAJOR is this line's, and sends this fifth part only to one declaring 1.1 or later, by MINOR, since a
+//! 1.0 reader refuses a five-part line (D m/32716). A reader takes its absence as unproven, never as any product.
 //!
 //! Readers first: an aegisd older than the preface sends HTTP/2 at once (`PRI * HTTP/2.0`), which [`opening`] tells
 //! apart from a preface on its first bytes, so its connection carries no preface and loses nothing.
@@ -53,7 +54,7 @@ pub struct Holder {
 /// `-` and `_`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CodeIdentity {
-    /// The team identifier, `P9DJA3JCKP` for the house (anemnez-trust's `ANEMNEZ_TEAM`).
+    /// The team identifier, the leaf certificate's OU. The house's is `anemnez_trust::ANEMNEZ_TEAM`.
     pub team: String,
     /// The signing identifier, `ai.anemnez.stoad`.
     pub identifier: String,

@@ -756,8 +756,10 @@ plane, never by hand), and aegisd writes a preface only to a target whose discov
 M m/25699). `carried::encode` refuses at the writer, by the same name, every field `parse` would refuse. **Since
 1.1 the line may carry a fifth part, the near caller's code identity** (`<team>:<identifier>`, `carried::CodeIdentity`;
 D m/32662, I m/32656): who signed the process the holder names, as the near aegisd judged it at accept. A reader
-takes a line without it, written by an older aegisd, as unproven, never as any product, and aegisd writes it only to a
-target at 1.1 or later, matched by MAJOR as before. A product admits a carried `callers = PRODUCT` call only on a
+takes a line without it, written by an older aegisd, as unproven, never as any product. **Two tests, apart** (D
+m/32716, B m/32798): aegisd sends a preface at all to a target whose contract's MAJOR is the line's, as before, and
+sends the fifth part only to a target declaring `1.1.0` or later, by MINOR, since a 1.0 reader refuses a five-part
+line as `preface-malformed` (fields) and closes the connection. A product admits a carried `callers = PRODUCT` call only on a
 present, team-signed code identity (`product-caller-unproven` otherwise).
 
 <!-- claim: a-connection-opens-within-its-bound -->
