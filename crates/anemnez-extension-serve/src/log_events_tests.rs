@@ -306,16 +306,25 @@ async fn a_late_authorization_leaves_the_read_only_what_remains() {
     use crate::log_events::FACE_WITHIN;
     let (f, log_clock) = held_fixture();
     let late = Duration::from_secs(40);
+    // Every deadline here is an instant from admit, and the row moves the clock to instants, so a timer that registers
+    // after a move is already due and fires at once: nothing waits on a count of waiters or a real-time poll (E
+    // m/33551, M m/33563). The authorizer's word is the one event the row waits on. HANG only names a hang.
+    const HANG: Duration = Duration::from_secs(60);
+    let system = anemnez_clock::Clock::system();
+    let admitted = f.manual.now();
     let clock = f.manual.clock();
-    // The authorizer says when its sleep has returned, so the one waiter counted after it can only be the read (E
-    // m/31181): counted straight after the advance, the authorizer's own timer could still be the waiter, and the read
-    // would park after the next advance with its deadline past it, never to end.
     let (slept_tx, slept) = tokio::sync::oneshot::channel::<()>();
     let slept_tx = Arc::new(std::sync::Mutex::new(Some(slept_tx)));
+    // Asked means admitted: the face fixed its one deadline before it asked, so time may move from here.
+    let (asked_tx, asked) = tokio::sync::oneshot::channel::<()>();
+    let asked_tx = Arc::new(std::sync::Mutex::new(Some(asked_tx)));
     let face = Arc::new(f.face(Authorize::new(move |_| {
         let (clock, slept_tx) = (clock.clone(), Arc::clone(&slept_tx));
+        if let Some(tx) = asked_tx.lock().expect("unpoisoned").take() {
+            let _ = tx.send(());
+        }
         async move {
-            clock.sleep(late).await;
+            clock.sleep_until(admitted + late).await;
             if let Some(tx) = slept_tx.lock().expect("unpoisoned").take() {
                 let _ = tx.send(());
             }
@@ -324,21 +333,19 @@ async fn a_late_authorization_leaves_the_read_only_what_remains() {
     })));
     let calling = Arc::clone(&face);
     let mut call = tokio::spawn(async move { calling.call(held_read()).await });
-    let authorizing = f.manual.until_waiting(1, PARK).await;
-    f.manual.advance(late).await;
-    let woke = anemnez_clock::Clock::system().timeout(PARK, slept).await.is_ok();
-    // The read now waits on its bound: what the deadline has left, never CALL_WITHIN whole.
-    let reading = woke && f.manual.until_waiting(1, PARK).await;
+    let admitting = system.timeout(HANG, asked).await.is_ok();
+    f.manual.advance_to(admitted + late).await;
+    let authorized = system.timeout(HANG, slept).await.is_ok();
+    // The read now waits on its bound, the call's one deadline: what it has left, never CALL_WITHIN whole.
     let left = FACE_WITHIN - late;
-    f.manual.advance(left - Duration::from_millis(1)).await;
+    f.manual.advance_to(admitted + (FACE_WITHIN - Duration::from_millis(1))).await;
     let early = call.is_finished();
-    f.manual.advance(Duration::from_millis(1)).await;
-    // A hang guard only, at nextest's scale: 5 s ran out on a loaded gate host with nothing hung (E m/33551).
-    let ended = anemnez_clock::Clock::system().timeout(Duration::from_secs(60), &mut call).await;
+    f.manual.advance_to(admitted + FACE_WITHIN).await;
+    let ended = system.timeout(HANG, &mut call).await;
     // The held read's thread is let go before any assert, so a red row fails and never hangs the runtime.
     let _ = log_clock.until_waiting(1, PARK).await;
     log_clock.advance(Duration::from_secs(30)).await;
-    assert!(authorizing && reading, "the authorization, then the read, waited on the face's clock");
+    assert!(admitting && authorized, "asked once admitted, and answered at admit + late");
     assert!(!early, "the read still had a millisecond");
     let refused = ended
         .expect("the row's hang guard: the manual clock never reached the read's deadline")

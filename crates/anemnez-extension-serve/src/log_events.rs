@@ -654,7 +654,10 @@ impl pb::events_server::Events for LogEvents {
             ))
         })?;
         let (log, bytes) = (self.log.clone(), request.into_inner().request);
-        let within = CALL_WITHIN.min(self.left(deadline));
+        // The read's bound is an instant, never a span measured again at registration: what the call's one deadline
+        // has left, at most CALL_WITHIN, so a clock that moves between the two can't push it past the deadline.
+        let until = deadline.min(self.clock.now_mono() + CALL_WITHIN);
+        let within = self.left(until);
         let clock = self.clock.clone();
         let read = tokio::task::spawn_blocking(move || {
             // Held while the thread reads, so a read past its bound still counts until it ends.
@@ -670,7 +673,7 @@ impl pb::events_server::Events for LogEvents {
                 (None, None) => Ok(Some(reply)),
             }
         });
-        match self.clock.timeout(within, read).await {
+        match self.clock.timeout_at(until, read).await {
             Ok(Ok(Ok(Some(reply)))) => Ok(tonic::Response::new(pb::CallReply { reply })),
             Ok(Ok(Ok(None))) => Err(tonic::Status::internal("the log was opened and its read never ran")),
             Ok(Ok(Err(Unopened::Busy(why)))) => Err(tonic::Status::resource_exhausted(format!(
