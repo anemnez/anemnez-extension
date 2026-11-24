@@ -123,7 +123,7 @@ impl StreamEnd {
 pub fn until_drained<S, T>(
     stream: S,
     end: Option<&StreamEnd>,
-) -> impl futures_util::Stream<Item = Result<T, tonic::Status>> + Send
+) -> impl futures_util::Stream<Item = Result<T, tonic::Status>> + Send + use<S, T>
 where
     S: futures_util::Stream<Item = Result<T, tonic::Status>> + Send + 'static,
     T: Send + 'static,

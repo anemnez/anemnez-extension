@@ -77,3 +77,20 @@ async fn a_products_stream_ends_draining_when_its_drain_says() {
     let got: Vec<Result<u32, tonic::Status>> = finished.collect().await;
     assert!(matches!(got.as_slice(), [Ok(3)]), "a stream that ends first ends clean: {got:?}");
 }
+
+/// The stream until_drained answers borrows nothing of its request: a handler takes its StreamEnd from the request's
+/// extensions and returns the stream as `'static`, as a tonic streaming response must (typhond's first use).
+#[test]
+fn a_drained_stream_outlives_the_end_it_was_handed() {
+    fn boxed<T: Send + 'static>(
+        stream: impl futures_util::Stream<Item = Result<T, tonic::Status>> + Send + 'static,
+    ) -> std::pin::Pin<Box<dyn futures_util::Stream<Item = Result<T, tonic::Status>> + Send>> {
+        Box::pin(stream)
+    }
+    let (end, _ending) = drain();
+    let stream = {
+        let end = Some(end.clone());
+        super::until_drained(futures_util::stream::iter([Ok::<u32, tonic::Status>(1)]), end.as_ref())
+    };
+    let _boxed = boxed(stream);
+}
