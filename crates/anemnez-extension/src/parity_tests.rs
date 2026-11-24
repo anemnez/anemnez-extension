@@ -57,7 +57,7 @@ fn every_option_enum_is_the_protos() {
 
 #[test]
 fn the_protos_are_the_extension_package() {
-    for proto in [protos::OPTIONS, protos::EVENTS, protos::HEALTH] {
+    for proto in [protos::OPTIONS, protos::EVENTS, protos::HEALTH, protos::TEACHING] {
         assert!(proto.contains("package anemnez.extension.v1;"), "one package, renamed once");
         let code = proto.lines().filter(|l| !l.trim_start().starts_with("//")).any(|l| l.contains("fabric"));
         assert!(!code, "no platform in the contract (a comment may say where it came from)");
@@ -163,4 +163,15 @@ fn the_events_call_messages_are_the_protos() {
     use prost::Message;
     let bytes = crate::describe::CallRequest { request: vec![9] }.encode_to_vec();
     assert_eq!(bytes, [0x0a, 1, 9], "request is field 1");
+}
+
+/// The outcome types' enums are teaching.proto's, value for value: RetryClass by its proto names (its serde names
+/// are Substrate's own, `Blanket` and `Scoped`, which stored gate decisions carry), and Holder likewise.
+#[test]
+fn every_teaching_enum_is_the_protos() {
+    use crate::teaching::{Holder, RetryClass};
+    let retry: Vec<String> = RetryClass::ALL.iter().map(|c| c.proto_name().to_owned()).collect();
+    assert_eq!(retry, proto_enum(protos::TEACHING, "RetryClass"));
+    let holders: Vec<String> = Holder::ALL.iter().map(|h| h.proto_name().to_owned()).collect();
+    assert_eq!(holders, proto_enum(protos::TEACHING, "Holder"));
 }

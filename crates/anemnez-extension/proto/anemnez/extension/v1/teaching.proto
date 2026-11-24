@@ -1,0 +1,112 @@
+// What a call teaches when it doesn't simply succeed, and what a success makes relevant (anemnez-service
+// AGENTIC_EXPERIENCE.md AX3, house rule 15): one shape for every product and every face, lifted from Substrate's
+// gate kernel and inform carrier so both say the same thing (rule 2).
+syntax = "proto3";
+
+package anemnez.extension.v1;
+
+// A refusal's, an error's or an unclear call's teaching, carried in its gRPC Status's details, beside the house-form
+// message `<code>: <expected>` an older reader still reads. A face reads it from that one place, never per method.
+message Teaching {
+  // The refusal's name, kebab case (`stamp-not-from-agora`), qualified `<namespace>.<name>` across products. What a
+  // caller matches on, never the prose.
+  string code = 1;
+  // What was expected, for the next attempt: the fix, written for the agent that reads it.
+  string expected = 2;
+  // The shape that would have worked, and an example of it, when the call itself was wrong.
+  string shape = 3;
+  string example = 4;
+  // What happened, and so what to do next. Exactly one is set.
+  oneof outcome {
+    // Refused before any work: the gate's retry class.
+    RetryClass refused = 5;
+    // Valid, but the runtime failed: its recovery.
+    Recovery failed = 6;
+    // Unanswered (a timeout after a write was sent, a connection closed mid-call): it may have landed. Read it back,
+    // judge by value, then act. Never retried blind (rule 5).
+    Unclear unclear = 7;
+  }
+  // Whose it is to fix.
+  Whose whose = 8;
+}
+
+// Whether the same call fails again. Substrate's gate stores it, so it gains no value (rule 8): an error's later
+// lives in Recovery, its own type.
+enum RetryClass {
+  RETRY_CLASS_UNSPECIFIED = 0;
+  // The same call fails again: stop.
+  BLANKET = 1;
+  // A different input may succeed: adapt.
+  SCOPED = 2;
+}
+
+// What an error's caller does next.
+message Recovery {
+  oneof next {
+    // Retry, by the class's rule.
+    RetryClass retry = 1;
+    // The same call, later (unavailable, a peer restarting): neither stop nor rewrite the input, only wait.
+    Later later = 2;
+  }
+  message Later {
+    // How long to wait, in milliseconds, before the same call.
+    uint64 after_ms = 1;
+  }
+}
+
+// An unclear call's only next move: resolve by value.
+message Unclear {}
+
+// Whose a fix is.
+message Whose {
+  oneof who {
+    // The caller's: change the input.
+    Caller caller = 1;
+    // The operator's: a host or a setting, named in `expected`.
+    Operator operator = 2;
+    // A known defect: its owner lane and the key an agent hands on (`ergon:K/…`), so no agent chases it.
+    Defect defect = 3;
+  }
+  message Caller {}
+  message Operator {}
+  message Defect {
+    string owner = 1;
+    string key = 2;
+  }
+}
+
+// What a success made relevant, riding the reply's trailing metadata (`anemnez-inform-bin`, encoded Informs), so no
+// product's proto changes to carry one. Conditional and scarce: one closed vocabulary per machine.
+message Inform {
+  // `<namespace>.<teaching>` (`process.detached`).
+  string kind = 1;
+  // What the agent needs to know, and the call that acts on it.
+  string text = 2;
+  // What it is about, as typed references (`process:<id>`, `ergon:H/x`).
+  repeated string refs = 3;
+  // Present when the teaching is also a debt the agent now owes.
+  Obligation obligation = 4;
+}
+
+// What an owed teaching is owed until.
+message Obligation {
+  // One per (kind, subject).
+  string id = 1;
+  // The move that discharges it, in words.
+  string until = 2;
+  Holder holder = 3;
+}
+
+// Who holds an obligation. Its values are prefixed because a proto enum's values share the package's scope
+// (options.proto's Callers already has AGENT).
+enum Holder {
+  // The session that made the call (the default).
+  HOLDER_SESSION = 0;
+  // The named agent that session speaks for: it outlives the session.
+  HOLDER_AGENT = 1;
+}
+
+// A reply's informs, as its trailing metadata carries them.
+message Informs {
+  repeated Inform informs = 1;
+}

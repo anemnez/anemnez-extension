@@ -19,18 +19,21 @@ pub mod media;
 pub mod options;
 pub mod peer;
 pub mod signed;
+pub mod teaching;
 
 /// The proto files, for a build that compiles them (`prost`, `tonic`) or a tool that reads them.
 pub mod protos {
     pub const OPTIONS: &str = include_str!("../proto/anemnez/extension/v1/options.proto");
     pub const EVENTS: &str = include_str!("../proto/anemnez/extension/v1/events.proto");
     pub const HEALTH: &str = include_str!("../proto/anemnez/extension/v1/health.proto");
+    pub const TEACHING: &str = include_str!("../proto/anemnez/extension/v1/teaching.proto");
 
     /// Where each proto sits under an include root, as `import` names it.
-    pub const FILES: [(&str, &str); 3] = [
+    pub const FILES: [(&str, &str); 4] = [
         ("anemnez/extension/v1/options.proto", OPTIONS),
         ("anemnez/extension/v1/events.proto", EVENTS),
         ("anemnez/extension/v1/health.proto", HEALTH),
+        ("anemnez/extension/v1/teaching.proto", TEACHING),
     ];
 
     /// Write every proto under `root` (`root/anemnez/extension/v1/…`), for a build script that
