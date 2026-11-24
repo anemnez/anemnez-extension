@@ -19,6 +19,7 @@ pub mod accepted;
 pub mod describe;
 pub mod digest;
 pub mod edge;
+pub mod follow;
 pub mod health;
 pub mod journal;
 pub mod key_cache;

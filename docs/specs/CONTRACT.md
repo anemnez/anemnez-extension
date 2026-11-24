@@ -155,6 +155,14 @@ didn't answer, `events-call-unanswered` for the read. A watch's open is authoriz
 a blocking thread until it ends, even past its bound, so a face holds at most `CALLS_MAX` reads (the product may set
 another), and the next call is refused `events-call-busy` at once (D m/20673).
 
+<!-- claim: a-followed-log-wakes-its-watch-as-its-file-moves -->
+**A followed log wakes its Watch as its file moves** (D m/32441, L m/32438). `Changes::follow(path, beat)` bumps a
+per-read log's changes whenever the file at `path` may hold something new: it's written or extended, it's replaced (a
+rename over it, which the follow machine follows to the new file), it's deleted, or a file is found at the path again,
+re-tried at each `beat` while it's absent (an event, never a busy loop). It bumps at no other time. The host is kqueue's
+EVFILT_VNODE on macOS, watching every note the machine acts on. Elsewhere `follow-unsupported` is said by name, and a
+Watch wakes at its beat, as before.
+
 <!-- claim: one-face-serves-several-logs-by-name -->
 **One face serves several logs, each by its name** (L m/32091, D m/32100). `LogEvents::over_many` takes a product's
 logs by name (Horai's streams, a book per owner, a channel each): a Call or Watch reads the log its request's

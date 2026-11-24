@@ -23,6 +23,8 @@ tokio.workspace = true
 futures-util.workspace = true
 # A carried connection closed at accept is said in the product's own log (crate::carried).
 tracing.workspace = true
+# The follow host (kqueue on macOS): a per-read log's Changes bumped as its file moves (D m/32441).
+libc = "0.2"
 sha2.workspace = true
 http.workspace = true
 axum.workspace = true
