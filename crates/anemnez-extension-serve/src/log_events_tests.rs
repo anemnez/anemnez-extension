@@ -333,7 +333,8 @@ async fn a_late_authorization_leaves_the_read_only_what_remains() {
     f.manual.advance(left - Duration::from_millis(1)).await;
     let early = call.is_finished();
     f.manual.advance(Duration::from_millis(1)).await;
-    let ended = anemnez_clock::Clock::system().timeout(Duration::from_secs(5), &mut call).await;
+    // A hang guard only, at nextest's scale: 5 s ran out on a loaded gate host with nothing hung (E m/33551).
+    let ended = anemnez_clock::Clock::system().timeout(Duration::from_secs(60), &mut call).await;
     // The held read's thread is let go before any assert, so a red row fails and never hangs the runtime.
     let _ = log_clock.until_waiting(1, PARK).await;
     log_clock.advance(Duration::from_secs(30)).await;

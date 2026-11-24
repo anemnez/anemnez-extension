@@ -445,11 +445,17 @@ impl Nonces for Panics {
 }
 
 /// A nonce store whose every write waits for good: a stalled disk.
-struct Stalled;
+/// A nonce store whose every write never ends, and which says each time one starts: the keys have answered by then,
+/// so a row moves time only after that event (E m/33551), never while the key lookup is still in flight.
+#[derive(Default)]
+struct Stalled {
+    started: tokio::sync::Notify,
+}
 
 #[tonic::async_trait]
 impl Nonces for Stalled {
     async fn record(&self, _issuer: &str, _nonce: [u8; 16], _until_ms: i64) -> Result<(), Refusal> {
+        self.started.notify_one();
         std::future::pending().await
     }
 }
@@ -485,22 +491,32 @@ async fn a_nonce_write_that_panics_is_unanswered_never_replay() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_stalled_store_fills_the_write_cap_and_the_next_token_is_refused_at_once() {
     use crate::principal::NONCE_WRITES_AT_MOST;
-    use anemnez_extension::principal::Lookup;
+    use anemnez_extension::principal::{Lookup, NONCE_WITHIN_MS};
+    // Time moves only by event (E m/33551): once a write has started, the keys have answered, and once its bound is the
+    // one timer pending, the clock moves exactly that far. Driven by run_until, the clock moved while the key lookup was
+    // still in flight on a loaded gate host, and the keys' bound fired first (lookup-unanswered keys).
+    const GUARD: Duration = Duration::from_secs(60);
+    let system = anemnez_clock::Clock::system();
     let manual = ManualClock::new();
-    let verifier = keyed(&manual, Arc::new(Stalled));
+    let stalled = Arc::new(Stalled::default());
+    let nonces: Arc<dyn Nonces> = Arc::clone(&stalled) as Arc<dyn Nonces>;
+    let verifier = Arc::new(keyed(&manual, nonces));
     for n in 0..NONCE_WRITES_AT_MOST {
         let token = mint(&manual, METHOD, [1; 32], 60, u8::try_from(n).expect("under 256"));
-        let (refused, _) = manual
-            .run_until(verifier.verify(&token, METHOD, &[1; 32]), Duration::from_secs(10))
-            .await
-            .expect("answered at its bound");
-        assert_eq!(refused.expect_err("never admitted"), Refusal::LookupUnanswered(Lookup::Nonce));
+        let verifying = Arc::clone(&verifier);
+        let mut verify = tokio::spawn(async move { verifying.verify(&token, METHOD, &[1; 32]).await });
+        let started = system.timeout(GUARD, stalled.started.notified()).await.is_ok();
+        let parked = manual.until_waiting(1, GUARD).await;
+        manual.advance(Duration::from_millis(NONCE_WITHIN_MS)).await;
+        let answered = system.timeout(GUARD, &mut verify).await;
+        assert!(started && parked, "write {n} started, then waited on its bound");
+        let refused = answered.expect("answered at its bound").expect("joins");
+        assert_eq!(refused.expect_err("never admitted"), Refusal::LookupUnanswered(Lookup::Nonce), "write {n}");
     }
+    // The cap is full: the next token is refused with the clock never moved, so it waited on nothing.
     let token = mint(&manual, METHOD, [1; 32], 60, 200);
-    let (refused, fired) =
-        manual.run_until(verifier.verify(&token, METHOD, &[1; 32]), Duration::from_secs(10)).await.expect("answered");
+    let refused = system.timeout(GUARD, verifier.verify(&token, METHOD, &[1; 32])).await.expect("refused at once");
     assert_eq!(refused.expect_err("refused"), Refusal::LookupUnanswered(Lookup::NonceWritesHeld));
-    assert!(fired.is_empty(), "refused at once, no wait: {fired:?}");
     let counted: Vec<_> = verifier.unanswered_lookups().iter().map(|(l, u)| (*l, u.count)).collect();
     assert_eq!(counted, [(Lookup::Nonce, NONCE_WRITES_AT_MOST as u64), (Lookup::NonceWritesHeld, 1)]);
 }
