@@ -145,7 +145,11 @@ fn a_teaching_rides_a_status_and_one_that_cant_be_read_is_set_aside() {
     };
     assert_eq!(teaching_in(&other.encode_to_vec()), InDetails::None, "another detail is no teaching");
     assert_eq!(teaching_in(b""), InDetails::None, "no details at all");
-    assert_eq!(teaching_in(b"\xff\xff\xff"), InDetails::None, "details that aren't a Status");
+    // E m/30763: bytes that aren't a Status are a broken or foreign sender, said as such, never read as an old one.
+    assert!(
+        matches!(teaching_in(b"\xff\xff\xff"), InDetails::Unreadable(why) if why.starts_with("status-details-malformed")),
+        "details that aren't a Status"
+    );
 
     let newer = wire::RpcStatus {
         code: 7,
