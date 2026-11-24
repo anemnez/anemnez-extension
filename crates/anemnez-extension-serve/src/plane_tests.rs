@@ -467,6 +467,7 @@ fn every_name_the_plane_refuses_with_is_on_its_one_list() {
         ("PRODUCT_CALLER_NOT_ALLOWED", anemnez_extension::peer::PRODUCT_CALLER_NOT_ALLOWED),
         ("PRODUCT_CALLERS_NOT_A_PRODUCT_METHOD", anemnez_extension::peer::PRODUCT_CALLERS_NOT_A_PRODUCT_METHOD),
         ("PRODUCT_CALLERS_TWICE", anemnez_extension::peer::PRODUCT_CALLERS_TWICE),
+        ("DESCRIPTOR_UNCHECKED", anemnez_extension::peer::DESCRIPTOR_UNCHECKED),
     ];
     assert!(found.len() >= 6, "the census reads the plane's refusals: {found:?}");
     for name in &found {
@@ -592,8 +593,8 @@ async fn the_layer_admits_a_proven_product_and_hands_its_caller_to_the_service()
 fn another_descriptors_product_methods_merge_and_the_unnamed_are_said() {
     use crate::plane::ProductCallers;
     let land = land_descriptor_with(pb::Effect::Write);
-    let own = ProductCallers::of(b"\xff the product's own, with no PRODUCT method", &[]).expect("none");
-    assert!(ProductCallers::of(b"\xff", &[(LAND, &["ai.anemnez.stoad"])]).is_err(), "not in the product's own");
+    let own = ProductCallers::of(&[], &[]).expect("the product's own, with no PRODUCT method");
+    assert!(ProductCallers::of(&[], &[(LAND, &["ai.anemnez.stoad"])]).is_err(), "not in the product's own");
     let sdk = ProductCallers::of(&land, &[(LAND, &["ai.anemnez.stoad"])]).expect("in the other descriptor");
     let merged = own.clone().merge(sdk.clone()).expect("one list each");
     // A m/33065: either order gives the same set, so no call order can drop a list.
@@ -611,4 +612,35 @@ fn another_descriptors_product_methods_merge_and_the_unnamed_are_said() {
     assert!(merged.unnamed().is_empty(), "every method named");
     let unnamed = ProductCallers::of(&land, &[]).expect("none named");
     assert_eq!(unnamed.unnamed(), [LAND], "said at build");
+}
+
+/// A m/33362: a descriptor the contract's check refuses is refused by its own name, with the checker's refusals, when a
+/// product names its methods: never read as a descriptor without the method, which would say the wrong cause. Naming
+/// none names no method, so no cause is mistaken: the plane is built with none, the safe way, as before.
+#[test]
+fn methods_named_of_an_unchecked_descriptor_are_refused_as_unchecked_with_the_checkers_refusals() {
+    use anemnez_extension::peer::{CLAIMED_METHOD_NOT_A_READ_OR_WRITE, DESCRIPTOR_UNCHECKED};
+    // Land with no effect: decodes, and the check refuses it (A's replica.proto lacked result and presence).
+    let unchecked = land_descriptor_with(pb::Effect::Unspecified);
+    let refused = anemnez_extension::descriptor::check_descriptor(&unchecked).expect_err("the fixture is refused");
+    let said: Vec<String> = refused.iter().map(ToString::to_string).collect();
+    let allow: &[(&str, &[&str])] = &[(LAND, &["ai.anemnez.stoad"])];
+    for (who, got) in [
+        ("product callers", crate::plane::ProductCallers::of(&unchecked, allow).map(|_| ())),
+        ("claimed methods", ClaimedMethods::of(&unchecked, &[LAND], |_| true).map(|_| ())),
+    ] {
+        assert_eq!(got, Err((DESCRIPTOR_UNCHECKED, said.join("; "))), "{who}");
+    }
+    let malformed = crate::plane::ProductCallers::of(b"\xff", allow).map(|_| ());
+    assert!(matches!(&malformed, Err((DESCRIPTOR_UNCHECKED, why)) if !why.is_empty()), "{malformed:?}");
+    assert!(
+        crate::plane::ProductCallers::of(&unchecked, &[]).is_ok_and(|none| !none.lists(LAND)),
+        "naming none: none, safely"
+    );
+    assert!(ClaimedMethods::of(&unchecked, &[], |_| true).is_ok(), "naming none");
+    // A checked descriptor without the method still says that cause, by its own name.
+    assert_eq!(
+        ClaimedMethods::of(&[], &[LAND], |_| true).map(|_| ()),
+        Err((CLAIMED_METHOD_NOT_A_READ_OR_WRITE, LAND.to_owned()))
+    );
 }

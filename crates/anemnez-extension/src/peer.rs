@@ -57,6 +57,10 @@ pub const CLAIMED_WRITE_NOT_A_WRITE: &str = "claimed-write-not-a-write";
 /// or no such method (D m/29220: a product lists reads, for attribution, as well as writes). Refused when the plane is
 /// built. Supersedes [`CLAIMED_WRITE_NOT_A_WRITE`], kept for its readers.
 pub const CLAIMED_METHOD_NOT_A_READ_OR_WRITE: &str = "claimed-method-not-a-read-or-write";
+/// A product naming methods (an allow-list, or methods for claimed lanes) of a descriptor `check_descriptor` refuses:
+/// refused when the plane is built, with the checker's own refusals, never read as a descriptor with no such method
+/// (A m/33362).
+pub const DESCRIPTOR_UNCHECKED: &str = "descriptor-unchecked";
 
 /// A product's own service named under a package the contract reserves (`anemnez.extension.`, `anemnez.fabric.`):
 /// the API plane serves the contract's faces itself and never Lifecycle, so a product can't shadow or add one
