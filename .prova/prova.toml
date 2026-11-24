@@ -48,7 +48,7 @@ switches    = ["quality"]
 description = "the workspace's unit tests, conducted once via cargo nextest and adopted into the account (deputed junit)"
 proofs      = ["ut"]
 switches    = ["ut"]
-must_run    = ["cargo-nextest"]
+must_run    = ["cargo-nextest", "swift", "protoc"]
 
 # Code coverage, ratcheted: conducts `cargo llvm-cov nextest` (an instrumented rebuild + run of the
 # workspace's unit tests) and holds the line-coverage total to the committed baseline in
@@ -68,7 +68,7 @@ must_run    = ["cargo-llvm-cov", "cargo-nextest"]
 [profiles.all]
 description = "the pre-push sweep: every black-box proof plus the ut and quality legs"
 switches    = ["ut", "quality"]
-must_run    = ["cargo-nextest"]
+must_run    = ["cargo-nextest", "swift", "protoc"]
 
 # The CI profile for the black-box leg. It exists mainly for `must_run`, which is the inverse of a
 # test's `requires`:

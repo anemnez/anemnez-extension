@@ -20,15 +20,20 @@ fn the_envelope_vector_is_what_prost_encodes() {
     let text = std::fs::read_to_string(path).expect("the shared vector");
     let vector: serde_json::Value = serde_json::from_str(&text).expect("json");
     let said = |key: &str| vector[key].as_str().unwrap_or_else(|| panic!("{key}")).to_owned();
-    let payload = unhex(&said("payload_hex"));
-    let encoded = [
-        ("call_request_hex", pb::CallRequest { request: payload.clone() }.encode_to_vec()),
-        ("call_reply_hex", pb::CallReply { reply: payload.clone() }.encode_to_vec()),
-        ("watch_request_hex", pb::WatchRequest { request: payload.clone() }.encode_to_vec()),
-        ("watch_frame_hex", pb::WatchFrame { frame: payload.clone() }.encode_to_vec()),
-    ];
-    for (key, bytes) in encoded {
-        assert_eq!(said(key), hex(&bytes), "{key} is prost's encoding of the payload");
+    // The short case's length is one varint byte; the long case's payload is 200 bytes, so its length takes two (M
+    // m/33255), and a codec that mis-writes long lengths is red.
+    for case in ["", "long_"] {
+        let payload = unhex(&said(&format!("{case}payload_hex")));
+        let encoded = [
+            ("call_request_hex", pb::CallRequest { request: payload.clone() }.encode_to_vec()),
+            ("call_reply_hex", pb::CallReply { reply: payload.clone() }.encode_to_vec()),
+            ("watch_request_hex", pb::WatchRequest { request: payload.clone() }.encode_to_vec()),
+            ("watch_frame_hex", pb::WatchFrame { frame: payload.clone() }.encode_to_vec()),
+        ];
+        for (key, bytes) in encoded {
+            let key = format!("{case}{key}");
+            assert_eq!(said(&key), hex(&bytes), "{key} is prost's encoding of the payload");
+        }
     }
     let empty = pb::CallRequest { request: Vec::new() }.encode_to_vec();
     assert_eq!(said("empty_payload_hex"), hex(&empty), "an empty payload is proto3's empty message");

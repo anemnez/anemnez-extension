@@ -38,11 +38,14 @@ private func unhex(_ text: String) -> Data {
     @Test func theEnvelopeCarriesTheBytesAsProstDoes() throws {
         let path = swiftDir.deletingLastPathComponent().appendingPathComponent("testdata/events-envelope.json")
         let vector = try JSONSerialization.jsonObject(with: Data(contentsOf: path)) as! [String: String]
-        let payload = unhex(vector["payload_hex"]!)
-        #expect(try Envelope.callRequest(payload) == unhex(vector["call_request_hex"]!))
-        #expect(try Envelope.watchRequest(payload) == unhex(vector["watch_request_hex"]!))
-        #expect(try Envelope.callReply(unhex(vector["call_reply_hex"]!)) == payload)
-        #expect(try Envelope.watchFrame(unhex(vector["watch_frame_hex"]!)) == payload)
+        // The short case's length is one varint byte; the long case's, 200 bytes, takes two (M m/33255).
+        for of in ["", "long_"] {
+            let payload = unhex(vector["\(of)payload_hex"]!)
+            #expect(try Envelope.callRequest(payload) == unhex(vector["\(of)call_request_hex"]!), "\(of)call_request")
+            #expect(try Envelope.watchRequest(payload) == unhex(vector["\(of)watch_request_hex"]!), "\(of)watch_request")
+            #expect(try Envelope.callReply(unhex(vector["\(of)call_reply_hex"]!)) == payload, "\(of)call_reply")
+            #expect(try Envelope.watchFrame(unhex(vector["\(of)watch_frame_hex"]!)) == payload, "\(of)watch_frame")
+        }
         #expect(try Envelope.callRequest(Data()) == unhex(vector["empty_payload_hex"]!), "an empty payload")
     }
 }
