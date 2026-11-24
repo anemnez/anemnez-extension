@@ -756,7 +756,10 @@ for its own further narrowing (for a replica stream, the assignment). An absent 
 one meaning whether the aegisd is older or its judge refused the caller, never admitted on silence; another team is
 `product-caller-untrusted`; an identifier not listed is `product-caller-not-allowed`; and a method its product named no
 callers for is `product-callers-unnamed`, failing closed. An allow entry for a method that isn't `callers = PRODUCT`,
-or naming no identifier, is refused when the faces are built (`product-callers-not-a-product-method`). A method of another
+or naming no identifier, is refused when the faces are built (`product-callers-not-a-product-method`). A list (an
+allow-list, or methods for claimed lanes) naming methods of a descriptor `check_descriptor` refuses is refused by its own
+name, `descriptor-unchecked`, carrying the checker's refusals, never read as a descriptor without the method, which
+would say the wrong cause (A m/33362); naming none still builds the plane with none, the safe way. A method of another
 descriptor the product serves, such as the SDK's replica `Open`, is named with `ApiFaces::product_callers_in`, judged
 against the descriptor that declares it (A m/33037), and either call order gives the same set; a method given two
 allow-lists, from two places, is refused when the faces are built (`product-callers-twice`), never the later one

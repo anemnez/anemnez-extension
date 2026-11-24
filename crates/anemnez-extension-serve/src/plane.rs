@@ -37,9 +37,9 @@ use anemnez_extension::mcp::Stamp;
 use anemnez_extension::options::Effect;
 use anemnez_extension::peer::{
     CARRIED_CLAIM_NOT_A_LANE, CARRIED_NO_PREFACE, CARRIED_WRITE_UNBOUND, CLAIMED_METHOD_NOT_A_READ_OR_WRITE,
-    CLAIMED_WRITE_NOT_A_WRITE, FABRICD_READS_DESCRIBE_ONLY, NOT_JUDGED, PRODUCT_CALLER_NOT_ALLOWED,
-    PRODUCT_CALLER_UNPROVEN, PRODUCT_CALLER_UNTRUSTED, PRODUCT_CALLERS_NOT_A_PRODUCT_METHOD, PRODUCT_CALLERS_TWICE,
-    PRODUCT_CALLERS_UNNAMED, Role, STAMP_NOT_FROM_AGORA,
+    CLAIMED_WRITE_NOT_A_WRITE, DESCRIPTOR_UNCHECKED, FABRICD_READS_DESCRIBE_ONLY, NOT_JUDGED,
+    PRODUCT_CALLER_NOT_ALLOWED, PRODUCT_CALLER_UNPROVEN, PRODUCT_CALLER_UNTRUSTED,
+    PRODUCT_CALLERS_NOT_A_PRODUCT_METHOD, PRODUCT_CALLERS_TWICE, PRODUCT_CALLERS_UNNAMED, Role, STAMP_NOT_FROM_AGORA,
 };
 use anemnez_extension::teaching::{RetryClass, Teaching, Whose, status_details};
 use tonic::body::BoxBody;
@@ -91,10 +91,27 @@ impl Reads {
     }
 }
 
+/// The methods of a descriptor a product names methods of, or [`DESCRIPTOR_UNCHECKED`] with the checker's refusals,
+/// each by name and in order: a broken descriptor is never taken for one without the method named (A m/33362).
+/// Naming none (`names` false) names no method, so no cause can be mistaken: such a descriptor has none, the safe way.
+fn checked(
+    file_descriptor_set: &[u8],
+    names: bool,
+) -> Result<Vec<anemnez_extension::descriptor::Method>, (&'static str, String)> {
+    match anemnez_extension::descriptor::check_descriptor(file_descriptor_set) {
+        Ok(methods) => Ok(methods),
+        Err(_) if !names => Ok(Vec::new()),
+        Err(refused) => {
+            Err((DESCRIPTOR_UNCHECKED, refused.iter().map(ToString::to_string).collect::<Vec<_>>().join("; ")))
+        }
+    }
+}
+
 /// The product's methods a product calls (`callers = PRODUCT` in its descriptor), read once when the plane is built, each
 /// with the signing identifiers its product allows to call it (D m/32983). A carried call reaches one past the read rule
-/// only from a proven product on its list ([`product_admits`]). A method with no list admits nobody, and a descriptor
-/// `check_descriptor` doesn't admit lists no method, the safe direction both ways.
+/// only from a proven product on its list ([`product_admits`]). A method with no list admits nobody. A descriptor
+/// `check_descriptor` doesn't admit is refused [`DESCRIPTOR_UNCHECKED`] when a list names its methods (A m/33362), and
+/// otherwise lists no method, the safe direction.
 #[derive(Clone, Debug, Default)]
 pub struct ProductCallers {
     methods: Arc<HashSet<String>>,
@@ -105,18 +122,15 @@ impl ProductCallers {
     /// The `callers = PRODUCT` methods of the encoded `FileDescriptorSet`, with `allow`, each `(method, identifiers)`.
     ///
     /// # Errors
+    /// [`DESCRIPTOR_UNCHECKED`] and the checker's refusals, for a descriptor `check_descriptor` refuses (A m/33362);
     /// [`PRODUCT_CALLERS_NOT_A_PRODUCT_METHOD`] and the method, for an entry the descriptor doesn't say is
     /// `callers = PRODUCT`, or that names no identifier.
     pub fn of(file_descriptor_set: &[u8], allow: &[(&str, &[&str])]) -> Result<ProductCallers, (&'static str, String)> {
-        let methods: HashSet<String> = anemnez_extension::descriptor::check_descriptor(file_descriptor_set)
-            .map(|methods| {
-                methods
-                    .into_iter()
-                    .filter(|m| m.options.callers == anemnez_extension::options::Callers::Product)
-                    .map(|m| m.path)
-                    .collect()
-            })
-            .unwrap_or_default();
+        let methods: HashSet<String> = checked(file_descriptor_set, !allow.is_empty())?
+            .into_iter()
+            .filter(|m| m.options.callers == anemnez_extension::options::Callers::Product)
+            .map(|m| m.path)
+            .collect();
         let mut allowed = std::collections::HashMap::new();
         for (method, identifiers) in allow {
             if !methods.contains(*method) || identifiers.is_empty() {
@@ -252,17 +266,18 @@ impl ClaimedMethods {
     /// its lanes (Ergon's: an owner that holds a book). No product opts in without saying what a lane is.
     ///
     /// # Errors
+    /// [`DESCRIPTOR_UNCHECKED`] and the checker's refusals, for a descriptor `check_descriptor` refuses (A m/33362);
     /// [`CLAIMED_METHOD_NOT_A_READ_OR_WRITE`] and the method, for one the descriptor says is an `act`, or a path it
-    /// doesn't have. A descriptor the check doesn't admit has no methods, so any list is refused.
+    /// doesn't have.
     pub fn of(
         file_descriptor_set: &[u8],
         methods: &[&str],
         is_lane: impl Fn(&str) -> bool + Send + Sync + 'static,
     ) -> Result<ClaimedMethods, (&'static str, String)> {
-        let effects: std::collections::HashMap<String, Effect> =
-            anemnez_extension::descriptor::check_descriptor(file_descriptor_set)
-                .map(|all| all.into_iter().map(|m| (m.path, m.options.effect)).collect())
-                .unwrap_or_default();
+        let effects: std::collections::HashMap<String, Effect> = checked(file_descriptor_set, !methods.is_empty())?
+            .into_iter()
+            .map(|m| (m.path, m.options.effect))
+            .collect();
         let (mut writes, mut reads) = (HashSet::new(), HashSet::new());
         for method in methods {
             match effects.get(*method) {
@@ -377,6 +392,9 @@ pub fn said(name: &'static str) -> String {
         PRODUCT_CALLERS_UNNAMED => "a method products call admits a carried caller only once its product names who may",
         PRODUCT_CALLER_NOT_ALLOWED => "a carried product caller must be one the method's product names as its caller",
         PRODUCT_CALLERS_TWICE => "a method products call takes one list of its callers, from one place",
+        DESCRIPTOR_UNCHECKED => {
+            "methods are named only of a descriptor the contract's check admits: fix what it refused"
+        }
         PRODUCT_CALLERS_NOT_A_PRODUCT_METHOD => {
             "only a method the descriptor says products call may list its callers, and it must name at least one"
         }
@@ -400,7 +418,7 @@ pub fn said_on(name: &'static str, path: &str) -> String {
 
 /// Every name the API plane refuses with, at a call or when the plane is built: the one list [`said`] and [`taught`]
 /// answer for, held by a row that reads this file's own refusals, so a new name can't go untaught (D m/30986).
-pub const PLANE_REFUSALS: [&str; 14] = [
+pub const PLANE_REFUSALS: [&str; 15] = [
     NOT_JUDGED,
     FABRICD_READS_DESCRIBE_ONLY,
     STAMP_NOT_FROM_AGORA,
@@ -415,6 +433,7 @@ pub const PLANE_REFUSALS: [&str; 14] = [
     PRODUCT_CALLER_NOT_ALLOWED,
     PRODUCT_CALLERS_NOT_A_PRODUCT_METHOD,
     PRODUCT_CALLERS_TWICE,
+    DESCRIPTOR_UNCHECKED,
 ];
 
 /// A plane refusal of a call to `path` as a teaching (house rule 15, AX3): its name as the code, what `said_on` says
