@@ -469,3 +469,65 @@ async fn authorize_is_handed_the_requests_metadata() {
     let _ = face.call(request).await;
     assert_eq!(*lanes.lock().unwrap(), vec![Some("K".to_owned())]);
 }
+
+/// A log opened for each read, as horaid opens Horai's (L m/30712): it counts its opens, records the bound each was
+/// handed, and is busy (its writer holds it) when told.
+struct PerRead {
+    log: Arc<Events>,
+    opens: std::sync::atomic::AtomicUsize,
+    busy: AtomicBool,
+    within: std::sync::Mutex<Vec<Duration>>,
+}
+
+impl crate::log_events::Log for PerRead {
+    fn with(&self, within: Duration, read: &mut dyn FnMut(&Events)) -> Result<(), crate::log_events::Busy> {
+        self.within.lock().unwrap().push(within);
+        if self.busy.load(Ordering::SeqCst) {
+            return Err(crate::log_events::Busy("its stream's flock is held by `horai ship`".into()));
+        }
+        self.opens.fetch_add(1, Ordering::SeqCst);
+        read(&self.log);
+        Ok(())
+    }
+}
+
+/// L m/30712: a log opened for each read serves Call through one open per call, handed what the call has left, and a
+/// log its writer holds is events-call-busy by name, nothing read; its Watch is refused as a Journal's is, so the
+/// client reads watch-unserved, and no watch thread starts.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_log_opened_per_read_serves_call_once_per_call_and_says_busy() {
+    let f = fixture();
+    f.publish(1);
+    let per_read = Arc::new(PerRead {
+        log: Arc::clone(&f.log),
+        opens: std::sync::atomic::AtomicUsize::new(0),
+        busy: AtomicBool::new(false),
+        within: std::sync::Mutex::new(Vec::new()),
+    });
+    let verifier = crate::principal_tests::verifier(&f.manual, true);
+    let face = LogEvents::over(per_read.clone(), verifier, Authorize::allow_all(), f.manual.clock());
+    let read =
+        || tonic::Request::new(pb::CallRequest { request: read_request(&from_start(), 10, Duration::ZERO).unwrap() });
+
+    for n in 1..=2 {
+        let reply = face.call(read()).await.expect("served").into_inner();
+        assert!(matches!(read_reply(&reply.reply), Ok(Read::Events { ref events, .. }) if events.len() == 1));
+        assert_eq!(per_read.opens.load(Ordering::SeqCst), n, "one open per call");
+    }
+    let handed = per_read.within.lock().unwrap().clone();
+    assert!(
+        handed.iter().all(|w| *w > Duration::ZERO && *w <= crate::log_events::CALL_WITHIN),
+        "each open is bounded by what the call has left: {handed:?}"
+    );
+
+    per_read.busy.store(true, Ordering::SeqCst);
+    let busy = face.call(read()).await.expect_err("its writer holds it");
+    assert_eq!(busy.code(), tonic::Code::ResourceExhausted);
+    assert!(busy.message().starts_with("events-call-busy: the log's writer holds it"), "{}", busy.message());
+    assert_eq!(per_read.opens.load(Ordering::SeqCst), 2, "nothing read while busy");
+
+    let unserved = face.watch(watch(10)).await.err().expect("refused");
+    assert_eq!(unserved.code(), tonic::Code::Unimplemented);
+    assert!(unserved.message().starts_with("events-call-unserved: "), "{}", unserved.message());
+    assert_eq!(face.watches_open(), 0, "a refused watch starts no thread");
+}
