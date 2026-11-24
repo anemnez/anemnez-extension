@@ -304,6 +304,35 @@ impl std::fmt::Display for DescriptorRefusal {
 
 impl std::error::Error for DescriptorRefusal {}
 
+/// A method's gRPC path, `/<package>.<Service>/<Method>`: the one form every reader of a descriptor names a method by.
+fn method_path(
+    file: &prost_types::FileDescriptorProto,
+    service: &prost_types::ServiceDescriptorProto,
+    method: &prost_types::MethodDescriptorProto,
+) -> String {
+    format!("/{}{}{}/{}", file.package(), dot(file.package()), service.name(), method.name())
+}
+
+/// Every method of an encoded `FileDescriptorSet` whose request or response streams, by its gRPC path: what a drain must
+/// tell End (M m/31062, D m/31056), read from the descriptor, the one place a method says it streams, so no product
+/// lists its streams by hand (rule 2).
+///
+/// # Errors
+/// [`DescriptorRefusal::Malformed`] for bytes that are not a `FileDescriptorSet`.
+pub fn streaming_paths(file_descriptor_set: &[u8]) -> Result<Vec<String>, DescriptorRefusal> {
+    let set =
+        FileDescriptorSet::decode(file_descriptor_set).map_err(|e| DescriptorRefusal::Malformed(e.to_string()))?;
+    let mut paths = Vec::new();
+    for file in &set.file {
+        for service in &file.service {
+            for method in service.method.iter().filter(|m| m.client_streaming() || m.server_streaming()) {
+                paths.push(method_path(file, service, method));
+            }
+        }
+    }
+    Ok(paths)
+}
+
 /// Check an encoded `FileDescriptorSet`: every offered method, with every refusal.
 ///
 /// # Errors
@@ -337,7 +366,7 @@ pub fn check_descriptor(file_descriptor_set: &[u8]) -> Result<Vec<Method>, Vec<D
                     ))]
                 })?;
             for (method, raw_method) in service.method.iter().zip(raw_methods) {
-                let path = format!("/{}{}{}/{}", file.package(), dot(file.package()), service.name(), method.name());
+                let path = method_path(file, service, method);
                 let bytes = match method_options(raw_method) {
                     Ok(Some(bytes)) => bytes,
                     Ok(None) => continue,
@@ -1399,5 +1428,41 @@ mod tests {
         assert!(found[0].contains("'nope' is not a field of LandRequest"), "{found:?}");
         assert!(found[1].contains("not a JSON object"), "{found:?}");
         assert!(found[2].contains("not JSON"), "{found:?}");
+    }
+
+    /// M m/31062: a descriptor's streaming methods, client, server and bidi, by their gRPC paths, and never a unary one;
+    /// bytes that aren't a descriptor are refused by name.
+    #[test]
+    fn streaming_paths_are_every_streaming_method_and_no_unary_one() {
+        use prost::Message as _;
+        use prost_types::{MethodDescriptorProto, ServiceDescriptorProto};
+        let method = |name: &str, client: bool, server: bool| MethodDescriptorProto {
+            name: Some(name.into()),
+            client_streaming: Some(client),
+            server_streaming: Some(server),
+            ..MethodDescriptorProto::default()
+        };
+        let set = FileDescriptorSet {
+            file: vec![FileDescriptorProto {
+                package: Some("typhon.v1".into()),
+                service: vec![ServiceDescriptorProto {
+                    name: Some("ModelRunner".into()),
+                    method: vec![
+                        method("ListModels", false, false),
+                        method("Subscribe", false, true),
+                        method("Upload", true, false),
+                        method("Chat", true, true),
+                    ],
+                    ..ServiceDescriptorProto::default()
+                }],
+                ..FileDescriptorProto::default()
+            }],
+        }
+        .encode_to_vec();
+        assert_eq!(
+            super::streaming_paths(&set).expect("reads"),
+            ["/typhon.v1.ModelRunner/Subscribe", "/typhon.v1.ModelRunner/Upload", "/typhon.v1.ModelRunner/Chat"]
+        );
+        assert!(matches!(super::streaming_paths(b"\xff\xff"), Err(DescriptorRefusal::Malformed(_))));
     }
 }
