@@ -213,6 +213,8 @@ spoken_for("a-carried-write-may-be-admitted-for-a-claimed-lane (preface)", "plan
 spoken_for("a-carried-write-may-be-admitted-for-a-claimed-lane (other peers)", "plane_tests::a_listed_write_from_any_other_peer_is_judged_as_before")
 spoken_for("a-carried-write-may-be-admitted-for-a-claimed-lane (layer)", "plane_tests::the_layer_hands_the_service_the_claim")
 spoken_for("a-carried-product-caller-is-proven-by-its-code", "plane_tests::a_carried_product_caller_is_admitted_only_when_proven_the_houses_and_listed")
+spoken_for("the-trust-anchor-takes-no-dependency", "tests::the_trust_anchor_takes_no_dependency")
+spoken_for("the-trust-anchor-takes-no-dependency (shape)", "tests::the_team_is_a_team_identifier")
 spoken_for("a-carried-product-caller-is-proven-by-its-code (descriptor)", "plane_tests::the_methods_products_call_are_read_from_the_descriptor")
 spoken_for("a-carried-product-caller-is-proven-by-its-code (layer)", "plane_tests::the_layer_admits_a_proven_product_and_hands_its_caller_to_the_service")
 spoken_for("a-carried-product-caller-is-proven-by-its-code (another descriptor, the unnamed said)", "plane_tests::another_descriptors_product_methods_merge_and_the_unnamed_are_said")

@@ -378,12 +378,8 @@ impl<S: tower_service::Service<http::Request<BoxBody>>> tower_service::Service<h
 #[tokio::test(flavor = "multi_thread")]
 async fn a_carried_connections_preface_rides_its_requests_and_http2_after_it_is_served() {
     use anemnez_extension::carried::{Holder, Preface, encode};
-    let preface = Preface {
-        node: "node-far".into(),
-        cert_der: vec![0x30, 0x01, 0x02],
-        holder: Holder { unique_id: 7, boot: "1795300000.1".into() },
-        code: None,
-    };
+    let preface =
+        Preface::new("node-far", vec![0x30, 0x01, 0x02], Holder { unique_id: 7, boot: "1795300000.1".into() });
     for (sent, expect) in [(Some(encode(&preface).expect("encodes")), Some("node-far".to_owned())), (None, None)] {
         let manual = ManualClock::new();
         let journal = Journal::new("a1b2c3d4.boot1", 8, manual.clock());

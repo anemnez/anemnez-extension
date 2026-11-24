@@ -174,12 +174,8 @@ const LAND: &str = "/h.v1.H/Land";
 /// A carried connection, with the preface aegisd says when it says one.
 fn carried(node: Option<&str>) -> Judged {
     let mut judged = judged(Role::Carried);
-    judged.carried = node.map(|node| Preface {
-        node: node.into(),
-        cert_der: vec![1, 2, 3],
-        holder: Holder { unique_id: 7, boot: "1795300000.1".into() },
-        code: None,
-    });
+    judged.carried =
+        node.map(|node| Preface::new(node, vec![1, 2, 3], Holder { unique_id: 7, boot: "1795300000.1".into() }));
     judged
 }
 

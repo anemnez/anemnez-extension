@@ -3,12 +3,11 @@
 use super::*;
 
 fn preface() -> Preface {
-    Preface {
-        node: "01a09e7e-a00d-7f52-8f09-b5e6bc6f288d".into(),
-        cert_der: vec![0x30, 0x82, 0x01, 0x0a, 0xff],
-        holder: Holder { unique_id: 4_242_424, boot: "1795300000.123456".into() },
-        code: None,
-    }
+    Preface::new(
+        "01a09e7e-a00d-7f52-8f09-b5e6bc6f288d",
+        vec![0x30, 0x82, 0x01, 0x0a, 0xff],
+        Holder { unique_id: 4_242_424, boot: "1795300000.123456".into() },
+    )
 }
 
 fn line(p: &Preface) -> Vec<u8> {
@@ -124,10 +123,7 @@ fn the_reader_declares_one_contract() {
 /// words is refused by name, at the writer and the reader alike.
 #[test]
 fn a_callers_code_identity_rides_as_the_fifth_part_and_a_line_without_it_still_reads() {
-    let signed = Preface {
-        code: Some(CodeIdentity { team: "ABCDE12345".into(), identifier: "ai.anemnez.stoad".into() }),
-        ..preface()
-    };
+    let signed = preface().with_code(CodeIdentity { team: "ABCDE12345".into(), identifier: "ai.anemnez.stoad".into() });
     let l = line(&signed);
     assert!(String::from_utf8_lossy(&l).ends_with(" ABCDE12345:ai.anemnez.stoad"), "{}", String::from_utf8_lossy(&l));
     assert_eq!(parse(&l), Ok(signed));
@@ -137,6 +133,6 @@ fn a_callers_code_identity_rides_as_the_fifth_part_and_a_line_without_it_still_r
         assert_eq!(parse(format!("{base} {bad}").as_bytes()), Err(PrefaceRefusal::Malformed("code")), "{bad:?}");
     }
     assert!(parse(format!("{base} ABCDE12345:a extra").as_bytes()).is_err(), "never a sixth part");
-    let bad = Preface { code: Some(CodeIdentity { team: "P9 DJ".into(), identifier: "x".into() }), ..preface() };
+    let bad = preface().with_code(CodeIdentity { team: "P9 DJ".into(), identifier: "x".into() });
     assert_eq!(encode(&bad), Err(PrefaceRefusal::Malformed("code")), "the writer refuses what the reader would");
 }
