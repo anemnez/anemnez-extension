@@ -27,12 +27,21 @@ fn peer(pid: i32, readable: bool) -> Peer {
 
 /// Read `bytes` as an opening, with the bound passed on the clock once the read parks: what it ended in.
 async fn opened_by_the_bound(bytes: &[u8], carried: bool) -> Result<(Option<Preface>, Vec<u8>), OpeningEnd> {
+    opened_by_the_bound_as(bytes, carried, false).await
+}
+
+/// [`opened_by_the_bound`], on a plane that opens HTTP/1 when `http1`.
+async fn opened_by_the_bound_as(
+    bytes: &[u8],
+    carried: bool,
+    http1: bool,
+) -> Result<(Option<Preface>, Vec<u8>), OpeningEnd> {
     let manual = ManualClock::new();
     let clock = manual.clock();
     let (mut far, near) = sent(bytes).await;
     let mut reading = tokio::spawn(async move {
         let _near = near;
-        read(&mut far, carried, &clock, OPENING_WITHIN).await
+        read(&mut far, carried, http1, &clock, OPENING_WITHIN).await
     });
     // Watched beside the read, so a read that ends without waiting on the bound fails with its answer, by name.
     tokio::select! {
@@ -52,7 +61,7 @@ async fn a_full_http2_preface_in_time_is_handed_on_whole() {
     let mut bytes = HTTP2_PREFACE.to_vec();
     bytes.extend_from_slice(b"\x00\x00\x00settings");
     let (mut far, _near) = sent(&bytes).await;
-    let read = read(&mut far, false, &ManualClock::new().clock(), OPENING_WITHIN).await.expect("opened");
+    let read = read(&mut far, false, false, &ManualClock::new().clock(), OPENING_WITHIN).await.expect("opened");
     assert_eq!(read, (None, bytes), "no preface, every byte for HTTP/2");
 }
 
@@ -69,7 +78,10 @@ async fn silence_or_a_part_then_silence_closes_at_the_bound() {
 #[tokio::test]
 async fn an_opening_that_isnt_http2_closes_by_name() {
     let (mut far, _near) = sent(b"GET / HTTP/1.1\r\n").await;
-    assert_eq!(read(&mut far, false, &ManualClock::new().clock(), OPENING_WITHIN).await, Err(OpeningEnd::NotHttp2));
+    assert_eq!(
+        read(&mut far, false, false, &ManualClock::new().clock(), OPENING_WITHIN).await,
+        Err(OpeningEnd::NotHttp2)
+    );
 }
 
 /// D m/26884: a carried line plus HTTP/2's preface is read under the one deadline, the line onto the preface, the
@@ -79,7 +91,7 @@ async fn a_carried_line_then_the_http2_preface_is_read_whole() {
     let mut bytes = encode(&preface()).expect("encodes");
     bytes.extend_from_slice(HTTP2_PREFACE);
     let (mut far, _near) = sent(&bytes).await;
-    let read = read(&mut far, true, &ManualClock::new().clock(), OPENING_WITHIN).await.expect("opened");
+    let read = read(&mut far, true, false, &ManualClock::new().clock(), OPENING_WITHIN).await.expect("opened");
     assert_eq!(read, (Some(preface()), HTTP2_PREFACE.to_vec()));
 }
 
@@ -87,7 +99,7 @@ async fn a_carried_line_then_the_http2_preface_is_read_whole() {
 #[tokio::test]
 async fn a_carried_peer_opening_with_http2_is_bare() {
     let (mut far, _near) = sent(HTTP2_PREFACE).await;
-    let read = read(&mut far, true, &ManualClock::new().clock(), OPENING_WITHIN).await.expect("opened");
+    let read = read(&mut far, true, false, &ManualClock::new().clock(), OPENING_WITHIN).await.expect("opened");
     assert_eq!(read, (None, HTTP2_PREFACE.to_vec()));
 }
 
@@ -107,14 +119,17 @@ async fn a_carried_line_that_wont_parse_is_refused_by_name() {
     let clock = ManualClock::new().clock();
     let (mut far, _near) = sent(b"anemnez-carried/2 a b c\n").await;
     assert_eq!(
-        read(&mut far, true, &clock, OPENING_WITHIN).await,
+        read(&mut far, true, false, &clock, OPENING_WITHIN).await,
         Err(OpeningEnd::Refused(PrefaceRefusal::VersionUnknown))
     );
     let mut long = b"anemnez-carried/1 ".to_vec();
     long.extend(vec![b'x'; 9 * 1024]);
     long.push(b'\n');
     let (mut far, _near) = sent(&long).await;
-    assert_eq!(read(&mut far, true, &clock, OPENING_WITHIN).await, Err(OpeningEnd::Refused(PrefaceRefusal::TooLong)));
+    assert_eq!(
+        read(&mut far, true, false, &clock, OPENING_WITHIN).await,
+        Err(OpeningEnd::Refused(PrefaceRefusal::TooLong))
+    );
 }
 
 /// Only a Carried peer's line is read as a preface: anyone else's bytes must be HTTP/2's, a preface-shaped line
@@ -122,7 +137,10 @@ async fn a_carried_line_that_wont_parse_is_refused_by_name() {
 #[tokio::test]
 async fn only_a_carried_peer_may_open_with_a_preface_line() {
     let (mut far, _near) = sent(&encode(&preface()).expect("encodes")).await;
-    assert_eq!(read(&mut far, false, &ManualClock::new().clock(), OPENING_WITHIN).await, Err(OpeningEnd::NotHttp2));
+    assert_eq!(
+        read(&mut far, false, false, &ManualClock::new().clock(), OPENING_WITHIN).await,
+        Err(OpeningEnd::NotHttp2)
+    );
 }
 
 /// A burst from one peer is only slowed, never refused: 32 openings at once, each in time, all open, eight at a time.
@@ -277,4 +295,36 @@ fn closes_are_said_at_most_once_a_minute_as_counts_by_end() {
     assert_eq!(due.as_deref(), Some("no-http2-preface=5, not-http2=2"), "the minute's closes, by end");
     let next = start + SAID_EVERY + Duration::from_secs(1);
     assert_eq!(tally.closed(&OpeningEnd::Crowded, next), None, "the next minute runs from that warn");
+}
+
+/// D m/30486: on a plane that opens HTTP/1, a whole first request head is handed on, every byte; a line that isn't an
+/// HTTP/1.x request is `not-http` at once; a head past its bound is `http1-head-too-long`; HTTP/2 still opens.
+#[tokio::test]
+async fn an_http1_plane_opens_a_whole_request_head_and_refuses_the_rest_by_name() {
+    let clock = ManualClock::new().clock();
+    let head = b"GET /api/v1/blobs/x HTTP/1.1\r\nHost: plane\r\n\r\nbody".to_vec();
+    let (mut far, _near) = sent(&head).await;
+    assert_eq!(read(&mut far, false, true, &clock, OPENING_WITHIN).await, Ok((None, head)), "every byte handed on");
+    let mut h2 = HTTP2_PREFACE.to_vec();
+    h2.extend_from_slice(b"\x00");
+    let (mut far, _near) = sent(&h2).await;
+    assert_eq!(read(&mut far, false, true, &clock, OPENING_WITHIN).await, Ok((None, h2)), "HTTP/2 still opens");
+    for line in [&b"GET /x HTTP/2.0\r\n"[..], b"GET  /x HTTP/1.1\r\n", b"G\x01T /x HTTP/1.1\r\n", b"\x16\x03\x01\r\n"] {
+        let (mut far, _near) = sent(line).await;
+        assert_eq!(read(&mut far, false, true, &clock, OPENING_WITHIN).await, Err(OpeningEnd::NotHttp), "{line:?}");
+    }
+    let mut long = b"GET /x HTTP/1.1\r\n".to_vec();
+    long.resize(HTTP1_HEAD_AT_MOST + 1, b'a');
+    let (mut near, mut far) = tokio::io::duplex(4 * HTTP1_HEAD_AT_MOST);
+    near.write_all(&long).await.expect("written");
+    assert_eq!(read(&mut far, false, true, &clock, OPENING_WITHIN).await, Err(OpeningEnd::Http1HeadTooLong));
+}
+
+/// A head that begins and never ends holds its connection no longer than the bound, said by name.
+#[tokio::test]
+async fn an_unfinished_http1_head_closes_at_the_bound() {
+    assert_eq!(
+        opened_by_the_bound_as(b"GET /x HTTP/1.1\r\nHost: pl", false, true).await,
+        Err(OpeningEnd::Http1HeadUnfinished)
+    );
 }

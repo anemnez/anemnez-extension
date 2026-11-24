@@ -722,7 +722,8 @@ M m/25699). `carried::encode` refuses at the writer, by the same name, every fie
 D m/26884, m/26885). -serve's accept (`opening::Openings`, which the SDK's control `Incoming` runs too) reads every
 connection's opening within `OPENING_WITHIN` (10 s) on the injected clock: a carried peer's preface line, when it
 begins one, then HTTP/2's 24-byte client connection preface (`HTTP2_PREFACE`). Silence, or a part and then silence,
-closes `no-http2-preface`; an opening that isn't HTTP/2 closes `not-http2`. Every byte read is handed back to HTTP/2.
+closes `no-http2-preface`; an opening that isn't HTTP/2 closes `not-http2` (on a plane that serves a product's HTTP
+routes, an HTTP/1 request head opens too: `a-products-http-routes-ride-the-plane`). Every byte read is handed back.
 **Its scope is the opening alone:** past it, an open, quiet HTTP/2 connection is normal for a client that keeps its
 channel, and HTTP/2 keepalive covers a dead one. **Silence costs only its sender:** openings run with no global cap,
 at most `OPENING_AT_MOST_PER_PEER` (8) read at once per judged peer (by pid and pidversion) and the rest wait their turn
@@ -750,6 +751,25 @@ reader (M m/14147).
   reserved package (`anemnez.extension.`, which holds Describe, Health and Events, and `anemnez.fabric.`, which
   holds Lifecycle) as `reserved-service`, and one added twice as `service-named-twice`. Both are refused by name
   before any server is built, never with a panic.
+<!-- claim: a-products-http-routes-ride-the-plane -->
+- **A product's own HTTP routes ride the same plane, behind the same layers** (D m/30486; F m/30196; K, 2026-11-24).
+  `ProductRoutes::http(router)` adds an axum router (a REST or download API) as the fallback past every gRPC route,
+  the faces' included, so the admission layer, `ApiPlaneLayer` and the digest judge each request as they judge a
+  call. Each request carries its connection's `Judged` as an extension, for the product's own handlers. No layer
+  buffers or bounds a body: the product bounds its own by progress. A second router is `service-named-twice: http`.
+  - **HTTP/1 opens only where a product declares it, and never for a carried peer.** On such a plane an uncarried
+    connection may open with an HTTP/1.x request line, once its first head has arrived (at most
+    `HTTP1_HEAD_AT_MOST`, 64 KiB), under the same `OPENING_WITHIN`, turns and judge. One that is neither HTTP/2 nor
+    such a line closes `not-http`, a head too long closes `http1-head-too-long`, and one unfinished at the bound
+    closes `http1-head-unfinished`. Every other plane stays HTTP/2 alone (`not-http2`), held twice: by the opening and
+    by the server's own `accept_http1`. hyper parses each request; a request with both Content-Length and chunked is
+    read as chunked and its connection closed after it (RFC 9112 §6.3), so nothing is smuggled behind it.
+  - **A refusal of an HTTP request is a real HTTP status** (`answer_refusal`, the one shape for every layer on the
+    plane): 403 for the plane's own, 503 for the drain's, with `Retry-After` where it is not-now and the house-form
+    `<name>: <why>` as a plain-text body. A gRPC call (by its `application/grpc` content type) keeps its trailers.
+    Never an HTTP 200 carrying a grpc-status, which a REST client reads as an empty success.
+  - **A carried caller reaches no HTTP route** until a product declares a carried-reads list for them: its paths
+    aren't reads in the descriptor, so the plane refuses it `carried-write-unbound`.
 - **A stop is bounded** (rule 4). Once the stop's signal resolves, the plane takes no new connection and lets
   the calls in hand finish within the product's drain window, a deadline on `Host` read at each look. Past it,
   each remaining connection is cut, its calls ending unanswered (`drain-window-passed`), and `serve` returns

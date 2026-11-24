@@ -334,7 +334,13 @@ where
         match admitted {
             Err(name) => {
                 let said = said_on(name, request.uri().path());
-                Either::Left(std::future::ready(Ok(tonic::Status::permission_denied(said).into_http())))
+                let refused = answer_refusal(
+                    request.headers(),
+                    tonic::Status::permission_denied(said),
+                    http::StatusCode::FORBIDDEN,
+                    None,
+                );
+                Either::Left(std::future::ready(Ok(refused)))
             }
             Ok(claimed) => {
                 if let Some(claimed) = claimed {
@@ -344,6 +350,43 @@ where
             }
         }
     }
+}
+
+/// Whether a request is a gRPC call, by its content type (`application/grpc`, `application/grpc+proto`, ...): what
+/// decides whether a refusal is said as gRPC trailers or as an HTTP status.
+#[must_use]
+pub fn is_grpc(headers: &http::HeaderMap) -> bool {
+    headers
+        .get(http::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.starts_with("application/grpc"))
+}
+
+/// A refusal as its caller reads it (D m/30486 (3)): to a gRPC call, `status` as trailers, as before; to any other
+/// request, the HTTP status `http`, its body `status`'s message (the house form, `<name>: <why>`) as plain text, and
+/// `Retry-After` in whole seconds when it is not-now. Never an HTTP 200 carrying a grpc-status, which a REST client
+/// reads as an empty success. One shape for every layer that refuses on the API plane: the plane's 403 here, the drain
+/// layer's 503 (anemnez-service, M m/30486).
+#[must_use]
+pub fn answer_refusal(
+    headers: &http::HeaderMap,
+    status: tonic::Status,
+    http: http::StatusCode,
+    retry_after: Option<std::time::Duration>,
+) -> http::Response<BoxBody> {
+    if is_grpc(headers) {
+        return status.into_http();
+    }
+    let body = http_body_util::Full::new(bytes::Bytes::from(status.message().to_owned()));
+    let mut response = http::Response::new(tonic::body::boxed(body));
+    *response.status_mut() = http;
+    let text = http::HeaderValue::from_static("text/plain; charset=utf-8");
+    response.headers_mut().insert(http::header::CONTENT_TYPE, text);
+    if let Some(after) = retry_after {
+        let seconds = after.as_secs() + u64::from(after.subsec_nanos() > 0);
+        response.headers_mut().insert(http::header::RETRY_AFTER, http::HeaderValue::from(seconds));
+    }
+    response
 }
 
 /// A binary metadata value's bytes: gRPC carries a `-bin` value base64, padded or not. A value that doesn't decode

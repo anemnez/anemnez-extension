@@ -46,7 +46,17 @@ impl tower_service::Service<http::Request<BoxBody>> for Product {
     }
 }
 
-fn peer(role: Role) -> Peer {
+/// The contract's faces as a row's plane serves them: a SERVING board, a journal's Events and a fixed descriptor.
+pub(crate) fn faces(manual: &ManualClock) -> ApiFaces {
+    let journal = Journal::new("a1b2c3d4.boot1", 8, manual.clock());
+    let board = Board::new(journal.clone());
+    board.set(State::Serving, "all well");
+    let events = EventsService::new(journal, crate::principal_tests::verifier(manual, false));
+    ApiFaces::new(Describe::new(b"the descriptor".to_vec()), board, events)
+}
+
+/// A peer judged `role`, its code readable.
+pub(crate) fn peer(role: Role) -> Peer {
     Peer::from_token(
         [501, 501, 20, 501, 20, 41, 100_001, 7],
         Ok(Code { identifier: format!("ai.anemnez.{role:?}"), team: "TEAM1".into() }),
@@ -95,11 +105,7 @@ async fn plane_with(role: Role, routes: ProductRoutes) -> Plane {
 /// [`plane_with`], through [`serve_admitted`] with `admit` when one is given.
 async fn plane_admitted(role: Role, routes: ProductRoutes, admit: Option<Admit>) -> Plane {
     let manual = ManualClock::new();
-    let journal = Journal::new("a1b2c3d4.boot1", 8, manual.clock());
-    let board = Board::new(journal.clone());
-    board.set(State::Serving, "all well");
-    let events = EventsService::new(journal, crate::principal_tests::verifier(&manual, false));
-    let faces = ApiFaces::new(Describe::new(b"the descriptor".to_vec()), board, events);
+    let faces = faces(&manual);
     let (dir, socket, incoming) = crate::serve_tests::listen_as(move |io| Accepted::new(io, peer(role), role));
     let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
     let signal = async move {

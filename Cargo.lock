@@ -82,6 +82,7 @@ dependencies = [
  "anemnez-extension",
  "anemnez-layout",
  "anemnez-sim",
+ "axum",
  "base64",
  "bytes",
  "futures-util",

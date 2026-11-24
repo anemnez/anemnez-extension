@@ -25,6 +25,7 @@ futures-util.workspace = true
 tracing.workspace = true
 sha2.workspace = true
 http.workspace = true
+axum.workspace = true
 http-body.workspace = true
 http-body-util.workspace = true
 bytes.workspace = true

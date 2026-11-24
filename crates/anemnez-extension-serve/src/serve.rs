@@ -90,6 +90,8 @@ impl ApiFaces {
 pub struct ProductRoutes {
     routes: Routes,
     names: Vec<&'static str>,
+    /// The product's own HTTP routes, served after its gRPC services and the faces ([`ProductRoutes::http`]).
+    http: Option<axum::Router>,
 }
 
 /// A product service refused by [`ProductRoutes::add_service`]: the refusal's name and the service's.
@@ -139,6 +141,25 @@ impl ProductRoutes {
         }
         self.names.push(S::NAME);
         self.routes = self.routes.add_service(service);
+        Ok(self)
+    }
+
+    /// The product's own HTTP routes (a REST or download API, say), on the same plane (D m/30486; F m/30196): every
+    /// request no gRPC service claims goes to `router`, behind the same layers as the faces (the admission layer, then
+    /// [`ApiPlaneLayer`], then the digest's), so the plane judges each one and a refusal is a real HTTP status. A plane
+    /// with HTTP routes also opens HTTP/1 connections, uncarried ones only ([`crate::opening::Openings::with_http1`]);
+    /// one without stays HTTP/2 alone. Each request carries its connection's [`crate::Judged`] as an extension, for
+    /// the product's own handlers. Bodies stream both ways: no layer here buffers or bounds a body, which is the
+    /// product's to bound by progress. A carried caller reaches no HTTP route (`carried-write-unbound`) until a
+    /// declared carried-reads list exists.
+    ///
+    /// # Errors
+    /// [`SERVICE_NAMED_TWICE`] naming `http`, for a second router: a product's HTTP routes are one router.
+    pub fn http(mut self, router: axum::Router) -> Result<ProductRoutes, Refused> {
+        if self.http.is_some() {
+            return Err(Refused { name: SERVICE_NAMED_TWICE, service: "http" });
+        }
+        self.http = Some(router);
         Ok(self)
     }
 }
@@ -241,7 +262,9 @@ where
     // per peer, so silence holds only its sender. One that doesn't open is closed, said at debug by name and at warn
     // only as the plane's counts by end, at most once per SAID_EVERY.
     let incoming = {
-        let (clock, openings) = (stop.clock.clone(), crate::opening::Openings::new());
+        let openings = crate::opening::Openings::new();
+        let openings = if product.http.is_some() { openings.with_http1() } else { openings };
+        let clock = stop.clock.clone();
         let tally = Arc::new(std::sync::Mutex::new(crate::opening::Tally::default()));
         incoming
             .map(move |accepted| {
@@ -280,11 +303,19 @@ where
     let digested = DigestLayer::for_paths(
         [EVENTS_METHOD, CALL_METHOD, WATCH_METHOD].into_iter().chain(token_checked.iter().copied()),
     );
+    // A product's HTTP routes are the fallback past every gRPC route, the faces' included, so the layers below judge
+    // them as they judge a call (D m/30486).
+    let accept_http1 = product.http.is_some();
+    let routes = match product.http {
+        Some(http) => Routes::from(product.routes.into_axum_router().fallback_service(http)),
+        None => product.routes,
+    };
     let server = tonic::transport::Server::builder()
+        .accept_http1(accept_http1)
         .layer(admit)
         .layer(ApiPlaneLayer::new(crate::plane::Reads::of(faces.describe.descriptor())).claiming(faces.claimed))
         .layer(digested)
-        .add_routes(product.routes)
+        .add_routes(routes)
         .add_service(pb::describe_server::DescribeServer::new(faces.describe))
         .add_service(pb::health_server::HealthServer::new(faces.health))
         .add_service(pb::events_server::EventsServer::new(faces.events))
@@ -384,3 +415,7 @@ impl<IO: AsyncWrite + Unpin> AsyncWrite for Cuttable<IO> {
         Pin::new(&mut self.io).poll_shutdown(cx)
     }
 }
+
+#[cfg(test)]
+#[path = "http_routes_tests.rs"]
+mod http_routes_tests;

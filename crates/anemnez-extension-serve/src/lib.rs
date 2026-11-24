@@ -37,8 +37,8 @@ pub use health::Board;
 pub use journal::{EventsService, Journal, Refusal, STREAM_METHODS, StreamEnd, Subscription, origin_for};
 pub use log_events::{Admit, Asked, Authorize, EventsFace, LogEvents, Method, Revoke};
 pub use plane::{
-    ApiPlaneLayer, Claimed, ClaimedMethods, ClaimedWrites, Reads, api_admits, carried_admits, carried_claim,
-    plane_admits, said_on,
+    ApiPlaneLayer, Claimed, ClaimedMethods, ClaimedWrites, Reads, answer_refusal, api_admits, carried_admits,
+    carried_claim, is_grpc, plane_admits, said_on,
 };
 pub use principal::{
     Absent, Admitted, Carried, KeyRecord, Keys, MemoryNonces, Nonces, PublishedKey, UNPUBLISHED, Unpublished, Verifier,
