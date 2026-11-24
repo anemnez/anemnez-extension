@@ -19,6 +19,19 @@ fn the_fixture_declares_its_service() {
     assert_eq!(service.events_kept, 64);
 }
 
+/// The good fixture carries guidance (ORIENTATION.md §4), so a host's `instructions` are proven against a descriptor
+/// protoc wrote: its summary is its first line, within the caps, and `mcp::instructions` answers it whole.
+#[test]
+fn the_fixture_carries_guidance_a_host_says_as_its_instructions() {
+    use anemnez_extension::options::{GUIDANCE_MAX_CHARS, GUIDANCE_SUMMARY_MAX_CHARS};
+    let service = service_of(Variant::Good.file_descriptor_set()).expect("declared");
+    assert_eq!(service.summary(), "The fixture product: one of each method shape the contract describes.");
+    assert!(service.summary().chars().count() <= GUIDANCE_SUMMARY_MAX_CHARS);
+    assert!(service.guidance.chars().count() <= GUIDANCE_MAX_CHARS);
+    assert_eq!(anemnez_extension::mcp::instructions(&service), Some(service.guidance.as_str()));
+    assert!(service.guidance.contains("Recent is the newest five"), "{}", service.guidance);
+}
+
 /// The good descriptor offers every method shape, and Ping, with no anemnez options, is not exposed.
 #[test]
 fn the_good_fixture_offers_every_method_shape() {
