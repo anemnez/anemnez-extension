@@ -103,6 +103,11 @@ fn a_teaching_this_build_cant_read_is_refused_by_name_never_defaulted() {
     let new_class = wire::Teaching { outcome: Some(wire::Outcome::Refused(3)), ..no_whose.clone() };
     assert!(Teaching::decode(&new_class.encode_to_vec()).is_err_and(|e| e.starts_with("teaching-retry-unknown")));
     assert!(Teaching::decode(b"\xff\xff").is_err_and(|e| e.starts_with("teaching-malformed")));
+    // K m/30467: a teaching with no code can't be matched, so it's refused, never read with an empty one.
+    let codeless = wire::Teaching { code: String::new(), ..no_whose.clone() };
+    let codeless =
+        wire::Teaching { whose: Some(wire::Whose { who: Some(wire::Who::Caller(wire::Empty {})) }), ..codeless };
+    assert!(Teaching::decode(&codeless.encode_to_vec()).is_err_and(|e| e.starts_with("teaching-code-empty")));
 }
 
 /// K m/29830: informs ride trailing metadata as one encoded Informs, so no product's proto changes to carry them.

@@ -316,7 +316,9 @@ pub fn encode_informs(informs: &[Inform]) -> Vec<u8> {
     wire::Informs { informs: informs.iter().map(wire::Inform::from).collect() }.encode_to_vec()
 }
 
-/// A trailing metadata value read back as informs.
+/// A trailing metadata value read back as informs. The one place this module reads a default rather than refusing
+/// (K m/30467): an obligation's holder this build doesn't know reads as [`Holder::Session`], the narrower of the two,
+/// so an advisory inform is never dropped and never outlives its session on a guess.
 ///
 /// # Errors
 /// Bytes that aren't an `Informs`, by name.
@@ -459,6 +461,10 @@ impl TryFrom<wire::Teaching> for Teaching {
     type Error = String;
 
     fn try_from(raw: wire::Teaching) -> Result<Self, String> {
+        // A teaching with no code can't be qualified or matched by a reader (K m/30467).
+        if raw.code.is_empty() {
+            return Err("teaching-code-empty: a teaching names its code, what a reader matches on".into());
+        }
         let class = |v: i32| RetryClass::from_wire(v).ok_or_else(|| format!("teaching-retry-unknown: {v}"));
         let outcome = match raw.outcome {
             Some(wire::Outcome::Refused(v)) => Outcome::Refused(class(v)?),
