@@ -68,7 +68,7 @@ fn each_field_that_wont_parse_is_refused_by_name() {
         (with(3, "x:1795300000"), "holder"),
         (with(3, "4242:"), "holder"),
         (format!("{good} extra"), "code"),
-        (format!("{good} P9DJA3JCKP:x extra"), "fields"),
+        (format!("{good} ABCDE12345:x extra"), "fields"),
         ("anemnez-carried/1 a b".to_owned(), "fields"),
     ] {
         assert_eq!(parse(bad.as_bytes()), Err(PrefaceRefusal::Malformed(field)), "{bad:?}");
@@ -125,18 +125,18 @@ fn the_reader_declares_one_contract() {
 #[test]
 fn a_callers_code_identity_rides_as_the_fifth_part_and_a_line_without_it_still_reads() {
     let signed = Preface {
-        code: Some(CodeIdentity { team: "P9DJA3JCKP".into(), identifier: "ai.anemnez.stoad".into() }),
+        code: Some(CodeIdentity { team: "ABCDE12345".into(), identifier: "ai.anemnez.stoad".into() }),
         ..preface()
     };
     let l = line(&signed);
-    assert!(String::from_utf8_lossy(&l).ends_with(" P9DJA3JCKP:ai.anemnez.stoad"), "{}", String::from_utf8_lossy(&l));
+    assert!(String::from_utf8_lossy(&l).ends_with(" ABCDE12345:ai.anemnez.stoad"), "{}", String::from_utf8_lossy(&l));
     assert_eq!(parse(&l), Ok(signed));
     assert_eq!(parse(&line(&preface())).map(|p| p.code), Ok(None), "an older aegisd's line: unproven");
     let base = String::from_utf8(line(&preface())).unwrap();
-    for bad in ["P9DJA3JCKP", ":ai.anemnez.stoad", "P9DJA3JCKP:", "P9DJ!:x", "P9DJA3JCKP:ai\"x"] {
+    for bad in ["ABCDE12345", ":ai.anemnez.stoad", "ABCDE12345:", "P9DJ!:x", "ABCDE12345:ai\"x"] {
         assert_eq!(parse(format!("{base} {bad}").as_bytes()), Err(PrefaceRefusal::Malformed("code")), "{bad:?}");
     }
-    assert!(parse(format!("{base} P9DJA3JCKP:a extra").as_bytes()).is_err(), "never a sixth part");
+    assert!(parse(format!("{base} ABCDE12345:a extra").as_bytes()).is_err(), "never a sixth part");
     let bad = Preface { code: Some(CodeIdentity { team: "P9 DJ".into(), identifier: "x".into() }), ..preface() };
     assert_eq!(encode(&bad), Err(PrefaceRefusal::Malformed("code")), "the writer refuses what the reader would");
 }
