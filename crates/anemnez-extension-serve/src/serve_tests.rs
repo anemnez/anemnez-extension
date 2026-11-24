@@ -379,9 +379,8 @@ pub(crate) fn land_descriptor_with(effect: pb::Effect) -> Vec<u8> {
         runs_to_completion: true,
         examples: vec![pb::Example { args_json: r#"{"train": "train/h-x"}"#.into(), caption: "Land one".into() }],
         ask_within_secs: Some(90),
-        // Built against the published kernel too (the package proof), whose proto may not have a newer option
-        // yet (orient, field 15): readers first, so its parity row joins this one once the kernel releases it.
-        ..Default::default()
+        // Every option, written out: a new one fails to compile here until its parity is said.
+        orient: false,
     };
     let mut method = prost_types::MethodDescriptorProto {
         name: Some("Land".into()),
@@ -438,6 +437,62 @@ fn the_descriptor_check_reads_the_protos_own_encoding() {
     want.examples = vec![Example::new(r#"{"train": "train/h-x"}"#, "Land one")];
     want.ask_within_secs = Some(90);
     assert_eq!(methods[0].options, want);
+}
+
+/// ORIENTATION.md `#orient-is-one-bounded-read` and `#guidance-is-a-service-option`, read the proto's own way: an orient
+/// and a service's guidance, encoded by the proto's generated code, are what the kernel's hand-written decoder reads
+/// (readers first: the kernel released them, 0.9.27, before any product sets them).
+#[test]
+fn the_kernel_reads_an_orient_and_guidance_as_the_proto_writes_them() {
+    fn ld(field: u32, bytes: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        prost::encoding::encode_key(field, prost::encoding::WireType::LengthDelimited, &mut out);
+        prost::encoding::encode_varint(bytes.len() as u64, &mut out);
+        out.extend_from_slice(bytes);
+        out
+    }
+    let orient = pb::MethodOptions {
+        description: "What matters to you now.".into(),
+        result: Some(pb::Result { shape: Some(pb::result::Shape::Bound(1_500)) }),
+        effect: pb::Effect::Read as i32,
+        presence: pb::Presence::Full as i32,
+        permission: pb::Permission::Allow as i32,
+        callers: pb::Callers::Agent as i32,
+        orient: true,
+        ..Default::default()
+    };
+    let guidance = "H keeps the probe.\nEach tool answers its help.";
+    let service_options = pb::ServiceOptions {
+        contract: "h".into(),
+        version: "1.0.0".into(),
+        cursor_scope: pb::CursorScope::Instance as i32,
+        guidance: guidance.into(),
+        ..Default::default()
+    };
+    let mut method = prost_types::MethodDescriptorProto {
+        name: Some("Orient".into()),
+        input_type: Some(".h.v1.Empty".into()),
+        output_type: Some(".h.v1.Empty".into()),
+        ..Default::default()
+    }
+    .encode_to_vec();
+    method.extend(ld(4, &ld(51701, &orient.encode_to_vec())));
+    let mut service =
+        prost_types::ServiceDescriptorProto { name: Some("H".into()), ..Default::default() }.encode_to_vec();
+    service.extend(ld(2, &method));
+    service.extend(ld(3, &ld(51702, &service_options.encode_to_vec())));
+    let mut file = prost_types::FileDescriptorProto {
+        package: Some("h.v1".into()),
+        message_type: vec![prost_types::DescriptorProto { name: Some("Empty".into()), ..Default::default() }],
+        ..Default::default()
+    }
+    .encode_to_vec();
+    file.extend(ld(6, &service));
+    let set = ld(1, &file);
+    let methods = anemnez_extension::descriptor::check_descriptor(&set).expect("admitted");
+    assert!(methods[0].options.orient, "orient, as the proto wrote it");
+    let read = anemnez_extension::descriptor::service_of(&set).expect("its service");
+    assert_eq!((read.guidance.as_str(), read.summary()), (guidance, "H keeps the probe."));
 }
 
 /// a-products-events-are-read-through-one-call: a Journal is not the one face's log, so `Events/Call`
