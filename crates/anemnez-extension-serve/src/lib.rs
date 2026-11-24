@@ -23,6 +23,7 @@ pub mod health;
 pub mod journal;
 pub mod key_cache;
 pub mod log_events;
+pub mod many;
 pub mod opening;
 pub mod plane;
 pub mod principal;

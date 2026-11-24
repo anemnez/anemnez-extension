@@ -255,7 +255,7 @@ impl Log for Arc<Events> {
 
 /// A product's own log, served through the contract's `Events` face.
 pub struct LogEvents {
-    log: Arc<dyn Log>,
+    log: crate::many::Logs,
     verifier: Verifier,
     authorize: Authorize,
     clock: Clock,
@@ -277,6 +277,33 @@ impl LogEvents {
     /// As [`LogEvents::new`], reading the log through `log` (L m/30712): each Call opens it once, within what the
     /// call has left, and one that can't be opened in time is `events-call-busy` by name.
     pub fn over(log: Arc<dyn Log>, verifier: Verifier, authorize: Authorize, clock: Clock) -> LogEvents {
+        LogEvents::over_logs(crate::many::Logs::One(log), verifier, authorize, clock)
+    }
+
+    /// As [`LogEvents::over`], one face over several named logs (L m/32091, D m/32100): a Call or Watch reads the log
+    /// its request's position names, never another, and one it doesn't serve is refused by name, naming those it does.
+    /// Each log keeps its own changes and Busy, so one log's writer never holds another's reads. Latest is refused by
+    /// name until a request can name its log ([`crate::many::LATEST_NEEDS_ITS_LOG`]).
+    ///
+    /// # Errors
+    /// `log-names-twice` for two logs of one name, and `log-unnamed` for an empty name or none at all.
+    pub fn over_many(
+        logs: Vec<(String, Arc<dyn Log>)>,
+        verifier: Verifier,
+        authorize: Authorize,
+        clock: Clock,
+    ) -> Result<LogEvents, String> {
+        if logs.is_empty() || logs.iter().any(|(name, _)| name.is_empty()) {
+            return Err("log-unnamed: a many-log face serves one or more logs, each by a name".into());
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        if let Some((name, _)) = logs.iter().find(|(name, _)| !seen.insert(name.clone())) {
+            return Err(format!("log-names-twice: {name:?} names two logs on one face"));
+        }
+        Ok(LogEvents::over_logs(crate::many::Logs::Many(logs), verifier, authorize, clock))
+    }
+
+    fn over_logs(log: crate::many::Logs, verifier: Verifier, authorize: Authorize, clock: Clock) -> LogEvents {
         LogEvents {
             log,
             verifier,
@@ -521,16 +548,11 @@ impl pb::events_server::Events for LogEvents {
         let drain = request.extensions().get::<StreamEnd>().map(StreamEnd::ended);
         // A held log streams as it always has; one opened for each read streams through a ReRead, each read one open
         // and each wait outside the lock (L m/31024), the same Watching over it.
-        let log: Arc<dyn hydramq_events::Face> = match self.log.held() {
-            Some(events) => events,
-            None => {
-                let reread = crate::reread::ReRead::new(Arc::clone(&self.log), CALL_WITHIN, &self.clock);
-                if !reread.sourced() {
-                    tracing::info!(log = %self.log.name(), "a watch re-reads on its beat alone: the log has no source of changes");
-                }
-                Arc::new(reread)
-            }
-        };
+        let faced = self.log.faced(CALL_WITHIN, &self.clock);
+        if !faced.sourced() {
+            tracing::info!(log = %self.log.names(), "a watch re-reads on its beat alone: a log has no source of changes");
+        }
+        let log = faced.face;
         let bytes = request.into_inner().request;
         // Read the request before taking a thread for it.
         wire::watch(&log, &bytes).map_err(|e| tonic::Status::invalid_argument(e.to_string()))?;
@@ -603,21 +625,18 @@ impl pb::events_server::Events for LogEvents {
                 self.calls_max
             ))
         })?;
-        let (log, bytes) = (Arc::clone(&self.log), request.into_inner().request);
+        let (log, bytes) = (self.log.clone(), request.into_inner().request);
         let within = CALL_WITHIN.min(self.left(deadline));
         let clock = self.clock.clone();
         let read = tokio::task::spawn_blocking(move || {
             // Held while the thread reads, so a read past its bound still counts until it ends.
             let _slot = slot;
-            if log.held().is_some() {
-                let mut served = None;
-                return log.with(within, &mut |events| served = Some(wire::serve(events, &bytes))).map(|()| served);
-            }
-            // Opened for each read: a long-poll's wait sits outside the log's lock, so its writer never waits on a
-            // caller's within (L m/31024). A read that found the writer holding it is busy, by name.
-            let reread = crate::reread::ReRead::new(log, within, &clock);
-            let reply = wire::serve(&reread, &bytes);
-            match reread.busy() {
+            // A held log is read as it is; one opened for each read waits outside its lock, so its writer never waits
+            // on a caller's within (L m/31024); several are routed by the request's log. A read that found a writer
+            // holding its log is busy, by name.
+            let faced = log.faced(within, &clock);
+            let reply = wire::serve(&*faced.face, &bytes);
+            match faced.busy() {
                 Some(why) => Err(Busy(why)),
                 None => Ok(Some(reply)),
             }

@@ -155,6 +155,13 @@ didn't answer, `events-call-unanswered` for the read. A watch's open is authoriz
 a blocking thread until it ends, even past its bound, so a face holds at most `CALLS_MAX` reads (the product may set
 another), and the next call is refused `events-call-busy` at once (D m/20673).
 
+<!-- claim: one-face-serves-several-logs-by-name -->
+**One face serves several logs, each by its name** (L m/32091, D m/32100). `LogEvents::over_many` takes a product's
+logs by name (Horai's streams, a book per owner, a channel each): a Call or Watch reads the log its request's
+position names and no other, one it doesn't serve is refused `ForeignLog` naming those it does, and each log keeps its
+own changes and Busy. Latest is refused `latest-needs-its-log` on such a face until a request can name its log on the
+wire, never routed by a prefix's spelling. Two logs of one name, or an empty one, are refused at build.
+
 <!-- claim: a-log-is-read-through-one-seam -->
 **A log is read through one seam, held or opened per read** (L m/30712). `LogEvents::new` takes a log held open for
 the server's life; `LogEvents::over` takes any `Log`, whose `with(within, read)` opens it once for a read, within what
