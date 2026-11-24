@@ -99,6 +99,10 @@ pub mod refusal {
     /// `Events/Call` past the most concurrent reads a product's log face holds (each holds a blocking thread
     /// while it reads): refused at once, never queued; retry later (CONTRACT.md, the log face).
     pub const EVENTS_CALL_BUSY: &str = "events-call-busy";
+    /// `Events/Call` or `Events/Watch` on a log its product can't open or read (it won't open, its directory can't be
+    /// made, its records don't read): never load, so a retry won't read it either (D m/32403, CONTRACT.md, the log
+    /// face). The reason follows the name.
+    pub const EVENTS_LOG_UNREADABLE: &str = "events-log-unreadable";
     /// The product's own authorization of an `Events/Call` or `Events/Watch` refused it, or didn't answer within
     /// its bound: nothing of the log is served (CONTRACT.md, the log face). The reason follows the name.
     pub const UNAUTHORIZED: &str = "unauthorized";
