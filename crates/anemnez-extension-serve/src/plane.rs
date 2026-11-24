@@ -183,7 +183,8 @@ pub fn carried_claim(judged: &Judged, stamp: Option<&[u8]>, claimed: &ClaimedWri
 }
 
 /// Every API-plane rule for one call, decided once: a carried call to a listed write by [`carried_claim`], answering
-/// its claim; every other call by [`api_admits`] then [`carried_admits`]. Pure, so each rule has its row.
+/// its claim; a carried call to a read admitted as a read, its stamp unused; every other call by [`api_admits`] then
+/// [`carried_admits`]. Pure, so each rule has its row.
 ///
 /// # Errors
 /// The refusal's name.
@@ -196,6 +197,9 @@ pub fn plane_admits(
 ) -> Result<Option<Claimed>, &'static str> {
     match judged {
         Some(j) if j.role == Role::Carried && claimed.lists(path) => carried_claim(j, stamp, claimed).map(Some),
+        // A carried read is admitted as a read whatever it carries: Agora sends its stamp on every far call, and a
+        // read's stamp is never parsed nor believed, so reads stay location agnostic (O m/29572, a live regression).
+        Some(j) if j.role == Role::Carried && reads.reads(path) => Ok(None),
         _ => api_admits(judged, path, stamp.is_some())
             .and_then(|()| judged.map_or(Ok(()), |j| carried_admits(j.role, path, reads)))
             .map(|()| None),

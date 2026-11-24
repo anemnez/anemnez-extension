@@ -206,6 +206,7 @@ spoken_for("a-carried-write-may-be-admitted-for-a-claimed-lane (a lane)", "plane
 spoken_for("a-carried-write-may-be-admitted-for-a-claimed-lane (preface)", "plane_tests::a_carried_write_with_no_preface_is_refused")
 spoken_for("a-carried-write-may-be-admitted-for-a-claimed-lane (other peers)", "plane_tests::a_listed_write_from_any_other_peer_is_judged_as_before")
 spoken_for("a-carried-write-may-be-admitted-for-a-claimed-lane (layer)", "plane_tests::the_layer_hands_the_service_the_claim")
+spoken_for("a-carried-write-may-be-admitted-for-a-claimed-lane (reads)", "plane_tests::a_carried_read_with_a_stamp_is_admitted_as_a_read_and_its_stamp_unused")
 spoken_for("a-carried-connection-says-its-preface-once", "serve_fn_tests::a_carried_connections_preface_rides_its_requests_and_http2_after_it_is_served")
 spoken_for("a-carried-connection-says-its-preface-once (only a carried peer)", "opening::tests::only_a_carried_peer_may_open_with_a_preface_line")
 spoken_for("a-carried-connection-says-its-preface-once (older aegisd)", "opening::tests::a_carried_peer_opening_with_http2_is_bare")

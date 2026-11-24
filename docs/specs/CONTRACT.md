@@ -687,8 +687,10 @@ only when aegisd's preface said the node it came from (else `carried-no-preface`
 a plain name (ASCII alphanumeric and `-`, at most 64, never `:`, `/`, `@` or a space, since it is written into a
 recorded principal) that the product's predicate calls its own (else `carried-claim-not-a-lane`). The layer then puts `Claimed { lane, via }` on the request, once, for the product to
 record as `lane:<l> claimed via <node>` and hold to that lane's own data. It is a claim, never a verified principal
-(`Untrusted::claimed_lane`, never `vouched_by_peer`): the carrier is verified, the claim is not. A carried stamp to any
-method the product didn't list is still `stamp-not-from-agora`, and any other peer is judged as before. When a verified
+(`Untrusted::claimed_lane`, never `vouched_by_peer`): the carrier is verified, the claim is not. A carried read is admitted
+as a read whatever it carries, its stamp never parsed nor believed, so reads stay location agnostic though Agora sends
+its stamp on every far call (O m/29572). A carried stamp to a write the product didn't list is still
+`stamp-not-from-agora`, and any other peer is judged as before. When a verified
 far token is carried on the same call it wins, and a schema-bumped setting then refuses unverified claims by name
 (INIT-DISTRIBUTED step 5's exit).
 

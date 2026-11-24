@@ -309,3 +309,30 @@ async fn the_layer_hands_the_service_the_claim() {
     assert_eq!(response.status(), http::StatusCode::OK, "served, not refused");
     assert_eq!(*seen.0.lock().expect("seen"), Some(Claimed { lane: "K".into(), via: "node-b".into() }));
 }
+
+/// O m/29572, a live regression: Agora carries its stamp on every far send (I's narrowed `{class, lane}`), so a carried
+/// read arrives with one. A carried read is admitted as a read, its stamp unused and never believed, with no Claimed on
+/// it, so reads stay location agnostic whatever the caller sends. A carried stamp to an unlisted write is still refused.
+#[test]
+fn a_carried_read_with_a_stamp_is_admitted_as_a_read_and_its_stamp_unused() {
+    let reads = Reads(std::sync::Arc::new(std::iter::once(FUNCTIONAL.to_owned()).collect()));
+    let far = carried(Some("node-b"));
+    let lane = stamp(Some("K"));
+    assert_eq!(plane_admits(Some(&far), FUNCTIONAL, Some(&lane), &reads, &claiming_land()), Ok(None), "a read");
+    assert_eq!(plane_admits(Some(&far), DESCRIBE, Some(&lane), &reads, &claiming_land()), Ok(None), "a face");
+    assert_eq!(
+        plane_admits(Some(&carried(None)), FUNCTIONAL, Some(&lane), &reads, &ClaimedWrites::default()),
+        Ok(None)
+    );
+    let unlisted = "/h.v1.H/Other";
+    assert_eq!(
+        plane_admits(Some(&far), unlisted, Some(&lane), &reads, &claiming_land()),
+        Err(STAMP_NOT_FROM_AGORA),
+        "a stamp to an unlisted write is still refused"
+    );
+    assert_eq!(
+        plane_admits(Some(&judged(Role::Other)), FUNCTIONAL, Some(&lane), &reads, &claiming_land()),
+        Err(STAMP_NOT_FROM_AGORA),
+        "no other peer's stamp is let through to a read"
+    );
+}
