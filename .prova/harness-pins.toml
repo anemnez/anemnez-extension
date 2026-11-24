@@ -1,0 +1,28 @@
+# Harness pins (E's prova-suite/harness-pins-dated): each git family this workspace builds from, why, and who moves it.
+# Horai reads a listed row, so its bump moves each rev at the producer's release. A row with no hold owes no end
+# (E m/26706). Until this file existed, nothing bumped the extension's pins, and hydramq sat on 0.5.35 while its
+# producer reached 0.5.48 (A m/32838).
+
+[hydramq-family]
+repo = "anemnez/hydramq"
+rev = "218d27fb1987"
+why = "hydramq-events and its leaves, the log face -serve serves (Events, Watch) and the SDK's replica plane resolves beside it: one copy across the extension, the SDK and hydramq"
+owner = "M"
+
+[anemnez-clock-family]
+repo = "anemnez/anemnez-clock"
+rev = "e982db15fea0"
+why = "the injected clock every kernel and host here takes (rule 3), the same git copy as hydramq's and the SDK's, so cargo builds one"
+owner = "M"
+
+[anemnez-layout-family]
+repo = "anemnez/anemnez-layout"
+rev = "84f8f22e7766"
+why = "where data lives and the durable replace (rule 8), on the same clock as the rest of the family"
+owner = "M"
+
+[anemnez-sim-family]
+repo = "anemnez/anemnez-sim"
+rev = "87aa91889129"
+why = "the deterministic simulation's runner, dev-only (MACHINES §4), its clock the same rev as ours"
+owner = "M"
