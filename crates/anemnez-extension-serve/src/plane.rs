@@ -221,6 +221,10 @@ pub fn plane_admits(
         Some(j) if j.role == Role::Carried && reads.reads(path) => {
             Ok(if claimed.lists_read(path) { carried_claim(j, stamp, claimed).ok() } else { None })
         }
+        // A carried write its product didn't list is carried-write-unbound, stamp or none: the method isn't a claimed
+        // write here, which is what the lane must hear, never stamp-not-from-agora, which tells it its caller is wrong
+        // (D m/30197, rule 15).
+        Some(j) if j.role == Role::Carried => Err(CARRIED_WRITE_UNBOUND),
         _ => api_admits(judged, path, stamp.is_some())
             .and_then(|()| judged.map_or(Ok(()), |j| carried_admits(j.role, path, reads)))
             .map(|()| None),
@@ -250,6 +254,19 @@ pub fn said(name: &'static str) -> String {
         _ => "refused by the API plane",
     };
     format!("{name}: {why}")
+}
+
+/// A plane refusal of a call to `path`, as [`said`] says it, and for `carried-write-unbound` naming the method, so the
+/// lane learns which of its calls isn't a claimed write here (D m/30197, rule 15).
+#[must_use]
+pub fn said_on(name: &'static str, path: &str) -> String {
+    match name {
+        CARRIED_WRITE_UNBOUND => {
+            let method = path.rsplit('/').next().filter(|m| !m.is_empty()).unwrap_or(path);
+            format!("{} ({method} isn't a claimed write here)", said(name))
+        }
+        _ => said(name),
+    }
 }
 
 /// The API plane's rules as a layer on the product's server: each call is admitted by [`api_admits`] and
@@ -315,7 +332,10 @@ where
             plane_admits(judged, request.uri().path(), stamp.as_deref(), &self.reads, &self.claimed)
         };
         match admitted {
-            Err(name) => Either::Left(std::future::ready(Ok(tonic::Status::permission_denied(said(name)).into_http()))),
+            Err(name) => {
+                let said = said_on(name, request.uri().path());
+                Either::Left(std::future::ready(Ok(tonic::Status::permission_denied(said).into_http())))
+            }
             Ok(claimed) => {
                 if let Some(claimed) = claimed {
                     request.extensions_mut().insert(claimed);
