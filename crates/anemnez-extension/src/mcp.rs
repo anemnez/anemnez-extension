@@ -297,6 +297,13 @@ impl Untrusted<Stamp> {
     pub fn vouched_by_peer(self) -> Stamp {
         self.0
     }
+
+    /// The lane it claims, kept a claim: what a product records as `claimed via <node>` for a carried call its plane
+    /// admitted as a claimed write (D m/28960), never a vouched stamp. `None` when it names no lane.
+    #[must_use]
+    pub fn claimed_lane(&self) -> Option<&str> {
+        self.0.lane.as_deref()
+    }
 }
 
 impl Stamp {

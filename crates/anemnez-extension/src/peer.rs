@@ -27,6 +27,15 @@ pub const STAMP_NOT_FROM_AGORA: &str = "stamp-not-from-agora";
 /// A carried call (from Aegis's peer: another host's caller, D m/22425 §5) to a method that isn't a read, refused by
 /// name until the caller's principal is bound through Aegis: the far end admits carried reads only (K m/23155).
 pub const CARRIED_WRITE_UNBOUND: &str = "carried-write-unbound";
+/// A carried call to a write its product lists for claimed lanes (D m/28960), from an aegisd that said no preface: the
+/// node it came from is unknown, so its claim names no carrier, and it is refused.
+pub const CARRIED_NO_PREFACE: &str = "carried-no-preface";
+/// A carried call to a write its product lists for claimed lanes whose stamp claims no lane, a name not shaped as one,
+/// or one the product says isn't its lane (D m/28960 (3), m/29077: a claim names a lane, never the person).
+pub const CARRIED_CLAIM_NOT_A_LANE: &str = "carried-claim-not-a-lane";
+/// A product listing a method for claimed carried writes that its own descriptor doesn't say is a `write`: an `act`,
+/// a `read` or no such method. Refused when the plane is built, so an `act` can never be listed (D m/28960 (1)).
+pub const CLAIMED_WRITE_NOT_A_WRITE: &str = "claimed-write-not-a-write";
 
 /// A product's own service named under a package the contract reserves (`anemnez.extension.`, `anemnez.fabric.`):
 /// the API plane serves the contract's faces itself and never Lifecycle, so a product can't shadow or add one

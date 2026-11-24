@@ -8,7 +8,11 @@
 //! - a call that carries a caller's stamp from any peer but Agora is refused `stamp-not-from-agora`;
 //! - a carried call (Aegis's peer) reaches a method only when its descriptor says `read`, or one of the contract's
 //!   own Describe or Health, else it is refused `carried-write-unbound` ([`carried_admits`]; K m/23155). The log's
-//!   Events are refused to a carried call whole, since Call carries an opaque request (E m/23165).
+//!   Events are refused to a carried call whole, since Call carries an opaque request (E m/23165);
+//! - a carried call to a write its product lists for claimed lanes ([`ClaimedWrites`], D m/28960) is admitted with
+//!   its stamp's lane as a claim, [`Claimed`] `{ lane, via }` on the request, when aegisd said the node it came from
+//!   and the stamp names one of the product's lanes, by its own predicate ([`carried_claim`]); else `carried-no-preface` or
+//!   `carried-claim-not-a-lane`.
 //!
 //! Which principal a call then runs as, and whether a grant covers it, is the product's own decision
 //! (`one-decision-per-call-at-the-product`); these rules only say who may reach it at all.
@@ -19,9 +23,11 @@ use anemnez_extension::mcp::STAMP_METADATA_KEY;
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use anemnez_extension::mcp::Stamp;
 use anemnez_extension::options::Effect;
 use anemnez_extension::peer::{
-    CARRIED_WRITE_UNBOUND, FABRICD_READS_DESCRIBE_ONLY, NOT_JUDGED, Role, STAMP_NOT_FROM_AGORA,
+    CARRIED_CLAIM_NOT_A_LANE, CARRIED_NO_PREFACE, CARRIED_WRITE_UNBOUND, CLAIMED_WRITE_NOT_A_WRITE,
+    FABRICD_READS_DESCRIBE_ONLY, NOT_JUDGED, Role, STAMP_NOT_FROM_AGORA,
 };
 use tonic::body::BoxBody;
 
@@ -84,6 +90,118 @@ pub fn carried_admits(role: Role, path: &str, reads: &Reads) -> Result<(), &'sta
     }
 }
 
+/// What a product says a lane is: its own predicate, since the shared plane can't know a product's lanes (D m/29077).
+type IsLane = Arc<dyn Fn(&str) -> bool + Send + Sync>;
+
+/// The writes a product admits from a carried call with a claimed lane (D m/28960 (1)), and what it says a lane is
+/// (D m/29077): opted in per method, never per product, and each one a `write` in the product's own descriptor.
+/// Default none, so a product that lists nothing keeps every carried write refused `carried-write-unbound`. Which of
+/// its writes to list is the product's own call: the check refuses an `act`, but a product whose descriptor says a
+/// host-touching verb is a `write` keeps it out by its own list.
+#[derive(Clone)]
+pub struct ClaimedWrites {
+    methods: Arc<HashSet<String>>,
+    is_lane: IsLane,
+}
+
+impl Default for ClaimedWrites {
+    fn default() -> ClaimedWrites {
+        ClaimedWrites { methods: Arc::default(), is_lane: Arc::new(|_| false) }
+    }
+}
+
+impl std::fmt::Debug for ClaimedWrites {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ClaimedWrites").field("methods", &self.methods).finish_non_exhaustive()
+    }
+}
+
+impl ClaimedWrites {
+    /// `methods` (gRPC paths, `/pkg.Service/Method`), each checked against the encoded `FileDescriptorSet` the plane
+    /// serves, and `is_lane`, the product's own word on whether a claimed name is one of its lanes (Ergon's: an owner
+    /// that holds a book). No product opts in without saying what a lane is.
+    ///
+    /// # Errors
+    /// [`CLAIMED_WRITE_NOT_A_WRITE`] and the method, for one the descriptor doesn't say is a `write`: an `act`, a
+    /// `read`, or a path it doesn't have. A descriptor the check doesn't admit has no writes, so any list is refused.
+    pub fn of(
+        file_descriptor_set: &[u8],
+        methods: &[&str],
+        is_lane: impl Fn(&str) -> bool + Send + Sync + 'static,
+    ) -> Result<ClaimedWrites, (&'static str, String)> {
+        let writes: HashSet<String> = anemnez_extension::descriptor::check_descriptor(file_descriptor_set)
+            .map(|all| all.into_iter().filter(|m| m.options.effect == Effect::Write).map(|m| m.path).collect())
+            .unwrap_or_default();
+        match methods.iter().find(|m| !writes.contains(**m)) {
+            Some(not_a_write) => Err((CLAIMED_WRITE_NOT_A_WRITE, (*not_a_write).to_owned())),
+            None => Ok(ClaimedWrites {
+                methods: Arc::new(methods.iter().map(|m| (*m).to_owned()).collect()),
+                is_lane: Arc::new(is_lane),
+            }),
+        }
+    }
+
+    pub(crate) fn lists(&self, path: &str) -> bool {
+        self.methods.contains(path)
+    }
+}
+
+/// A carried write admitted for a claimed lane (D m/28960): the lane the far caller's stamp claims, and the node aegisd
+/// said the call came from. A claim, recorded as one (`lane:<l> claimed via <node>`), never a verified principal: the
+/// carrier is verified, the claim is not. The plane puts it on the request's extensions; read it with
+/// `request.extensions().get::<Claimed>()`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Claimed {
+    pub lane: String,
+    pub via: String,
+}
+
+/// The longest name a claimed lane may be.
+const LANE_MAX: usize = 64;
+
+/// A lane's shape, beneath the product's own word on it: a plain name (ASCII alphanumeric and `-`, at most
+/// [`LANE_MAX`]), never `:`, `/`, `@` or a space, since the lane is written into a recorded principal (D m/29077).
+fn lane_shaped(lane: &str) -> bool {
+    !lane.is_empty() && lane.len() <= LANE_MAX && lane.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+}
+
+/// The claim of a carried call to a listed write, from what its accept judged and the stamp bytes it carries, held to
+/// the product's own word on what a lane is. Pure.
+///
+/// # Errors
+/// [`CARRIED_NO_PREFACE`] when aegisd said no node; [`CARRIED_CLAIM_NOT_A_LANE`] for no stamp, a stamp with no lane, a
+/// lane not shaped as a plain name, or one the product says isn't its lane.
+pub fn carried_claim(judged: &Judged, stamp: Option<&[u8]>, claimed: &ClaimedWrites) -> Result<Claimed, &'static str> {
+    let via = judged.carried.as_ref().map(|preface| preface.node.clone()).ok_or(CARRIED_NO_PREFACE)?;
+    let stamp = Stamp::from_metadata(stamp.ok_or(CARRIED_CLAIM_NOT_A_LANE)?);
+    let lane = stamp.claimed_lane().ok_or(CARRIED_CLAIM_NOT_A_LANE)?;
+    if !lane_shaped(lane) || !(claimed.is_lane)(lane) {
+        return Err(CARRIED_CLAIM_NOT_A_LANE);
+    }
+    Ok(Claimed { lane: lane.to_owned(), via })
+}
+
+/// Every API-plane rule for one call, decided once: a carried call to a listed write by [`carried_claim`], answering
+/// its claim; every other call by [`api_admits`] then [`carried_admits`]. Pure, so each rule has its row.
+///
+/// # Errors
+/// The refusal's name.
+pub fn plane_admits(
+    judged: Option<&Judged>,
+    path: &str,
+    stamp: Option<&[u8]>,
+    reads: &Reads,
+    claimed: &ClaimedWrites,
+) -> Result<Option<Claimed>, &'static str> {
+    match judged {
+        Some(j) if j.role == Role::Carried && claimed.lists(path) => carried_claim(j, stamp, claimed).map(Some),
+        _ => api_admits(judged, path, stamp.is_some())
+            .and_then(|()| judged.map_or(Ok(()), |j| carried_admits(j.role, path, reads)))
+            .map(|()| None),
+    }
+}
+
 /// A plane refusal as the caller reads it, in the house form `<name>: <why>` (M m/25549, G m/25537): the name first,
 /// so a reader matches it by its name (anemnez-service `reach::named`), and why, so a person reads more than the name.
 #[must_use]
@@ -96,6 +214,11 @@ pub fn said(name: &'static str) -> String {
         CARRIED_WRITE_UNBOUND => {
             "a call carried from another host reaches reads only, until its caller's principal is bound end to end"
         }
+        CARRIED_NO_PREFACE => {
+            "a carried write is admitted for a claimed lane only when aegisd says the node it came from"
+        }
+        CARRIED_CLAIM_NOT_A_LANE => "a carried write's stamp must claim one of the product's lanes, by a plain name",
+        CLAIMED_WRITE_NOT_A_WRITE => "only a method the descriptor says is a write may be listed for claimed lanes",
         _ => "refused by the API plane",
     };
     format!("{name}: {why}")
@@ -107,13 +230,20 @@ pub fn said(name: &'static str) -> String {
 #[derive(Clone, Debug, Default)]
 pub struct ApiPlaneLayer {
     reads: Reads,
+    claimed: ClaimedWrites,
 }
 
 impl ApiPlaneLayer {
-    /// The layer for a product whose read methods are `reads`.
+    /// The layer for a product whose read methods are `reads`, admitting no claimed carried writes.
     #[must_use]
     pub fn new(reads: Reads) -> ApiPlaneLayer {
-        ApiPlaneLayer { reads }
+        ApiPlaneLayer { reads, claimed: ClaimedWrites::default() }
+    }
+
+    /// The same, admitting carried calls with a claimed lane to `claimed` (D m/28960).
+    #[must_use]
+    pub fn claiming(self, claimed: ClaimedWrites) -> ApiPlaneLayer {
+        ApiPlaneLayer { claimed, ..self }
     }
 }
 
@@ -121,7 +251,7 @@ impl<S> tower_layer::Layer<S> for ApiPlaneLayer {
     type Service = ApiPlaneService<S>;
 
     fn layer(&self, inner: S) -> ApiPlaneService<S> {
-        ApiPlaneService { inner, reads: self.reads.clone() }
+        ApiPlaneService { inner, reads: self.reads.clone(), claimed: self.claimed.clone() }
     }
 }
 
@@ -130,6 +260,7 @@ impl<S> tower_layer::Layer<S> for ApiPlaneLayer {
 pub struct ApiPlaneService<S> {
     inner: S,
     reads: Reads,
+    claimed: ClaimedWrites,
 }
 
 impl<S> tower_service::Service<http::Request<BoxBody>> for ApiPlaneService<S>
@@ -148,16 +279,33 @@ where
 
     /// Decided before the inner service is touched, so the inner that was polled ready serves an admitted
     /// call itself, with no clone and no box.
-    fn call(&mut self, request: http::Request<BoxBody>) -> Self::Future {
+    fn call(&mut self, mut request: http::Request<BoxBody>) -> Self::Future {
         use futures_util::future::Either;
-        let carries_stamp = request.headers().contains_key(STAMP_METADATA_KEY);
-        let judged = request.extensions().get::<Judged>();
-        let path = request.uri().path();
-        let admitted = api_admits(judged, path, carries_stamp)
-            .and_then(|()| judged.map_or(Ok(()), |j| carried_admits(j.role, path, &self.reads)));
+        let admitted = {
+            let stamp = request.headers().get(STAMP_METADATA_KEY).map(|v| stamp_bytes(v.as_bytes()));
+            let judged = request.extensions().get::<Judged>();
+            plane_admits(judged, request.uri().path(), stamp.as_deref(), &self.reads, &self.claimed)
+        };
         match admitted {
             Err(name) => Either::Left(std::future::ready(Ok(tonic::Status::permission_denied(said(name)).into_http()))),
-            Ok(()) => Either::Right(self.inner.call(request)),
+            Ok(claimed) => {
+                if let Some(claimed) = claimed {
+                    request.extensions_mut().insert(claimed);
+                }
+                Either::Right(self.inner.call(request))
+            }
         }
     }
+}
+
+/// A binary metadata value's bytes: gRPC carries a `-bin` value base64, padded or not. A value that doesn't decode
+/// reads as no bytes, which parses as no stamp, so it claims no lane.
+pub(crate) fn stamp_bytes(header: &[u8]) -> Vec<u8> {
+    use base64::Engine as _;
+    use base64::engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig};
+    const ANY_PADDING: GeneralPurpose = GeneralPurpose::new(
+        &base64::alphabet::STANDARD,
+        GeneralPurposeConfig::new().with_decode_padding_mode(DecodePaddingMode::Indifferent),
+    );
+    ANY_PADDING.decode(header).unwrap_or_default()
 }

@@ -671,7 +671,26 @@ built from the descriptor it serves), or to the contract's own Describe and Heal
 `carried-write-unbound` by name, the log's Events included, since Call carries hydramq-events' request opaquely and a
 commit or ack through it would be a write (E m/23165), and a stamp a carried call carries is never believed
 (`stamp-not-from-agora`). A descriptor the check doesn't admit reads as no reads. The rule lifts for a caller whose
-principal is bound through Aegis (I's binding), and never before.
+principal is bound through Aegis (I's binding), and never before, but for the writes a product lists for claimed
+lanes (`a-carried-write-may-be-admitted-for-a-claimed-lane`, below).
+
+<!-- claim: a-carried-write-may-be-admitted-for-a-claimed-lane -->
+**A carried write reaches a product only when it lists the method for claimed lanes, and then as a claim** (D m/28960;
+O m/28968; K m/29040). Trust doesn't depend on location: a lane's write from another host through a verified aegisd is
+no weaker than the same claim made on the host itself. A product opts in per method, never per product, through
+`ApiFaces::claiming` (`ClaimedWrites::of`), and each listed method must be a `write` in its own descriptor: an `act`,
+a `read`, or a path it doesn't have is refused `claimed-write-not-a-write` when the plane is built. Which writes to
+list is the product's own call: a host-touching verb its descriptor calls a `write` (Ergon's Place) stays out by its
+list (O m/29051). Nothing is listed by default. The product also says what a lane is, as a predicate, since the shared
+plane can't know its lanes (D m/29077): no product opts in without one. A carried call to a listed method is admitted
+only when aegisd's preface said the node it came from (else `carried-no-preface`) and its stamp claims a lane shaped as
+a plain name (ASCII alphanumeric and `-`, at most 64, never `:`, `/`, `@` or a space, since it is written into a
+recorded principal) that the product's predicate calls its own (else `carried-claim-not-a-lane`). The layer then puts `Claimed { lane, via }` on the request, once, for the product to
+record as `lane:<l> claimed via <node>` and hold to that lane's own data. It is a claim, never a verified principal
+(`Untrusted::claimed_lane`, never `vouched_by_peer`): the carrier is verified, the claim is not. A carried stamp to any
+method the product didn't list is still `stamp-not-from-agora`, and any other peer is judged as before. When a verified
+far token is carried on the same call it wins, and a schema-bumped setting then refuses unverified claims by name
+(INIT-DISTRIBUTED step 5's exit).
 
 <!-- claim: a-carried-connection-says-its-preface-once -->
 **A carried connection says where it came from once, at accept** (K m/25625; M m/25661; D m/25623). aegisd writes

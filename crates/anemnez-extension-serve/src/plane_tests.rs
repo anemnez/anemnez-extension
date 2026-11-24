@@ -1,14 +1,21 @@
 //! The API plane's per-call rules (CONTRACT.md §8, §8.1): one row per rule on the pure decision, and one
 //! end to end through [`ApiPlaneLayer`] on a socket.
 
+use anemnez_extension::carried::{Holder, Preface};
 use anemnez_extension::mcp::STAMP_METADATA_KEY;
+use anemnez_extension::mcp::Stamp;
 use anemnez_extension::peer::{
-    CARRIED_WRITE_UNBOUND, Code, FABRICD_READS_DESCRIBE_ONLY, NOT_JUDGED, Peer, Role, STAMP_NOT_FROM_AGORA,
+    CARRIED_CLAIM_NOT_A_LANE, CARRIED_NO_PREFACE, CARRIED_WRITE_UNBOUND, CLAIMED_WRITE_NOT_A_WRITE, Code,
+    FABRICD_READS_DESCRIBE_ONLY, NOT_JUDGED, Peer, Role, STAMP_NOT_FROM_AGORA,
 };
 
 use crate::accepted::{Accepted, Judged};
 use crate::pb;
-use crate::plane::{ApiPlaneLayer, Reads, api_admits, carried_admits, said};
+use crate::plane::{
+    ApiPlaneLayer, Claimed, ClaimedWrites, Reads, api_admits, carried_admits, carried_claim, plane_admits, said,
+    stamp_bytes,
+};
+use crate::serve_tests::land_descriptor_with;
 
 const DESCRIBE: &str = "/anemnez.extension.v1.Describe/Get";
 const FUNCTIONAL: &str = "/minion.v1.Minion/AppsList";
@@ -115,10 +122,190 @@ fn reads_come_from_the_descriptors_effects_and_a_bad_descriptor_reads_none() {
 #[test]
 fn every_plane_refusal_is_said_as_its_name_then_why() {
     assert_eq!(said(NOT_JUDGED), NOT_JUDGED, "already a sentence, unchanged on the wire");
-    for name in [FABRICD_READS_DESCRIBE_ONLY, STAMP_NOT_FROM_AGORA, CARRIED_WRITE_UNBOUND] {
+    for name in [
+        FABRICD_READS_DESCRIBE_ONLY,
+        STAMP_NOT_FROM_AGORA,
+        CARRIED_WRITE_UNBOUND,
+        CARRIED_NO_PREFACE,
+        CARRIED_CLAIM_NOT_A_LANE,
+        CLAIMED_WRITE_NOT_A_WRITE,
+    ] {
         let said = said(name);
         let (named, why) = said.split_once(": ").expect("the house form");
         assert_eq!(named, name);
         assert!(!why.is_empty() && why != "refused by the API plane", "{name} says why of its own: {said}");
     }
+}
+
+// ── Claimed carried writes (D m/28960, O m/28968, K m/29040) ─────────────────────────────────────────────────────
+
+const LAND: &str = "/h.v1.H/Land";
+
+/// A carried connection, with the preface aegisd says when it says one.
+fn carried(node: Option<&str>) -> Judged {
+    let mut judged = judged(Role::Carried);
+    judged.carried = node.map(|node| Preface {
+        node: node.into(),
+        cert_der: vec![1, 2, 3],
+        holder: Holder { unique_id: 7, boot: "1795300000.1".into() },
+    });
+    judged
+}
+
+fn stamp(lane: Option<&str>) -> Vec<u8> {
+    Stamp::new(lane.map(str::to_owned), None, None).to_metadata()
+}
+
+/// The product's lanes, for these rows: K and O.
+fn ours(lane: &str) -> bool {
+    matches!(lane, "K" | "O")
+}
+
+fn claiming_land() -> ClaimedWrites {
+    ClaimedWrites::of(&land_descriptor_with(pb::Effect::Write), &[LAND], ours).expect("Land is a write")
+}
+
+/// D m/28960 (1): a product lists methods, never itself, and only its descriptor's writes: an act, a read, or a path
+/// it doesn't have is refused when the plane is built, by name. (A host-touching verb a descriptor calls a write, as
+/// Ergon's Place is, stays out by the product's own list: O m/29051.)
+#[test]
+fn only_a_descriptors_writes_can_be_listed_for_claimed_lanes() {
+    for effect in [pb::Effect::Write, pb::Effect::Act, pb::Effect::Read] {
+        let checked = anemnez_extension::descriptor::check_descriptor(&land_descriptor_with(effect));
+        assert!(checked.is_ok(), "{effect:?}: the fixture is a descriptor the check admits, so no row is vacuous");
+    }
+    assert!(ClaimedWrites::of(&land_descriptor_with(pb::Effect::Write), &[LAND], ours).is_ok());
+    for effect in [pb::Effect::Act, pb::Effect::Read] {
+        assert_eq!(
+            ClaimedWrites::of(&land_descriptor_with(effect), &[LAND], ours).err(),
+            Some((CLAIMED_WRITE_NOT_A_WRITE, LAND.to_owned())),
+            "{effect:?}"
+        );
+    }
+    let missing = ClaimedWrites::of(&land_descriptor_with(pb::Effect::Write), &["/h.v1.H/Place"], ours).err();
+    assert_eq!(missing, Some((CLAIMED_WRITE_NOT_A_WRITE, "/h.v1.H/Place".to_owned())), "a path it doesn't have");
+    assert!(ClaimedWrites::of(b"not a descriptor", &[], ours).is_ok(), "listing nothing is always fine");
+}
+
+/// A carried call to a listed write, from aegisd's preface and with a lane claimed, is admitted with its claim: the
+/// lane and the node it came from.
+#[test]
+fn a_listed_carried_write_with_a_lane_is_admitted_with_its_claim() {
+    let admitted = plane_admits(
+        Some(&carried(Some("node-b"))),
+        LAND,
+        Some(&stamp(Some("K"))),
+        &Reads::default(),
+        &claiming_land(),
+    );
+    assert_eq!(admitted, Ok(Some(Claimed { lane: "K".into(), via: "node-b".into() })));
+}
+
+/// Only listed writes: an unlisted carried write is still carried-write-unbound, and a stamp it carries is still not
+/// believed, as before the opt-in.
+#[test]
+fn an_unlisted_carried_write_is_refused_as_before() {
+    let judged = carried(Some("node-b"));
+    let none = ClaimedWrites::default();
+    assert_eq!(plane_admits(Some(&judged), LAND, None, &Reads::default(), &none), Err(CARRIED_WRITE_UNBOUND));
+    let lane = stamp(Some("K"));
+    assert_eq!(plane_admits(Some(&judged), LAND, Some(&lane), &Reads::default(), &none), Err(STAMP_NOT_FROM_AGORA));
+    let other = "/h.v1.H/Other";
+    assert_eq!(
+        plane_admits(Some(&judged), other, Some(&lane), &Reads::default(), &claiming_land()),
+        Err(STAMP_NOT_FROM_AGORA)
+    );
+}
+
+/// D m/28960 (3), m/29077: a claim names one of the product's lanes, by its own predicate, never a list here; a name
+/// not shaped as a plain name is refused beneath it, whatever the product says; and a listed write with no claim is
+/// refused by the same name.
+#[test]
+fn a_carried_claim_the_product_doesnt_call_a_lane_or_not_shaped_as_one_is_refused() {
+    let judged = carried(Some("node-b"));
+    let claimed = claiming_land();
+    assert_eq!(carried_claim(&judged, Some(&stamp(Some("O"))), &claimed).map(|c| c.lane), Ok("O".into()));
+    for not_ours in ["User", "person", "Z"] {
+        let refused = carried_claim(&judged, Some(&stamp(Some(not_ours))), &claimed);
+        assert_eq!(refused, Err(CARRIED_CLAIM_NOT_A_LANE), "{not_ours}: the product's predicate says no");
+    }
+    let says_yes = ClaimedWrites::of(&land_descriptor_with(pb::Effect::Write), &[LAND], |_| true).expect("a write");
+    let too_long = "a".repeat(65);
+    for shape in ["a:b", "x/y", "k@host", "a b", "", too_long.as_str()] {
+        let bytes = format!(r#"{{"class":"external","place":{{"proven":false}},"lane":"{shape}"}}"#).into_bytes();
+        assert_eq!(
+            carried_claim(&judged, Some(&bytes), &says_yes),
+            Err(CARRIED_CLAIM_NOT_A_LANE),
+            "{shape:?} by shape"
+        );
+    }
+    assert_eq!(carried_claim(&judged, Some(&stamp(None)), &claimed), Err(CARRIED_CLAIM_NOT_A_LANE), "no lane");
+    assert_eq!(carried_claim(&judged, None, &claimed), Err(CARRIED_CLAIM_NOT_A_LANE), "no stamp");
+    assert_eq!(carried_claim(&judged, Some(b"not json"), &claimed), Err(CARRIED_CLAIM_NOT_A_LANE), "not a stamp");
+}
+
+/// D m/28960 (2): the carrier is what's verified, so a carried write with no preface names no carrier and is refused.
+#[test]
+fn a_carried_write_with_no_preface_is_refused() {
+    let admitted =
+        plane_admits(Some(&carried(None)), LAND, Some(&stamp(Some("K"))), &Reads::default(), &claiming_land());
+    assert_eq!(admitted, Err(CARRIED_NO_PREFACE));
+}
+
+/// The opt-in touches carried calls only: Agora's stamp to a listed write passes with no claim, and any other peer's
+/// stamp is still refused.
+#[test]
+fn a_listed_write_from_any_other_peer_is_judged_as_before() {
+    let lane = stamp(Some("K"));
+    let claimed = claiming_land();
+    assert_eq!(plane_admits(Some(&judged(Role::Agora)), LAND, Some(&lane), &Reads::default(), &claimed), Ok(None));
+    assert_eq!(
+        plane_admits(Some(&judged(Role::Other)), LAND, Some(&lane), &Reads::default(), &claimed),
+        Err(STAMP_NOT_FROM_AGORA)
+    );
+    assert_eq!(plane_admits(None, LAND, Some(&lane), &Reads::default(), &claimed), Err(NOT_JUDGED));
+}
+
+/// The stamp reaches the plane as gRPC sends it: base64 in a `-bin` header, which reads back as the bytes sent.
+#[test]
+fn a_stamp_reads_back_from_its_bin_header_as_sent() {
+    let sent = stamp(Some("K"));
+    let mut metadata = tonic::metadata::MetadataMap::new();
+    metadata.insert_bin(STAMP_METADATA_KEY, tonic::metadata::MetadataValue::from_bytes(&sent));
+    let headers = metadata.into_headers();
+    assert_eq!(stamp_bytes(headers.get(STAMP_METADATA_KEY).expect("the header").as_bytes()), sent);
+    assert!(stamp_bytes(b"!!not base64!!").is_empty(), "undecodable reads as no bytes, so no lane");
+}
+
+/// End to end through the layer: an admitted claimed write reaches the service with its Claimed on the request.
+#[tokio::test]
+async fn the_layer_hands_the_service_the_claim() {
+    use tower_layer::Layer as _;
+    use tower_service::Service as _;
+
+    #[derive(Clone, Default)]
+    struct Seen(std::sync::Arc<std::sync::Mutex<Option<Claimed>>>);
+    impl tower_service::Service<http::Request<tonic::body::BoxBody>> for Seen {
+        type Response = http::Response<tonic::body::BoxBody>;
+        type Error = std::convert::Infallible;
+        type Future = std::future::Ready<Result<Self::Response, Self::Error>>;
+        fn poll_ready(&mut self, _: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), Self::Error>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+        fn call(&mut self, request: http::Request<tonic::body::BoxBody>) -> Self::Future {
+            *self.0.lock().expect("seen") = request.extensions().get::<Claimed>().cloned();
+            std::future::ready(Ok(http::Response::new(tonic::body::empty_body())))
+        }
+    }
+
+    let seen = Seen::default();
+    let mut service = ApiPlaneLayer::new(Reads::default()).claiming(claiming_land()).layer(seen.clone());
+    let mut metadata = tonic::metadata::MetadataMap::new();
+    metadata.insert_bin(STAMP_METADATA_KEY, tonic::metadata::MetadataValue::from_bytes(&stamp(Some("K"))));
+    let mut request = http::Request::builder().uri(LAND).body(tonic::body::empty_body()).expect("a request");
+    *request.headers_mut() = metadata.into_headers();
+    request.extensions_mut().insert(carried(Some("node-b")));
+    let response = service.call(request).await.expect("answered");
+    assert_eq!(response.status(), http::StatusCode::OK, "served, not refused");
+    assert_eq!(*seen.0.lock().expect("seen"), Some(Claimed { lane: "K".into(), via: "node-b".into() }));
 }

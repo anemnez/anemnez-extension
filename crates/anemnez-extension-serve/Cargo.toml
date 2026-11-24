@@ -15,6 +15,7 @@ publish.workspace = true
 anemnez-extension.workspace = true
 anemnez-clock.workspace = true
 anemnez-layout.workspace = true
+base64.workspace = true
 tonic.workspace = true
 prost.workspace = true
 prost-types.workspace = true

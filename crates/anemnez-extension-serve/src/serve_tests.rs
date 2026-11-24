@@ -353,6 +353,11 @@ fn only_one_uncompressed_frame_is_digested() {
 /// An admitted descriptor of one method, `/h.v1.H/Land`, its options encoded by the proto's generated code: for the
 /// rows that need a real descriptor (a released fixture would be a second copy of -serve).
 pub(crate) fn land_descriptor() -> Vec<u8> {
+    land_descriptor_with(pb::Effect::Write)
+}
+
+/// [`land_descriptor`], with Land's effect `effect`.
+pub(crate) fn land_descriptor_with(effect: pb::Effect) -> Vec<u8> {
     fn ld(field: u32, bytes: &[u8]) -> Vec<u8> {
         let mut out = Vec::new();
         prost::encoding::encode_key(field, prost::encoding::WireType::LengthDelimited, &mut out);
@@ -363,7 +368,7 @@ pub(crate) fn land_descriptor() -> Vec<u8> {
     let options = pb::MethodOptions {
         description: "Land a train.".into(),
         result: Some(pb::Result { shape: Some(pb::result::Shape::Bound(50)) }),
-        effect: pb::Effect::Write as i32,
+        effect: effect as i32,
         route: Some(pb::Route { to: Some(pb::route::To::Leader("herald".into())) }),
         person_act: true,
         presence: pb::Presence::Minimal as i32,

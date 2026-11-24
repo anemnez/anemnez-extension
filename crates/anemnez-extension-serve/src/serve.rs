@@ -59,13 +59,29 @@ pub struct ApiFaces {
     describe: Describe,
     health: Board,
     events: EventsFace,
+    claimed: crate::plane::ClaimedWrites,
 }
 
 impl ApiFaces {
     /// The three faces [`serve`] puts beside the product's calls. `events` is the product's Journal (an
     /// `EventsService`, retiring) or its own log (a `LogEvents`), as an [`EventsFace`].
     pub fn new(describe: Describe, health: Board, events: impl Into<EventsFace>) -> ApiFaces {
-        ApiFaces { describe, health, events: events.into() }
+        ApiFaces { describe, health, events: events.into(), claimed: crate::plane::ClaimedWrites::default() }
+    }
+
+    /// The same, with the API plane admitting carried calls with a claimed lane to `methods` (D m/28960), each a
+    /// `write` in the descriptor this Describe serves, for a lane `is_lane` says is the product's own (D m/29077).
+    ///
+    /// # Errors
+    /// [`CLAIMED_WRITE_NOT_A_WRITE`](anemnez_extension::peer::CLAIMED_WRITE_NOT_A_WRITE) and the method, for one that
+    /// isn't.
+    pub fn claiming(
+        self,
+        methods: &[&str],
+        is_lane: impl Fn(&str) -> bool + Send + Sync + 'static,
+    ) -> Result<ApiFaces, (&'static str, String)> {
+        let claimed = crate::plane::ClaimedWrites::of(self.describe.descriptor(), methods, is_lane)?;
+        Ok(ApiFaces { claimed, ..self })
     }
 }
 
@@ -266,7 +282,7 @@ where
     );
     let server = tonic::transport::Server::builder()
         .layer(admit)
-        .layer(ApiPlaneLayer::new(crate::plane::Reads::of(faces.describe.descriptor())))
+        .layer(ApiPlaneLayer::new(crate::plane::Reads::of(faces.describe.descriptor())).claiming(faces.claimed))
         .layer(digested)
         .add_routes(product.routes)
         .add_service(pb::describe_server::DescribeServer::new(faces.describe))

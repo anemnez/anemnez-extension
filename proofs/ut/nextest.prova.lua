@@ -199,6 +199,13 @@ spoken_for("one-mapping-flattens-a-descriptor (map_entry)", "descriptor::tests::
 spoken_for("an-external-caller-is-parsed-here-and-trusted-only-from-its-peer", "mcp::tests::an_external_caller_is_parsed_here_and_trusted_only_from_its_peer")
 
 spoken_for("a-carried-call-reaches-reads-only", "plane_tests::a_carried_call_reaches_reads_only")
+spoken_for("a-carried-write-may-be-admitted-for-a-claimed-lane", "plane_tests::a_listed_carried_write_with_a_lane_is_admitted_with_its_claim")
+spoken_for("a-carried-write-may-be-admitted-for-a-claimed-lane (writes only)", "plane_tests::only_a_descriptors_writes_can_be_listed_for_claimed_lanes")
+spoken_for("a-carried-write-may-be-admitted-for-a-claimed-lane (unlisted)", "plane_tests::an_unlisted_carried_write_is_refused_as_before")
+spoken_for("a-carried-write-may-be-admitted-for-a-claimed-lane (a lane)", "plane_tests::a_carried_claim_the_product_doesnt_call_a_lane_or_not_shaped_as_one_is_refused")
+spoken_for("a-carried-write-may-be-admitted-for-a-claimed-lane (preface)", "plane_tests::a_carried_write_with_no_preface_is_refused")
+spoken_for("a-carried-write-may-be-admitted-for-a-claimed-lane (other peers)", "plane_tests::a_listed_write_from_any_other_peer_is_judged_as_before")
+spoken_for("a-carried-write-may-be-admitted-for-a-claimed-lane (layer)", "plane_tests::the_layer_hands_the_service_the_claim")
 spoken_for("a-carried-connection-says-its-preface-once", "serve_fn_tests::a_carried_connections_preface_rides_its_requests_and_http2_after_it_is_served")
 spoken_for("a-carried-connection-says-its-preface-once (only a carried peer)", "opening::tests::only_a_carried_peer_may_open_with_a_preface_line")
 spoken_for("a-carried-connection-says-its-preface-once (older aegisd)", "opening::tests::a_carried_peer_opening_with_http2_is_bare")
