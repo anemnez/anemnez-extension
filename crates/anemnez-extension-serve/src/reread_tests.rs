@@ -137,3 +137,33 @@ async fn a_wait_is_outside_the_open_and_woken_by_changes_or_its_bound() {
     manual.advance(Duration::from_secs(30)).await;
     assert_eq!(rx.recv_timeout(PARK).expect("its bound").expect("read"), 0, "nothing past it, at the bound");
 }
+
+/// D m/32441's host row, on a real file: Changes::follow wakes a waiter when the file is replaced by a rename over it,
+/// and follows to the new file, so its next write wakes one too, each long before the beat. PARK is the real-time
+/// bound a row waits on a wake, a twelfth of the beat.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_followed_file_wakes_a_waiter_through_a_replace_and_after_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("events.log");
+    std::fs::write(&path, b"one").unwrap();
+    let changes = Changes::new(&anemnez_clock::Clock::system());
+    let _following = changes.follow(&path, Duration::from_secs(60)).expect("macOS follows");
+    let found = changes.wait_past(0, PARK, None);
+    assert!(found, "the first open finds the file");
+
+    let seen = changes.generation();
+    let beside = dir.path().join("events.log.new");
+    std::fs::write(&beside, b"two").unwrap();
+    std::fs::rename(&beside, &path).unwrap();
+    assert!(changes.wait_past(seen, PARK, None), "the replace wakes, before the beat");
+    // The replace bumps once for the file gone and once for the new one opened and armed: wait for the second, by
+    // value, never a sleep.
+    if changes.generation() < seen + 2 {
+        assert!(changes.wait_past(changes.generation(), PARK, None), "the new file opened");
+    }
+    let seen = changes.generation();
+    let mut file = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
+    std::io::Write::write_all(&mut file, b"three").unwrap();
+    assert!(changes.wait_past(seen, PARK, None), "the new file's write wakes: the watch followed it");
+}

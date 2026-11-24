@@ -91,6 +91,7 @@ dependencies = [
  "http-body-util",
  "hydramq-events",
  "hyper-util",
+ "libc",
  "prost",
  "prost-types",
  "sha2",

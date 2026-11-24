@@ -53,8 +53,24 @@ impl Changes {
         self.moved.notify_all();
     }
 
+    /// Bump these changes whenever the file at `path` may hold something new: written or extended, replaced (a
+    /// rename over it, which it follows to the new file), deleted, or found again at a `beat` while it's absent (D
+    /// m/32441). It stops within a beat of the [`crate::follow::Following`] being dropped, so the [`crate::Log`] that
+    /// hands these out keeps it.
+    ///
+    /// # Errors
+    /// [`crate::follow::FOLLOW_UNSUPPORTED`] where there's no file watch for this host (a Watch then wakes at its beat),
+    /// or the watch couldn't start.
+    pub fn follow(
+        self: &Arc<Self>,
+        path: &std::path::Path,
+        beat: Duration,
+    ) -> Result<crate::follow::Following, String> {
+        crate::follow::follow(Arc::clone(self), path, beat)
+    }
+
     /// Wait at most `within` for the generation to move past `seen`, or `stop` to be set. Whether it moved.
-    fn wait_past(&self, seen: u64, within: Duration, stop: Option<&AtomicBool>) -> bool {
+    pub(crate) fn wait_past(&self, seen: u64, within: Duration, stop: Option<&AtomicBool>) -> bool {
         let stopped = || stop.is_some_and(|s| s.load(Ordering::SeqCst));
         let deadline = self.clock.now_mono() + within;
         let Ok(mut generation) = self.generation.lock() else { return false };
