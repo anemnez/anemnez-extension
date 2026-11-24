@@ -15,3 +15,6 @@
 # Nothing here for prova's generated state, deliberately. The --last-failed record and held-topology
 # run-state live in .prova/var/, which ships its own `.gitignore` of `*` — every package ignores its
 # own state, at any depth, so this file never needs an entry for it.
+# SwiftPM build output and its editor state (the root Package.swift, AnemnezEvents).
+/.build/
+/.swiftpm/

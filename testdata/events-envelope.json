@@ -1,0 +1,9 @@
+{
+  "about": "The Events face's gRPC envelope (anemnez/extension/v1/events.proto) as -serve's prost encodes it: one vector both sides read (ERGON-UI.md §4a; M m/32875). The Rust row holds these bytes to prost's encoding, and the Swift row decodes them with swift-protobuf, so the two sides can never carry the wire's bytes differently.",
+  "payload_hex": "68796472616d71",
+  "call_request_hex": "0a0768796472616d71",
+  "call_reply_hex": "0a0768796472616d71",
+  "watch_request_hex": "0a0768796472616d71",
+  "watch_frame_hex": "0a0768796472616d71",
+  "empty_payload_hex": ""
+}

@@ -65,6 +65,8 @@ mod describe_tests;
 #[cfg(test)]
 mod edge_tests;
 #[cfg(test)]
+mod envelope_vector_tests;
+#[cfg(test)]
 mod key_cache_sim_tests;
 #[cfg(test)]
 mod log_events_tests;
