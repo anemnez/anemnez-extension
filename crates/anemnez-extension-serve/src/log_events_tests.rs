@@ -480,6 +480,10 @@ struct PerRead {
 }
 
 impl crate::log_events::Log for PerRead {
+    fn name(&self) -> &str {
+        LOG
+    }
+
     fn with(&self, within: Duration, read: &mut dyn FnMut(&Events)) -> Result<(), crate::log_events::Busy> {
         self.within.lock().unwrap().push(within);
         if self.busy.load(Ordering::SeqCst) {
@@ -492,8 +496,8 @@ impl crate::log_events::Log for PerRead {
 }
 
 /// L m/30712: a log opened for each read serves Call through one open per call, handed what the call has left, and a
-/// log its writer holds is events-call-busy by name, nothing read; its Watch is refused as a Journal's is, so the
-/// client reads watch-unserved, and no watch thread starts.
+/// log its writer holds is events-call-busy by name, nothing read; its Watch is served through the same re-read
+/// (m/31024), its first frame the log's event.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_log_opened_per_read_serves_call_once_per_call_and_says_busy() {
     let f = fixture();
@@ -526,8 +530,8 @@ async fn a_log_opened_per_read_serves_call_once_per_call_and_says_busy() {
     assert!(busy.message().starts_with("events-call-busy: the log's writer holds it"), "{}", busy.message());
     assert_eq!(per_read.opens.load(Ordering::SeqCst), 2, "nothing read while busy");
 
-    let unserved = face.watch(watch(10)).await.err().expect("refused");
-    assert_eq!(unserved.code(), tonic::Code::Unimplemented);
-    assert!(unserved.message().starts_with("events-call-unserved: "), "{}", unserved.message());
-    assert_eq!(face.watches_open(), 0, "a refused watch starts no thread");
+    per_read.busy.store(false, Ordering::SeqCst);
+    let mut frames = face.watch(watch(10)).await.expect("a per-read log's watch is served").into_inner();
+    let first = anemnez_clock::Clock::system().timeout(PARK, frames.next()).await.expect("a frame in time");
+    assert_eq!(events_in(&first.expect("a frame").expect("not an error")), 1, "the log's event, through the re-read");
 }

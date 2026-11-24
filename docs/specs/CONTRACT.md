@@ -161,7 +161,12 @@ the server's life; `LogEvents::over` takes any `Log`, whose `with(within, read)`
 the call has left, so a product whose log has another writer (horaid, over Horai's flock'd logs) serves the same face
 and never a private one (rule 2). A log its writer holds is `events-call-busy` by name, "the log's writer holds it",
 nothing read. A log opened per read has no Watch yet, and refuses it as a Journal does (`events-call-unserved`, which
-the client reads as `watch-unserved`), until a Watch's re-read is served.
+the client reads as `watch-unserved`), until a Watch's re-read is served. A log opened per read is served through `ReRead`, a hydramq-events `Face` over the seam, so Events/Call's
+long-poll and Events/Watch take the one wire path every log takes. Each read is one `with`; finding nothing past the
+cursor, the wait is outside the log's lock (its writer never waits on a caller's `within`, L m/31024), woken by the
+log's `Changes`, which its owner bumps on every write it learns of, or by the bound alone where the log has none
+(said in the watch's log line). The generation is read before each read and the wait lasts only while it still
+equals that one, so a write landing between a read and its wait wakes it at once (D m/31023).
 
 <!-- claim: a-log-watch-is-bounded-and-ends-stopped -->
 **A log watch is bounded, and its every end stops it.** Each watch is a thread of its own pushing into a bounded
