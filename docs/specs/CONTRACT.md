@@ -692,8 +692,9 @@ as a read whatever it carries, so reads stay location agnostic though Agora send
 m/29572). A product may list reads too (`ClaimedMethods`, D m/29220): on a listed read a claim that holds rides it for
 attribution, metering and fairness only, and one that doesn't is served unattributed, never refused; an unlisted read's
 stamp is never parsed. Only an `act`, or a path the descriptor doesn't have, can't be listed
-(`claimed-method-not-a-read-or-write`). A carried stamp to a write the product didn't list is still
-`stamp-not-from-agora`, and any other peer is judged as before. When a verified
+(`claimed-method-not-a-read-or-write`). A carried write the product didn't list is `carried-write-unbound`,
+stamp or none, its refusal naming the method ("Place isn't a claimed write here"), never `stamp-not-from-agora`, which
+would tell the lane its caller is wrong (D m/30197, rule 15). Any other peer is judged as before. When a verified
 far token is carried on the same call it wins, and a schema-bumped setting then refuses unverified claims by name
 (INIT-DISTRIBUTED step 5's exit).
 

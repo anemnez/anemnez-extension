@@ -13,7 +13,7 @@ use crate::accepted::{Accepted, Judged};
 use crate::pb;
 use crate::plane::{
     ApiPlaneLayer, Claimed, ClaimedMethods, ClaimedWrites, Reads, api_admits, carried_admits, carried_claim,
-    plane_admits, said, stamp_bytes,
+    plane_admits, said, said_on, stamp_bytes,
 };
 use crate::serve_tests::land_descriptor_with;
 
@@ -239,19 +239,23 @@ fn a_listed_carried_write_with_a_lane_is_admitted_with_its_claim() {
     assert_eq!(admitted, Ok(Some(Claimed { lane: "K".into(), via: "node-b".into() })));
 }
 
-/// Only listed writes: an unlisted carried write is still carried-write-unbound, and a stamp it carries is still not
-/// believed, as before the opt-in.
+/// Only listed writes: an unlisted carried write is carried-write-unbound, stamp or none, since the method isn't a
+/// claimed write here (D m/30197, rule 15), never stamp-not-from-agora.
 #[test]
 fn an_unlisted_carried_write_is_refused_as_before() {
     let judged = carried(Some("node-b"));
     let none = ClaimedWrites::default();
     assert_eq!(plane_admits(Some(&judged), LAND, None, &Reads::default(), &none), Err(CARRIED_WRITE_UNBOUND));
     let lane = stamp(Some("K"));
-    assert_eq!(plane_admits(Some(&judged), LAND, Some(&lane), &Reads::default(), &none), Err(STAMP_NOT_FROM_AGORA));
+    assert_eq!(
+        plane_admits(Some(&judged), LAND, Some(&lane), &Reads::default(), &none),
+        Err(CARRIED_WRITE_UNBOUND),
+        "a stamp changes nothing: the write isn't listed (D m/30197)"
+    );
     let other = "/h.v1.H/Other";
     assert_eq!(
         plane_admits(Some(&judged), other, Some(&lane), &Reads::default(), &claiming_land()),
-        Err(STAMP_NOT_FROM_AGORA)
+        Err(CARRIED_WRITE_UNBOUND)
     );
 }
 
@@ -365,12 +369,22 @@ fn a_carried_read_with_a_stamp_is_admitted_as_a_read_and_its_stamp_unused() {
     let unlisted = "/h.v1.H/Other";
     assert_eq!(
         plane_admits(Some(&far), unlisted, Some(&lane), &reads, &claiming_land()),
-        Err(STAMP_NOT_FROM_AGORA),
-        "a stamp to an unlisted write is still refused"
+        Err(CARRIED_WRITE_UNBOUND),
+        "a stamp to an unlisted write is refused as unbound, never as the caller's fault"
     );
     assert_eq!(
         plane_admits(Some(&judged(Role::Other)), FUNCTIONAL, Some(&lane), &reads, &claiming_land()),
         Err(STAMP_NOT_FROM_AGORA),
         "no other peer's stamp is let through to a read"
     );
+}
+
+/// D m/30197, rule 15: an unlisted carried write's refusal names its method, so the lane hears which of its calls
+/// isn't a claimed write here, in the house form with the name first. Other refusals say as before.
+#[test]
+fn an_unbound_carried_write_is_said_by_its_method() {
+    let told = said_on(CARRIED_WRITE_UNBOUND, "/anemnez.ergon.v1.Items/Place");
+    assert!(told.starts_with("carried-write-unbound: "), "{told}");
+    assert!(told.ends_with("(Place isn't a claimed write here)"), "{told}");
+    assert_eq!(said_on(STAMP_NOT_FROM_AGORA, "/x.v1.X/Y"), said(STAMP_NOT_FROM_AGORA), "others unchanged");
 }
