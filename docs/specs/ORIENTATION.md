@@ -54,9 +54,12 @@ method's `description` is.
 **A product may mark one method `orient`: what matters to the caller now.**
 - It is unary and takes no argument (O): it renders the same for the same caller and state, and a focused
   read is the product's own `get`. It has `effect: read` and exposure `Agent`.
-- Its bounds are the contract's existing options (K): its size is its `result: Bound` (at most 1,500
-  characters, refused if larger or absent), and its time is its `ask_within_secs`, the one number a
-  fan-out's inner bound reads.
+- Its bounds are the contract's existing options (K), plus one cap of its own:
+  - its result is `bound`, the count of replies, which is a count and never characters. One reply is
+    `bound: 1`. `check_descriptor` refuses an orient with no bound, or one past 1,500;
+  - its text, the reply itself, is at most 1,500 characters (`ORIENT_BOUND_MAX`), capped by the product,
+    and a cut text says it was cut and where the rest is (AGENTIC_EXPERIENCE.md AX6; Ergon's orient, O);
+  - its time is its `ask_within_secs`, the one number a fan-out's inner bound reads.
 - It answers about the authenticated caller (its stamp, CONTRACT.md §7), never a lane named in its input.
   On a carried call that is the claimed lane, once the product lists `orient` in its ClaimedMethods.
   Until then a carried orient answers as for an unattributed caller, never someone's book (K). A claim is
