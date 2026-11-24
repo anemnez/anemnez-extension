@@ -29,6 +29,7 @@ use anemnez_extension::peer::{
     CARRIED_CLAIM_NOT_A_LANE, CARRIED_NO_PREFACE, CARRIED_WRITE_UNBOUND, CLAIMED_METHOD_NOT_A_READ_OR_WRITE,
     CLAIMED_WRITE_NOT_A_WRITE, FABRICD_READS_DESCRIBE_ONLY, NOT_JUDGED, Role, STAMP_NOT_FROM_AGORA,
 };
+use anemnez_extension::teaching::{RetryClass, Teaching, Whose, status_details};
 use tonic::body::BoxBody;
 
 use crate::accepted::Judged;
@@ -269,6 +270,34 @@ pub fn said_on(name: &'static str, path: &str) -> String {
     }
 }
 
+/// A plane refusal of a call to `path` as a teaching (house rule 15, AX3): its name as the code, what `said_on` says
+/// as what was expected, a retry class, and whose it is to fix. Every plane refusal is refused before any work, and the
+/// same call is refused again, so each is `Blanket`. What differs is whose it is: the caller's call to change, or the
+/// operator's wiring of this host.
+#[must_use]
+pub fn taught(name: &'static str, path: &str) -> Teaching {
+    let (code, whose) = match name {
+        // A server whose accept judged nothing, or a carried call no aegisd vouched for: this host's wiring.
+        NOT_JUDGED => ("not-judged", Whose::Operator),
+        CARRIED_NO_PREFACE => (name, Whose::Operator),
+        // Every other is the call itself: through Agora, a read, a listed write, a plain lane name.
+        _ => (name, Whose::Caller),
+    };
+    let said = said_on(name, path);
+    let expected = said.split_once(": ").map_or(said.as_str(), |(_, why)| why).to_owned();
+    Teaching::refused(code, expected, RetryClass::Blanket, whose)
+}
+
+/// A plane refusal of a call to `path` as gRPC answers it: PERMISSION_DENIED, the house-form message `said_on` says
+/// (what every reader matches by name, unchanged), and its [`taught`] teaching as the Status's one detail, so a reader
+/// that knows the outcome types reads the retry class and whose (anemnez-extension `teaching::teaching_in`).
+#[must_use]
+pub fn refused(name: &'static str, path: &str) -> tonic::Status {
+    let said = said_on(name, path);
+    let details = status_details(tonic::Code::PermissionDenied as i32, &said, &taught(name, path));
+    tonic::Status::with_details(tonic::Code::PermissionDenied, said, bytes::Bytes::from(details))
+}
+
 /// The API plane's rules as a layer on the product's server: each call is admitted by [`api_admits`] and
 /// [`carried_admits`] or answered PERMISSION_DENIED with the refusal's name and why ([`said`]), before any service
 /// sees it.
@@ -333,10 +362,9 @@ where
         };
         match admitted {
             Err(name) => {
-                let said = said_on(name, request.uri().path());
                 let refused = answer_refusal(
                     request.headers(),
-                    tonic::Status::permission_denied(said),
+                    refused(name, request.uri().path()),
                     http::StatusCode::FORBIDDEN,
                     None,
                 );
