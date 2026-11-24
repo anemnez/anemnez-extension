@@ -22,8 +22,9 @@ dependencies = [
 
 [[package]]
 name = "anemnez-extension"
-version = "0.9.32"
+version = "0.9.50"
 dependencies = [
+ "anemnez-trust",
  "base64",
  "ed25519-dalek",
  "p256",
@@ -36,7 +37,7 @@ dependencies = [
 
 [[package]]
 name = "anemnez-extension-client"
-version = "0.9.32"
+version = "0.9.50"
 dependencies = [
  "anemnez-clock",
  "anemnez-extension",
@@ -58,7 +59,7 @@ dependencies = [
 
 [[package]]
 name = "anemnez-extension-fixture"
-version = "0.9.32"
+version = "0.9.50"
 dependencies = [
  "anemnez-clock",
  "anemnez-extension",
@@ -76,12 +77,13 @@ dependencies = [
 
 [[package]]
 name = "anemnez-extension-serve"
-version = "0.9.32"
+version = "0.9.50"
 dependencies = [
  "anemnez-clock",
  "anemnez-extension",
  "anemnez-layout",
  "anemnez-sim",
+ "anemnez-trust",
  "axum",
  "base64",
  "bytes",
@@ -132,6 +134,11 @@ source = "git+ssh://git@github.com/anemnez/anemnez-sim-io.git?rev=90248fc1ce3a#9
 dependencies = [
  "libc",
 ]
+
+[[package]]
+name = "anemnez-trust"
+version = "0.3.0"
+source = "git+ssh://git@github.com/anemnez/anemnez-service.git?rev=e2066107cafc#e2066107cafcd5996ef07df1c3207be8bdebbd7b"
 
 [[package]]
 name = "anyhow"

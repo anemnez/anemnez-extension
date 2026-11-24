@@ -42,8 +42,8 @@ pub use journal::{
 };
 pub use log_events::{Admit, Asked, Authorize, Busy, EventsFace, Log, LogEvents, Method, Revoke};
 pub use plane::{
-    ApiPlaneLayer, Claimed, ClaimedMethods, ClaimedWrites, Reads, answer_refusal, api_admits, carried_admits,
-    carried_claim, is_grpc, plane_admits, said_on,
+    ApiPlaneLayer, Claimed, ClaimedMethods, ClaimedWrites, ProductCaller, ProductCallers, Reads, answer_refusal,
+    api_admits, carried_admits, carried_claim, is_grpc, plane_admits, product_admits, said_on,
 };
 pub use principal::{
     Absent, Admitted, Carried, KeyRecord, Keys, MemoryNonces, Nonces, PublishedKey, UNPUBLISHED, Unpublished, Verifier,

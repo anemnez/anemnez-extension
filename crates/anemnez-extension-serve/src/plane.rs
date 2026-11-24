@@ -14,6 +14,13 @@
 //!   and the stamp names one of the product's lanes, by its own predicate ([`carried_claim`]); else `carried-no-preface` or
 //!   `carried-claim-not-a-lane`.
 //!
+//! - a carried call to a method whose descriptor says `callers = PRODUCT` ([`ProductCallers`], D m/32662) is admitted
+//!   only when aegisd's preface carries the far caller's code identity, its team the house's (anemnez-trust's anchor),
+//!   with [`ProductCaller`] `{ node, identity }` on the request for the handler's own predicate to narrow (for a replica
+//!   stream, this product's own identifier and the assignment); an absent identity is `product-caller-unproven`, one
+//!   meaning whatever the cause, and another team is `product-caller-untrusted` ([`product_admits`]). A carried agent
+//!   write still needs its bound token: a code identity never opens a method that isn't `callers = PRODUCT`.
+//!
 //! Which principal a call then runs as, and whether a grant covers it, is the product's own decision
 //! (`one-decision-per-call-at-the-product`); these rules only say who may reach it at all.
 
@@ -27,7 +34,8 @@ use anemnez_extension::mcp::Stamp;
 use anemnez_extension::options::Effect;
 use anemnez_extension::peer::{
     CARRIED_CLAIM_NOT_A_LANE, CARRIED_NO_PREFACE, CARRIED_WRITE_UNBOUND, CLAIMED_METHOD_NOT_A_READ_OR_WRITE,
-    CLAIMED_WRITE_NOT_A_WRITE, FABRICD_READS_DESCRIBE_ONLY, NOT_JUDGED, Role, STAMP_NOT_FROM_AGORA,
+    CLAIMED_WRITE_NOT_A_WRITE, FABRICD_READS_DESCRIBE_ONLY, NOT_JUDGED, PRODUCT_CALLER_UNPROVEN,
+    PRODUCT_CALLER_UNTRUSTED, Role, STAMP_NOT_FROM_AGORA,
 };
 use anemnez_extension::teaching::{RetryClass, Teaching, Whose, status_details};
 use tonic::body::BoxBody;
@@ -77,6 +85,58 @@ impl Reads {
     pub(crate) fn reads(&self, path: &str) -> bool {
         self.0.contains(path) || FACE_READS.iter().any(|face| path.starts_with(face))
     }
+}
+
+/// The product's methods a product calls (`callers = PRODUCT` in its descriptor), read once when the plane is built: a
+/// carried call reaches one past the read rule only from a proven product ([`product_admits`]). A descriptor
+/// `check_descriptor` doesn't admit lists none, the safe direction.
+#[derive(Clone, Debug, Default)]
+pub struct ProductCallers(Arc<HashSet<String>>);
+
+impl ProductCallers {
+    /// The `callers = PRODUCT` methods of the encoded `FileDescriptorSet`.
+    #[must_use]
+    pub fn of(file_descriptor_set: &[u8]) -> ProductCallers {
+        let methods = anemnez_extension::descriptor::check_descriptor(file_descriptor_set)
+            .map(|methods| {
+                methods
+                    .into_iter()
+                    .filter(|m| m.options.callers == anemnez_extension::options::Callers::Product)
+                    .map(|m| m.path)
+                    .collect()
+            })
+            .unwrap_or_default();
+        ProductCallers(Arc::new(methods))
+    }
+
+    /// Whether `path` is one a product calls.
+    #[must_use]
+    pub fn lists(&self, path: &str) -> bool {
+        self.0.contains(path)
+    }
+}
+
+/// A carried product caller, proven: the node aegisd said the call came from, and the code identity it judged of the
+/// far process. On the request, for the handler's predicate to narrow (D m/32662).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProductCaller {
+    pub node: String,
+    pub identity: anemnez_extension::carried::CodeIdentity,
+}
+
+/// Whether the carried call `judged` is a proven product caller: aegisd's preface carries the far caller's code
+/// identity, its team the house's (anemnez-trust's anchor, never "the far aegisd said so"). Pure.
+///
+/// # Errors
+/// [`PRODUCT_CALLER_UNPROVEN`] with no preface or no code identity in it, one meaning whatever the cause;
+/// [`PRODUCT_CALLER_UNTRUSTED`] for another team.
+pub fn product_admits(judged: &Judged) -> Result<ProductCaller, &'static str> {
+    let Some(preface) = &judged.carried else { return Err(PRODUCT_CALLER_UNPROVEN) };
+    let Some(identity) = &preface.code else { return Err(PRODUCT_CALLER_UNPROVEN) };
+    if identity.team != anemnez_trust::ANEMNEZ_TEAM {
+        return Err(PRODUCT_CALLER_UNTRUSTED);
+    }
+    Ok(ProductCaller { node: preface.node.clone(), identity: identity.clone() })
 }
 
 /// Whether a call to `path` on a connection judged `role` may go on, beyond [`api_admits`]: a carried call only to a
@@ -252,6 +312,10 @@ pub fn said(name: &'static str) -> String {
         CLAIMED_METHOD_NOT_A_READ_OR_WRITE => {
             "only a method the descriptor says is a read or a write may be listed for claimed lanes, never an act"
         }
+        PRODUCT_CALLER_UNPROVEN => {
+            "a carried call to a method products call is admitted only when aegisd says who signed the far caller"
+        }
+        PRODUCT_CALLER_UNTRUSTED => "a carried product caller must be signed by the house's team",
         _ => "refused by the API plane",
     };
     format!("{name}: {why}")
@@ -272,7 +336,7 @@ pub fn said_on(name: &'static str, path: &str) -> String {
 
 /// Every name the API plane refuses with, at a call or when the plane is built: the one list [`said`] and [`taught`]
 /// answer for, held by a row that reads this file's own refusals, so a new name can't go untaught (D m/30986).
-pub const PLANE_REFUSALS: [&str; 8] = [
+pub const PLANE_REFUSALS: [&str; 10] = [
     NOT_JUDGED,
     FABRICD_READS_DESCRIBE_ONLY,
     STAMP_NOT_FROM_AGORA,
@@ -281,6 +345,8 @@ pub const PLANE_REFUSALS: [&str; 8] = [
     CARRIED_CLAIM_NOT_A_LANE,
     CLAIMED_WRITE_NOT_A_WRITE,
     CLAIMED_METHOD_NOT_A_READ_OR_WRITE,
+    PRODUCT_CALLER_UNPROVEN,
+    PRODUCT_CALLER_UNTRUSTED,
 ];
 
 /// A plane refusal of a call to `path` as a teaching (house rule 15, AX3): its name as the code, what `said_on` says
@@ -318,13 +384,14 @@ pub fn refused(name: &'static str, path: &str) -> tonic::Status {
 pub struct ApiPlaneLayer {
     reads: Reads,
     claimed: ClaimedWrites,
+    products: ProductCallers,
 }
 
 impl ApiPlaneLayer {
     /// The layer for a product whose read methods are `reads`, admitting no claimed carried writes.
     #[must_use]
     pub fn new(reads: Reads) -> ApiPlaneLayer {
-        ApiPlaneLayer { reads, claimed: ClaimedWrites::default() }
+        ApiPlaneLayer { reads, claimed: ClaimedWrites::default(), products: ProductCallers::default() }
     }
 
     /// The same, admitting carried calls with a claimed lane to `claimed` (D m/28960).
@@ -332,14 +399,31 @@ impl ApiPlaneLayer {
     pub fn claiming(self, claimed: ClaimedWrites) -> ApiPlaneLayer {
         ApiPlaneLayer { claimed, ..self }
     }
+
+    /// The same, admitting carried calls from proven products to `products` (D m/32662).
+    #[must_use]
+    pub fn products(self, products: ProductCallers) -> ApiPlaneLayer {
+        ApiPlaneLayer { products, ..self }
+    }
 }
 
 impl<S> tower_layer::Layer<S> for ApiPlaneLayer {
     type Service = ApiPlaneService<S>;
 
     fn layer(&self, inner: S) -> ApiPlaneService<S> {
-        ApiPlaneService { inner, reads: self.reads.clone(), claimed: self.claimed.clone() }
+        ApiPlaneService {
+            inner,
+            reads: self.reads.clone(),
+            claimed: self.claimed.clone(),
+            products: self.products.clone(),
+        }
     }
+}
+
+/// What an admitted call carries onto its request.
+enum Admitted {
+    Claimed(Claimed),
+    Product(ProductCaller),
 }
 
 /// [`ApiPlaneLayer`]'s service.
@@ -348,6 +432,7 @@ pub struct ApiPlaneService<S> {
     inner: S,
     reads: Reads,
     claimed: ClaimedWrites,
+    products: ProductCallers,
 }
 
 impl<S> tower_service::Service<http::Request<BoxBody>> for ApiPlaneService<S>
@@ -371,7 +456,16 @@ where
         let admitted = {
             let stamp = request.headers().get(STAMP_METADATA_KEY).map(|v| stamp_bytes(v.as_bytes()));
             let judged = request.extensions().get::<Judged>();
-            plane_admits(judged, request.uri().path(), stamp.as_deref(), &self.reads, &self.claimed)
+            let path = request.uri().path();
+            match judged {
+                // A method products call, carried: admitted only from a proven product, its caller on the request.
+                Some(j) if j.role == Role::Carried && self.products.lists(path) => match product_admits(j) {
+                    Ok(caller) => Ok(Some(Admitted::Product(caller))),
+                    Err(name) => Err(name),
+                },
+                _ => plane_admits(judged, path, stamp.as_deref(), &self.reads, &self.claimed)
+                    .map(|claimed| claimed.map(Admitted::Claimed)),
+            }
         };
         match admitted {
             Err(name) => {
@@ -383,9 +477,15 @@ where
                 );
                 Either::Left(std::future::ready(Ok(refused)))
             }
-            Ok(claimed) => {
-                if let Some(claimed) = claimed {
-                    request.extensions_mut().insert(claimed);
+            Ok(admitted) => {
+                match admitted {
+                    Some(Admitted::Claimed(claimed)) => {
+                        request.extensions_mut().insert(claimed);
+                    }
+                    Some(Admitted::Product(caller)) => {
+                        request.extensions_mut().insert(caller);
+                    }
+                    None => {}
                 }
                 Either::Right(self.inner.call(request))
             }

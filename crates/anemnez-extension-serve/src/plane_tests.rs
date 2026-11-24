@@ -25,6 +25,36 @@ fn judged(role: Role) -> Judged {
     Accepted::new((), Peer::from_token([501, 501, 20, 501, 20, 41, 100_001, 7], code), role).judged().clone()
 }
 
+/// A service that answers OK and keeps what the plane put on the request as a `T`: `Some(Some(t))` when it ran with one,
+/// `Some(None)` when it ran without, `None` when the plane refused before it.
+#[derive(Clone)]
+struct Seen<T>(std::sync::Arc<std::sync::Mutex<Option<Option<T>>>>);
+
+impl<T> Default for Seen<T> {
+    fn default() -> Self {
+        Seen(std::sync::Arc::default())
+    }
+}
+
+impl<T: Clone> Seen<T> {
+    fn got(&self) -> Option<Option<T>> {
+        self.0.lock().expect("seen").clone()
+    }
+}
+
+impl<T: Clone + Send + Sync + 'static> tower_service::Service<http::Request<tonic::body::BoxBody>> for Seen<T> {
+    type Response = http::Response<tonic::body::BoxBody>;
+    type Error = std::convert::Infallible;
+    type Future = std::future::Ready<Result<Self::Response, Self::Error>>;
+    fn poll_ready(&mut self, _: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), Self::Error>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+    fn call(&mut self, request: http::Request<tonic::body::BoxBody>) -> Self::Future {
+        *self.0.lock().expect("seen") = Some(request.extensions().get::<T>().cloned());
+        std::future::ready(Ok(http::Response::new(tonic::body::empty_body())))
+    }
+}
+
 /// A call on a connection not judged at accept is refused by name, whatever it asks and whoever it says it is.
 #[test]
 fn an_unjudged_connection_is_refused_by_name() {
@@ -326,22 +356,7 @@ async fn the_layer_hands_the_service_the_claim() {
     use tower_layer::Layer as _;
     use tower_service::Service as _;
 
-    #[derive(Clone, Default)]
-    struct Seen(std::sync::Arc<std::sync::Mutex<Option<Claimed>>>);
-    impl tower_service::Service<http::Request<tonic::body::BoxBody>> for Seen {
-        type Response = http::Response<tonic::body::BoxBody>;
-        type Error = std::convert::Infallible;
-        type Future = std::future::Ready<Result<Self::Response, Self::Error>>;
-        fn poll_ready(&mut self, _: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), Self::Error>> {
-            std::task::Poll::Ready(Ok(()))
-        }
-        fn call(&mut self, request: http::Request<tonic::body::BoxBody>) -> Self::Future {
-            *self.0.lock().expect("seen") = request.extensions().get::<Claimed>().cloned();
-            std::future::ready(Ok(http::Response::new(tonic::body::empty_body())))
-        }
-    }
-
-    let seen = Seen::default();
+    let seen = Seen::<Claimed>::default();
     let mut service = ApiPlaneLayer::new(Reads::default()).claiming(claiming_land()).layer(seen.clone());
     let mut metadata = tonic::metadata::MetadataMap::new();
     metadata.insert_bin(STAMP_METADATA_KEY, tonic::metadata::MetadataValue::from_bytes(&stamp(Some("K"))));
@@ -350,7 +365,7 @@ async fn the_layer_hands_the_service_the_claim() {
     request.extensions_mut().insert(carried(Some("node-b")));
     let response = service.call(request).await.expect("answered");
     assert_eq!(response.status(), http::StatusCode::OK, "served, not refused");
-    assert_eq!(*seen.0.lock().expect("seen"), Some(Claimed { lane: "K".into(), via: "node-b".into() }));
+    assert_eq!(seen.got(), Some(Some(Claimed { lane: "K".into(), via: "node-b".into() })));
 }
 
 /// O m/29572, a live regression: Agora carries its stamp on every far send (I's narrowed `{class, lane}`), so a carried
@@ -446,6 +461,8 @@ fn every_name_the_plane_refuses_with_is_on_its_one_list() {
         ("CARRIED_CLAIM_NOT_A_LANE", CARRIED_CLAIM_NOT_A_LANE),
         ("CLAIMED_WRITE_NOT_A_WRITE", CLAIMED_WRITE_NOT_A_WRITE),
         ("CLAIMED_METHOD_NOT_A_READ_OR_WRITE", CLAIMED_METHOD_NOT_A_READ_OR_WRITE),
+        ("PRODUCT_CALLER_UNPROVEN", anemnez_extension::peer::PRODUCT_CALLER_UNPROVEN),
+        ("PRODUCT_CALLER_UNTRUSTED", anemnez_extension::peer::PRODUCT_CALLER_UNTRUSTED),
     ];
     assert!(found.len() >= 6, "the census reads the plane's refusals: {found:?}");
     for name in &found {
@@ -455,4 +472,90 @@ fn every_name_the_plane_refuses_with_is_on_its_one_list() {
             "{name} is refused with in plane.rs but isn't on PLANE_REFUSALS, so it has no teaching row"
         );
     }
+}
+
+// ── Carried product callers (D m/32662, m/32698; A's replica Open) ────────────────────────────────────────────────
+
+/// A carried connection whose preface says who signed the far caller.
+fn carried_signed(team: &str) -> Judged {
+    let mut judged = carried(Some("node-b"));
+    if let Some(preface) = judged.carried.as_mut() {
+        preface.code =
+            Some(anemnez_extension::carried::CodeIdentity { team: team.into(), identifier: "ai.anemnez.stoad".into() });
+    }
+    judged
+}
+
+/// D m/32662: a carried call to a `callers = PRODUCT` method is admitted only on a present, house-signed code identity,
+/// its caller named for the handler's predicate; absent is unproven, one meaning whether there's no preface or no code
+/// in it; another team is untrusted, refused by name.
+#[test]
+fn a_carried_product_caller_is_admitted_only_when_proven_and_the_houses() {
+    use crate::plane::{ProductCaller, product_admits};
+    use anemnez_extension::peer::{PRODUCT_CALLER_UNPROVEN, PRODUCT_CALLER_UNTRUSTED};
+    let house = anemnez_trust::ANEMNEZ_TEAM;
+    let proven = product_admits(&carried_signed(house)).expect("proven");
+    assert_eq!(
+        proven,
+        ProductCaller {
+            node: "node-b".into(),
+            identity: anemnez_extension::carried::CodeIdentity {
+                team: house.into(),
+                identifier: "ai.anemnez.stoad".into()
+            }
+        }
+    );
+    assert_eq!(product_admits(&carried(Some("node-b"))), Err(PRODUCT_CALLER_UNPROVEN), "a preface with no code");
+    assert_eq!(product_admits(&carried(None)), Err(PRODUCT_CALLER_UNPROVEN), "no preface at all: the same meaning");
+    assert_eq!(product_admits(&carried_signed("ABCDE12345")), Err(PRODUCT_CALLER_UNTRUSTED), "another team");
+}
+
+/// The descriptor says which methods products call, read once: Land is `callers = PRODUCT`, Describe isn't.
+#[test]
+fn the_methods_products_call_are_read_from_the_descriptor() {
+    let products = crate::plane::ProductCallers::of(&land_descriptor_with(pb::Effect::Write));
+    assert!(products.lists("/h.v1.H/Land"));
+    assert!(!products.lists(DESCRIBE));
+    assert!(!crate::plane::ProductCallers::of(b"\xff not a descriptor").lists("/h.v1.H/Land"), "none, the safe way");
+}
+
+/// End to end through the layer: a proven product's carried call reaches the handler with its ProductCaller; an
+/// unproven one is refused before it; a code identity never opens a method products don't call (an agent's write
+/// still needs its bound token); and a direct call carries no ProductCaller (its code is the local accept's).
+#[tokio::test]
+async fn the_layer_admits_a_proven_product_and_hands_its_caller_to_the_service() {
+    use crate::plane::{ProductCaller, ProductCallers};
+    use tower_layer::Layer as _;
+    use tower_service::Service as _;
+
+    let send = |judged: Judged, path: &'static str| {
+        let seen = Seen::<ProductCaller>::default();
+        let products = ProductCallers::of(&land_descriptor_with(pb::Effect::Write));
+        let mut service = ApiPlaneLayer::new(Reads::default()).products(products).layer(seen.clone());
+        let mut request = http::Request::builder()
+            .uri(path)
+            .header("content-type", "application/grpc")
+            .body(tonic::body::empty_body())
+            .expect("a request");
+        request.extensions_mut().insert(judged);
+        async move {
+            let response = service.call(request).await.expect("answered");
+            let said = tonic::Status::from_header_map(response.headers()).map(|s| s.message().to_owned());
+            (said, seen.got())
+        }
+    };
+    let (said, seen) = send(carried_signed(anemnez_trust::ANEMNEZ_TEAM), LAND).await;
+    assert_eq!(said, None, "served");
+    assert_eq!(seen.flatten().map(|c| c.node), Some("node-b".to_owned()), "its caller, on the request");
+
+    let (said, seen) = send(carried(Some("node-b")), LAND).await;
+    assert!(said.is_some_and(|m| m.starts_with("product-caller-unproven")), "refused before the handler");
+    assert!(seen.is_none(), "the handler never ran");
+
+    let (said, _) = send(carried_signed(anemnez_trust::ANEMNEZ_TEAM), FUNCTIONAL).await;
+    assert!(said.is_some_and(|m| m.starts_with(CARRIED_WRITE_UNBOUND)), "a code identity opens only PRODUCT methods");
+
+    let (said, seen) = send(judged(Role::Other), LAND).await;
+    assert_eq!(said, None, "a direct call is the plane's ordinary path");
+    assert_eq!(seen, Some(None), "with no ProductCaller: a direct caller's code is its own accept's, never a preface");
 }

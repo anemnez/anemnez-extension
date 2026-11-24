@@ -737,6 +737,17 @@ would tell the lane its caller is wrong (D m/30197, rule 15). Any other peer is 
 far token is carried on the same call it wins, and a schema-bumped setting then refuses unverified claims by name
 (INIT-DISTRIBUTED step 5's exit).
 
+<!-- claim: a-carried-product-caller-is-proven-by-its-code -->
+**A carried call from a product is proven by who signed it** (D m/32662, m/32698; A's replica `Open`). A method whose
+descriptor says `callers = PRODUCT` is reached by a carried call past the read rule only when aegisd's preface carries
+the far caller's code identity (contract 1.1's fifth part) and its team is the house's, anemnez-trust's anchor, never
+"the far aegisd said so" (`plane::product_admits`). The handler then has `ProductCaller { node, identity }` on its
+request, for its own predicate to narrow (for a replica stream, this product's own identifier and the assignment). An
+absent identity is `product-caller-unproven`, one meaning whether the aegisd is older or its judge refused the caller,
+never admitted on silence; another team is `product-caller-untrusted`, by name. A code identity never opens any other
+method: a carried write from an agent still needs its bound token (`carried-write-unbound`). A direct caller carries no
+`ProductCaller`: its code is the local accept's, never a preface it sent.
+
 <!-- claim: a-carried-connection-says-its-preface-once -->
 **A carried connection says where it came from once, at accept** (K m/25625; M m/25661; D m/25623). aegisd writes
 one line before the product's HTTP/2, `anemnez-carried/1 <node> <base64 DER> <unique_id>:<boot>`, through the one

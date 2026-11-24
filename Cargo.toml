@@ -6,7 +6,7 @@ members = ["crates/*"]
 edition = "2024"
 repository = "https://github.com/anemnez/anemnez-extension"
 license = "MIT OR Apache-2.0"
-version = "0.9.32"
+version = "0.9.50"
 # Released to Artichoke only for now (the User, 2026-11-05); crates.io comes when third-party
 # extensibility is advertised, and then Herald publishes each version to both, same bytes
 # (fabric CONVERGENCE.md §0 (7)).
@@ -21,10 +21,13 @@ serde_json = "1"
 
 # The serving face (crates/anemnez-extension-serve): the gRPC stack matches Substrate's and
 # anemnez-service's (tonic 0.12 / prost 0.13), so a product pulls in no second copy.
-anemnez-extension = { path = "crates/anemnez-extension", version = "0.9.32", registry-index = "sparse+http://127.0.0.1:7787/crates/index/" }
+anemnez-extension = { path = "crates/anemnez-extension", version = "0.9.50", registry-index = "sparse+http://127.0.0.1:7787/crates/index/" }
 # The one clock, in the dual form at the rev every git-built closure shares (D m/16149: one crate, one source,
 # one rev; M m/16161): 3ed93558f1b7, as the SDK and hydramq pin it, so cargo builds one copy. The version is loose
 # ("0.1") because the git tree says 0.1.0; Herald rewrites it to the release at that rev when it publishes.
+# The house's trust anchor, its one home (D m/32487): no dependencies, so the kernel takes it freely. It lives in the
+# SDK's workspace and is released with it.
+anemnez-trust = { git = "ssh://git@github.com/anemnez/anemnez-service.git", rev = "e2066107cafc", version = "0.3", registry-index = "sparse+http://127.0.0.1:7787/crates/index/" }
 anemnez-clock = { git = "ssh://git@github.com/anemnez/anemnez-clock.git", rev = "e982db15fea0", version = "0.1", registry-index = "sparse+http://127.0.0.1:7787/crates/index/" }
 anemnez-layout = { git = "ssh://git@github.com/anemnez/anemnez-layout.git", rev = "84f8f22e7766", version = "0.1", registry-index = "sparse+http://127.0.0.1:7787/crates/index/" }
 # The deterministic simulation's runner, dev-only (MACHINES §4; D m/17459): its anemnez-clock is the same rev as ours.

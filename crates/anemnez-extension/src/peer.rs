@@ -27,6 +27,12 @@ pub const STAMP_NOT_FROM_AGORA: &str = "stamp-not-from-agora";
 /// A carried call (from Aegis's peer: another host's caller, D m/22425 §5) to a method that isn't a read, refused by
 /// name until the caller's principal is bound through Aegis: the far end admits carried reads only (K m/23155).
 pub const CARRIED_WRITE_UNBOUND: &str = "carried-write-unbound";
+/// A carried call to a method whose descriptor says `callers = PRODUCT`, with no code identity in aegisd's preface: an
+/// older aegisd's line, or a caller its judge refused (D m/32662). One meaning, unproven, never admitted on silence.
+pub const PRODUCT_CALLER_UNPROVEN: &str = "product-caller-unproven";
+/// A carried call to a `callers = PRODUCT` method whose preface's code identity names a team this house doesn't trust
+/// (anemnez-trust's anchor): refused by name, never dropped (D m/32698).
+pub const PRODUCT_CALLER_UNTRUSTED: &str = "product-caller-untrusted";
 /// A carried call to a write its product lists for claimed lanes (D m/28960), from an aegisd that said no preface: the
 /// node it came from is unknown, so its claim names no carrier, and it is refused.
 pub const CARRIED_NO_PREFACE: &str = "carried-no-preface";

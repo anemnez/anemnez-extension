@@ -8,6 +8,7 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+anemnez-trust.workspace = true
 serde.workspace = true
 ed25519-dalek.workspace = true
 p256.workspace = true

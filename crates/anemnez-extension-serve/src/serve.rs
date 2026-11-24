@@ -313,7 +313,11 @@ where
     let server = tonic::transport::Server::builder()
         .accept_http1(accept_http1)
         .layer(admit)
-        .layer(ApiPlaneLayer::new(crate::plane::Reads::of(faces.describe.descriptor())).claiming(faces.claimed))
+        .layer(
+            ApiPlaneLayer::new(crate::plane::Reads::of(faces.describe.descriptor()))
+                .claiming(faces.claimed)
+                .products(crate::plane::ProductCallers::of(faces.describe.descriptor())),
+        )
         .layer(digested)
         .add_routes(routes)
         .add_service(pb::describe_server::DescribeServer::new(faces.describe))
