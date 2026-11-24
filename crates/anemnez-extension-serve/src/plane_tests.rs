@@ -13,7 +13,7 @@ use crate::accepted::{Accepted, Judged};
 use crate::pb;
 use crate::plane::{
     ApiPlaneLayer, Claimed, ClaimedMethods, ClaimedWrites, Reads, api_admits, carried_admits, carried_claim,
-    plane_admits, said, said_on, stamp_bytes,
+    plane_admits, refused, said, said_on, stamp_bytes, taught,
 };
 use crate::serve_tests::land_descriptor_with;
 
@@ -387,4 +387,43 @@ fn an_unbound_carried_write_is_said_by_its_method() {
     assert!(told.starts_with("carried-write-unbound: "), "{told}");
     assert!(told.ends_with("(Place isn't a claimed write here)"), "{told}");
     assert_eq!(said_on(STAMP_NOT_FROM_AGORA, "/x.v1.X/Y"), said(STAMP_NOT_FROM_AGORA), "others unchanged");
+}
+
+/// House rule 15, AX3: every plane refusal answers PERMISSION_DENIED with its house-form message unchanged (what every
+/// reader matches by name) and its teaching as the Status's one detail: the name as its code, said's why as what was
+/// expected, refused Blanket, and whose: the operator's for this host's wiring, the caller's for the call itself.
+#[test]
+fn every_plane_refusal_carries_its_teaching_beside_its_house_form_message() {
+    use anemnez_extension::teaching::{InDetails, Outcome, RetryClass, Whose, teaching_in};
+    let every = [
+        NOT_JUDGED,
+        FABRICD_READS_DESCRIBE_ONLY,
+        STAMP_NOT_FROM_AGORA,
+        CARRIED_WRITE_UNBOUND,
+        CARRIED_NO_PREFACE,
+        CARRIED_CLAIM_NOT_A_LANE,
+        CLAIMED_WRITE_NOT_A_WRITE,
+        CLAIMED_METHOD_NOT_A_READ_OR_WRITE,
+    ];
+    let path = "/anemnez.ergon.v1.Items/Place";
+    for name in every {
+        let status = refused(name, path);
+        assert_eq!(status.code(), tonic::Code::PermissionDenied, "{name}");
+        assert_eq!(status.message(), said_on(name, path), "{name}: the house form, unchanged");
+        let InDetails::Taught(teaching) = teaching_in(status.details()) else {
+            panic!("{name}: a teaching rides its Status")
+        };
+        assert_eq!(teaching.outcome, Outcome::Refused(RetryClass::Blanket), "{name}: the same call is refused again");
+        assert!(!teaching.code.contains(' '), "{name}: its code is a name, never a sentence: {}", teaching.code);
+        assert!(
+            !teaching.expected.is_empty() && teaching.expected != teaching.code,
+            "{name}: what was expected, in words"
+        );
+        let operators = [NOT_JUDGED, CARRIED_NO_PREFACE];
+        let whose = if operators.contains(&name) { Whose::Operator } else { Whose::Caller };
+        assert_eq!(teaching.whose, whose, "{name}");
+    }
+    let unbound = taught(CARRIED_WRITE_UNBOUND, path);
+    assert!(unbound.expected.contains("Place isn't a claimed write here"), "the method named: {}", unbound.expected);
+    assert_eq!(taught(NOT_JUDGED, path).code, "not-judged", "a sentence's name is given a code");
 }
