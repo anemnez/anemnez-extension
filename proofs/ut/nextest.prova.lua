@@ -101,6 +101,7 @@ spoken_for("a-stream-asked-to-end-by-the-drain-ends-draining", "serve_tests::the
 spoken_for("a-stream-asked-to-end-by-the-drain-ends-draining", "serve_tests::a_draining_stream_ends_at_the_journal_s_place_when_asked_however_busy")
 spoken_for("async-cancelled-only-by-its-owner", "serve_tests::a_dropped_subscriber_cancels_nothing")
 spoken_for("health-is-state-with-parts", "serve_tests::a_watcher_reads_health_then_sees_only_later_changes")
+spoken_for("health-is-state-with-parts (a part's name is one shape)", "health::tests::a_part_name_is_a_path_of_printable_segments")
 spoken_for("health-may-say-what-a-restart-costs", "health::tests::a_restart_cost_is_said_once_per_change_and_can_be_taken_back")
 spoken_for("a-product-pushes-events-as-a-stream-it-serves", "serve_tests::a_foreign_cursor_is_not_mine_and_an_old_one_is_out_of_range")
 spoken_for("a-keyed-route-names-a-string-field", "options::tests::a_keyed_route_names_a_top_level_string_field")
