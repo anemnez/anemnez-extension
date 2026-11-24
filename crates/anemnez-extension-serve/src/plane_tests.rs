@@ -12,8 +12,8 @@ use anemnez_extension::peer::{
 use crate::accepted::{Accepted, Judged};
 use crate::pb;
 use crate::plane::{
-    ApiPlaneLayer, Claimed, ClaimedMethods, ClaimedWrites, Reads, api_admits, carried_admits, carried_claim,
-    plane_admits, refused, said, said_on, stamp_bytes, taught,
+    ApiPlaneLayer, Claimed, ClaimedMethods, ClaimedWrites, PLANE_REFUSALS, Reads, api_admits, carried_admits,
+    carried_claim, plane_admits, refused, said, said_on, stamp_bytes, taught,
 };
 use crate::serve_tests::land_descriptor_with;
 
@@ -395,18 +395,8 @@ fn an_unbound_carried_write_is_said_by_its_method() {
 #[test]
 fn every_plane_refusal_carries_its_teaching_beside_its_house_form_message() {
     use anemnez_extension::teaching::{InDetails, Outcome, RetryClass, Whose, teaching_in};
-    let every = [
-        NOT_JUDGED,
-        FABRICD_READS_DESCRIBE_ONLY,
-        STAMP_NOT_FROM_AGORA,
-        CARRIED_WRITE_UNBOUND,
-        CARRIED_NO_PREFACE,
-        CARRIED_CLAIM_NOT_A_LANE,
-        CLAIMED_WRITE_NOT_A_WRITE,
-        CLAIMED_METHOD_NOT_A_READ_OR_WRITE,
-    ];
     let path = "/anemnez.ergon.v1.Items/Place";
-    for name in every {
+    for name in PLANE_REFUSALS {
         let status = refused(name, path);
         assert_eq!(status.code(), tonic::Code::PermissionDenied, "{name}");
         assert_eq!(status.message(), said_on(name, path), "{name}: the house form, unchanged");
@@ -426,4 +416,42 @@ fn every_plane_refusal_carries_its_teaching_beside_its_house_form_message() {
     let unbound = taught(CARRIED_WRITE_UNBOUND, path);
     assert!(unbound.expected.contains("Place isn't a claimed write here"), "the method named: {}", unbound.expected);
     assert_eq!(taught(NOT_JUDGED, path).code, "not-judged", "a sentence's name is given a code");
+}
+
+/// D m/30986: the one list is every name this file refuses with. Read from plane.rs's own production source, each
+/// SCREAMING_CASE name it answers `Err(NAME)` or `.ok_or(NAME)` with is in PLANE_REFUSALS, so a new refusal is taught
+/// and said, or this row is red.
+#[test]
+fn every_name_the_plane_refuses_with_is_on_its_one_list() {
+    let source = include_str!("plane.rs");
+    let production = source.split("#[cfg(test)]").next().unwrap_or(source);
+    let mut found = std::collections::BTreeSet::new();
+    for opener in ["Err(", "ok_or("] {
+        for (at, _) in production.match_indices(opener) {
+            let name: String =
+                production[at + opener.len()..].chars().take_while(|c| c.is_ascii_uppercase() || *c == '_').collect();
+            let closed = production[at + opener.len() + name.len()..].starts_with(')');
+            if name.len() > 2 && closed {
+                found.insert(name);
+            }
+        }
+    }
+    let listed = [
+        ("NOT_JUDGED", NOT_JUDGED),
+        ("FABRICD_READS_DESCRIBE_ONLY", FABRICD_READS_DESCRIBE_ONLY),
+        ("STAMP_NOT_FROM_AGORA", STAMP_NOT_FROM_AGORA),
+        ("CARRIED_WRITE_UNBOUND", CARRIED_WRITE_UNBOUND),
+        ("CARRIED_NO_PREFACE", CARRIED_NO_PREFACE),
+        ("CARRIED_CLAIM_NOT_A_LANE", CARRIED_CLAIM_NOT_A_LANE),
+        ("CLAIMED_WRITE_NOT_A_WRITE", CLAIMED_WRITE_NOT_A_WRITE),
+        ("CLAIMED_METHOD_NOT_A_READ_OR_WRITE", CLAIMED_METHOD_NOT_A_READ_OR_WRITE),
+    ];
+    assert!(found.len() >= 6, "the census reads the plane's refusals: {found:?}");
+    for name in &found {
+        let value = listed.iter().find(|(n, _)| n == name).map(|(_, v)| *v);
+        assert!(
+            value.is_some_and(|v| PLANE_REFUSALS.contains(&v)),
+            "{name} is refused with in plane.rs but isn't on PLANE_REFUSALS, so it has no teaching row"
+        );
+    }
 }

@@ -270,6 +270,19 @@ pub fn said_on(name: &'static str, path: &str) -> String {
     }
 }
 
+/// Every name the API plane refuses with, at a call or when the plane is built: the one list [`said`] and [`taught`]
+/// answer for, held by a row that reads this file's own refusals, so a new name can't go untaught (D m/30986).
+pub const PLANE_REFUSALS: [&str; 8] = [
+    NOT_JUDGED,
+    FABRICD_READS_DESCRIBE_ONLY,
+    STAMP_NOT_FROM_AGORA,
+    CARRIED_WRITE_UNBOUND,
+    CARRIED_NO_PREFACE,
+    CARRIED_CLAIM_NOT_A_LANE,
+    CLAIMED_WRITE_NOT_A_WRITE,
+    CLAIMED_METHOD_NOT_A_READ_OR_WRITE,
+];
+
 /// A plane refusal of a call to `path` as a teaching (house rule 15, AX3): its name as the code, what `said_on` says
 /// as what was expected, a retry class, and whose it is to fix. Every plane refusal is refused before any work, and the
 /// same call is refused again, so each is `Blanket`. What differs is whose it is: the caller's call to change, or the
