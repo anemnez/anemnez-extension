@@ -113,6 +113,38 @@ impl StreamEnd {
     }
 }
 
+/// A product's own stream, ended when its drain says (CONTRACT §8.3): `stream` as it is until the request's
+/// [`StreamEnd`] completes, then one UNAVAILABLE `draining`, retryable at another instance, and nothing after. A
+/// request with no `StreamEnd` (a plane without the drain layer, or a socket of the product's own) streams as before.
+///
+/// The faces' Events and Watch end this way already; a product's own streaming method (typhon's Subscribe, a pull's
+/// progress) takes this, and names its path in the drain layer's `streams`, so its drain waits only on unary calls
+/// (O m/30335: a stream the drain can't end holds the whole window).
+pub fn until_drained<S, T>(
+    stream: S,
+    end: Option<&StreamEnd>,
+) -> impl futures_util::Stream<Item = Result<T, tonic::Status>> + Send
+where
+    S: futures_util::Stream<Item = Result<T, tonic::Status>> + Send + 'static,
+    T: Send + 'static,
+{
+    use futures_util::StreamExt as _;
+    let ended: Ended = match end {
+        Some(end) => end.ended(),
+        None => Box::pin(std::future::pending()),
+    };
+    let state = Some((Box::pin(stream), ended));
+    futures_util::stream::unfold(state, |state| async move {
+        let (mut stream, mut ended) = state?;
+        // Biased to the drain: a stream told to end never sends past it, even with an item ready.
+        tokio::select! {
+            biased;
+            () = &mut ended => Some((Err(draining()), None)),
+            item = stream.next() => item.map(|item| (item, Some((stream, ended)))),
+        }
+    })
+}
+
 impl fmt::Debug for StreamEnd {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("StreamEnd")

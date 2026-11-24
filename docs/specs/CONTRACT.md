@@ -288,6 +288,14 @@ ended with `data-loss`, never silently skipped.
 `anemnez-clock` `Clock` at construction and never reads the system's; a stream's expiry is a `Mono`
 deadline on that clock, read once when it opens (C), so a `ManualClock` test drives it end to end.
 
+<!-- claim: a-products-own-stream-ends-at-its-drain -->
+**A product's own stream ends at its drain the same way** (O m/30335, D m/31056). A product's own streaming
+method (typhon's `Subscribe`, a pull's progress) takes -serve's `until_drained(stream, request's StreamEnd)` and names
+its path in the drain layer's `streams`: once the drain asks, the stream sends nothing more and ends UNAVAILABLE
+`draining`, retryable, even with an item ready; a request with no `StreamEnd` streams as before. A stream left out is
+held as a call until the window cancels it, so a product's drain would wait its whole window on a stream that never
+ends.
+
 <!-- claim: a-stream-asked-to-end-by-the-drain-ends-draining -->
 **A stream asked to end by its instance's drain ends `draining`** (§8.3's "last frames, then `end`"; D m/16592). The
 product's drain layer puts a `StreamEnd` in each stream's request; the `Events` service reads it from there. Once the
