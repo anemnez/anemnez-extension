@@ -155,9 +155,23 @@ impl Running {
         self.orient.held.send_replace(held);
     }
 
-    /// Answered once an `Orient` call is held here.
+    /// Answered once an `Orient` call is held here. Unbounded: a caller bounds it (rule 4), or a row whose Orient never
+    /// reaches the fixture waits out the runner's timeout unnamed. [`Running::orient_held_within`] is the bounded twin.
     pub async fn orient_held(&self) {
         self.orient.holding.notified().await;
+    }
+}
+
+impl Running {
+    /// [`Running::orient_held`] within `within` on `clock`, or an error naming what didn't arrive (B m/33548).
+    ///
+    /// # Errors
+    /// No `Orient` call was held within the bound.
+    pub async fn orient_held_within(&self, clock: &Clock, within: Duration) -> Result<(), String> {
+        clock
+            .timeout(within, self.orient_held())
+            .await
+            .map_err(|_| format!("no Orient call reached the fixture within {within:?}"))
     }
 }
 
@@ -346,7 +360,9 @@ impl pb::fixture_server::Fixture for Fixture {
         let mut held = self.orient.held.subscribe();
         if *held.borrow_and_update() {
             self.orient.holding.notify_one();
-            let _ = held.wait_for(|held| !held).await;
+            if let Err(_dropped) = held.wait_for(|held| !held).await {
+                // The Running was dropped: the fixture is ending, so the hold ends with it and Orient answers.
+            }
         }
         Ok(reply(&request, pb::OrientReply { now: ORIENT_NOW.into() }))
     }

@@ -242,3 +242,19 @@ async fn a_held_orient_answers_only_once_let_go() {
     let now = asked.await.expect("ran").expect("answered").into_inner().now;
     assert_eq!(now, crate::ORIENT_NOW);
 }
+
+/// B m/33548: the bounded twin names what didn't arrive when no Orient call is held within its bound, as an event on the
+/// clock handed in (no sleep), and answers once one is.
+#[tokio::test(flavor = "multi_thread")]
+async fn orient_held_within_names_a_call_that_never_came() {
+    let manual = ManualClock::new();
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let running = serve(dir.path(), manual.clock(), Variant::Good).await.expect("serves");
+    running.hold_orient(true);
+    let clock = manual.clock();
+    let (waited, ()) = tokio::join!(running.orient_held_within(&clock, Duration::from_secs(5)), async {
+        assert!(manual.until_waiting(1, Duration::from_secs(5)).await, "the bound is armed");
+        manual.advance(Duration::from_secs(5)).await;
+    });
+    assert!(waited.expect_err("bounded").contains("no Orient call reached the fixture within 5s"));
+}
