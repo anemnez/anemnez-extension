@@ -59,6 +59,7 @@ outside a caller's range is refused at connect with both versions named, never c
 | `runs_to_completion` | bool, default false | bounded only by its own end, like `process.run`, so the caller's deadline is not charged for it. A request carrying a wait-budget field (`timeout_ms` and its kin) owns its budget without this; the bridge derives that, so it is never stated twice (C). Independent of `blocks` (D) |
 | `examples` | `Example{args_json, caption}`, repeated (field 13; 12 is reserved) | worked calls, for a caller's help: each the request as a JSON argument object, which a bridge type-checks against the method's parameters and renders its own way (Lua for Substrate, JSON for Agora's MCP face: B, D); `check_descriptor` refuses `example-mismatch` when it isn't a JSON object of the request's top-level fields |
 | `ask_within_secs` | `optional uint32` (field 14), seconds | how long a call may hold an Ask open (§8.1 `an-ask-is-bounded-in-the-call`): absent reads as 45, never 0; a method that never asks says 0; past 120 `check_descriptor` refuses `ask-bound-over-cap` with the value. `MethodOptions::ask_within()` reads it, so no bridge applies the default itself |
+| `orient` | `bool` (field 15) | this method is the product's orient, what matters to the calling agent now (ORIENTATION.md `#orient-is-one-bounded-read`): at most one per descriptor, a unary `agent` read with no request fields and a `bound` result of 1,500 or fewer, else `check_descriptor` refuses it by name (`orient-twice`, `orient-not-a-read`, `orient-takes-input`, `orient-unbounded`, `orient-not-for-agents`, `orient-streams`). Its flattened tool says `orient: true` under `_meta.anemnez` |
 
 <!-- claim: a-keyed-route-names-a-string-field -->
 **A keyed route names one string field of the call** (B, D, H, 2026-11-07). `leader(group, key)`
@@ -507,7 +508,7 @@ turn, which the face answers with a job, never a wait (house rule 14). Each cont
 carries the cursor and whose reply the next one; `bound(n)` a list; a `session` an id that `opens`
 answers and `within` and `closes` take as a field of their request; `blocks` and
 `runs_to_completion` a job (below).
-A product's flattened face is the same on every host.
+A product's flattened face is the same on every host. A server's `instructions` are the service's `guidance` (field 6 of `ServiceOptions`, ORIENTATION.md `#guidance-is-a-service-option`), whole, as `mcp::instructions` answers it from the descriptor alone, and `ServiceOptions::summary` is its first line, the Minimal line. `service_of` refuses `guidance-too-long` past 1,200 characters and `guidance-summary-too-long` past 160 on the first line.
 
 <!-- claim: long-work-flattens-to-a-job-and-an-event -->
 **Long work flattens to a job and an event** (house rule 14; D, H, 2026-11-14). A `long` method's

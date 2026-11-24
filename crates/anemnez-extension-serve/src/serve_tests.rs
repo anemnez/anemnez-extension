@@ -379,6 +379,9 @@ pub(crate) fn land_descriptor_with(effect: pb::Effect) -> Vec<u8> {
         runs_to_completion: true,
         examples: vec![pb::Example { args_json: r#"{"train": "train/h-x"}"#.into(), caption: "Land one".into() }],
         ask_within_secs: Some(90),
+        // Built against the published kernel too (the package proof), whose proto may not have a newer option
+        // yet (orient, field 15): readers first, so its parity row joins this one once the kernel releases it.
+        ..Default::default()
     };
     let mut method = prost_types::MethodDescriptorProto {
         name: Some("Land".into()),

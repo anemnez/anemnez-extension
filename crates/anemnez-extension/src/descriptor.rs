@@ -183,6 +183,25 @@ pub enum DescriptorRefusal {
     MediaUnknown(String, String),
     /// A field that isn't `bytes` says a media (the field named): only bytes hold an image.
     MediaNotBytes(String),
+    /// The service's guidance is longer than [`crate::options::GUIDANCE_MAX_CHARS`] (the service named, and its
+    /// length in characters).
+    GuidanceTooLong(String, usize),
+    /// The guidance's first line, its summary, is longer than [`crate::options::GUIDANCE_SUMMARY_MAX_CHARS`] (the
+    /// service named, and that line's length in characters).
+    GuidanceSummaryTooLong(String, usize),
+    /// Two methods are marked `orient` (both paths): a product says its "now" once.
+    OrientTwice(String, String),
+    /// An `orient` method whose effect isn't `read`: orienting changes nothing.
+    OrientNotARead(String),
+    /// An `orient` method whose request has fields: it takes no argument, so it renders the same for the same
+    /// caller and state.
+    OrientTakesInput(String),
+    /// An `orient` method whose result isn't `bound` at [`crate::options::ORIENT_BOUND_MAX`] or fewer.
+    OrientUnbounded(String),
+    /// An `orient` method whose callers aren't `agent`: it orients an agent.
+    OrientNotForAgents(String),
+    /// An `orient` method that streams: it is one unary read.
+    OrientStreams(String),
 }
 
 impl DescriptorRefusal {
@@ -213,6 +232,14 @@ impl DescriptorRefusal {
             Self::FieldOptionsMalformed(_) => "field-options-malformed",
             Self::MediaUnknown(..) => "media-unknown",
             Self::MediaNotBytes(_) => "media-not-bytes",
+            Self::GuidanceTooLong(..) => "guidance-too-long",
+            Self::GuidanceSummaryTooLong(..) => "guidance-summary-too-long",
+            Self::OrientTwice(..) => "orient-twice",
+            Self::OrientNotARead(_) => "orient-not-a-read",
+            Self::OrientTakesInput(_) => "orient-takes-input",
+            Self::OrientUnbounded(_) => "orient-unbounded",
+            Self::OrientNotForAgents(_) => "orient-not-for-agents",
+            Self::OrientStreams(_) => "orient-streams",
         }
     }
 }
@@ -233,9 +260,24 @@ impl std::fmt::Display for DescriptorRefusal {
             Self::MediaUnknown(path, media) => {
                 write!(f, "{path}: media-unknown: {media:?} is not one of image/png, image/jpeg")
             }
-            Self::ServiceOptionsTwice(first, second) => {
+            Self::ServiceOptionsTwice(first, second) | Self::OrientTwice(first, second) => {
                 write!(f, "{}: {first} and {second}", self.name())
             }
+            Self::GuidanceTooLong(service, chars) => write!(
+                f,
+                "{service}: guidance-too-long: {chars} characters, past {}",
+                crate::options::GUIDANCE_MAX_CHARS
+            ),
+            Self::GuidanceSummaryTooLong(service, chars) => write!(
+                f,
+                "{service}: guidance-summary-too-long: its first line is {chars} characters, past {}",
+                crate::options::GUIDANCE_SUMMARY_MAX_CHARS
+            ),
+            Self::OrientUnbounded(p) => write!(
+                f,
+                "{p}: orient-unbounded: an orient's result is bound, at {} or fewer",
+                crate::options::ORIENT_BOUND_MAX
+            ),
             Self::CallersMissing(p)
             | Self::PermissionMissing(p)
             | Self::PersonActAllowed(p)
@@ -251,7 +293,11 @@ impl std::fmt::Display for DescriptorRefusal {
             | Self::VersionMissing(p)
             | Self::CursorScopeMissing(p)
             | Self::FieldOptionsMalformed(p)
-            | Self::MediaNotBytes(p) => write!(f, "{p}: {}", self.name()),
+            | Self::MediaNotBytes(p)
+            | Self::OrientNotARead(p)
+            | Self::OrientTakesInput(p)
+            | Self::OrientNotForAgents(p)
+            | Self::OrientStreams(p) => write!(f, "{p}: {}", self.name()),
         }
     }
 }
@@ -268,6 +314,8 @@ pub fn check_descriptor(file_descriptor_set: &[u8]) -> Result<Vec<Method>, Vec<D
     let raw_files = repeated(file_descriptor_set, 1).map_err(|why| vec![DescriptorRefusal::Malformed(why.into())])?;
     let mut methods = Vec::new();
     let mut refused = Vec::new();
+    // The first method marked orient, by path: a second is refused naming both (orient-twice).
+    let mut orient: Option<String> = None;
     if raw_files.len() != set.file.len() {
         return Err(vec![files_mismatch(set.file.len(), raw_files.len())]);
     }
@@ -300,22 +348,35 @@ pub fn check_descriptor(file_descriptor_set: &[u8]) -> Result<Vec<Method>, Vec<D
                 };
                 let input = find_message(&set, method.input_type());
                 let output = find_message(&set, method.output_type());
+                let streams = method.client_streaming() || method.server_streaming();
                 match check_method(&path, &bytes, input, output) {
-                    Ok((options, route_key)) => methods.push(Method {
-                        path,
-                        options,
-                        route_key,
-                        client_streaming: method.client_streaming(),
-                        server_streaming: method.server_streaming(),
-                        input: fields_of(input),
-                        input_type: method.input_type().to_owned(),
-                        output_type: method.output_type().to_owned(),
-                        output_media: media
-                            .iter()
-                            .filter(|f| f.message == method.output_type())
-                            .map(|f| (f.field.clone(), f.media))
-                            .collect(),
-                    }),
+                    Ok((options, _)) if options.orient && streams => {
+                        refused.push(DescriptorRefusal::OrientStreams(path));
+                    }
+                    Ok((options, _)) if options.orient && orient.is_some() => {
+                        let first = orient.clone().unwrap_or_default();
+                        refused.push(DescriptorRefusal::OrientTwice(first, path));
+                    }
+                    Ok((options, route_key)) => {
+                        if options.orient {
+                            orient = Some(path.clone());
+                        }
+                        methods.push(Method {
+                            path,
+                            options,
+                            route_key,
+                            client_streaming: method.client_streaming(),
+                            server_streaming: method.server_streaming(),
+                            input: fields_of(input),
+                            input_type: method.input_type().to_owned(),
+                            output_type: method.output_type().to_owned(),
+                            output_media: media
+                                .iter()
+                                .filter(|f| f.message == method.output_type())
+                                .map(|f| (f.field.clone(), f.media))
+                                .collect(),
+                        });
+                    }
                     Err(mut found) => refused.append(&mut found),
                 }
             }
@@ -372,6 +433,20 @@ fn check_method(
     if let Some(secs) = raw.ask_within_secs.filter(|&s| s > crate::options::ASK_WITHIN_CAP_SECS) {
         refused.push(DescriptorRefusal::AskBoundOverCap(p(), secs));
     }
+    if raw.orient {
+        if effect.is_some_and(|e| e != Effect::Read) {
+            refused.push(DescriptorRefusal::OrientNotARead(p()));
+        }
+        if input.is_some_and(|i| !i.field.is_empty()) {
+            refused.push(DescriptorRefusal::OrientTakesInput(p()));
+        }
+        if result.is_some() && !matches!(result, Some(ResultShape::Bound(n)) if n <= crate::options::ORIENT_BOUND_MAX) {
+            refused.push(DescriptorRefusal::OrientUnbounded(p()));
+        }
+        if callers.is_some_and(|c| c != crate::options::Callers::Agent) {
+            refused.push(DescriptorRefusal::OrientNotForAgents(p()));
+        }
+    }
     let mut route_key = None;
     let unnamed = match &route {
         Route::Leader(group) | Route::Keyed { group, .. } if group.is_empty() => Some("group"),
@@ -411,6 +486,7 @@ fn check_method(
                     .map(|e| crate::options::Example::new(e.args_json, e.caption))
                     .collect(),
                 ask_within_secs: raw.ask_within_secs,
+                orient: raw.orient,
             },
             route_key,
         )),
@@ -547,12 +623,21 @@ pub fn service_of(file_descriptor_set: &[u8]) -> Result<crate::options::ServiceO
         2 => crate::options::CursorScope::Instance,
         _ => return Err(DescriptorRefusal::CursorScopeMissing(name)),
     };
+    let chars = raw.guidance.chars().count();
+    if chars > crate::options::GUIDANCE_MAX_CHARS {
+        return Err(DescriptorRefusal::GuidanceTooLong(name, chars));
+    }
+    let summary = raw.guidance.lines().next().unwrap_or_default().chars().count();
+    if summary > crate::options::GUIDANCE_SUMMARY_MAX_CHARS {
+        return Err(DescriptorRefusal::GuidanceSummaryTooLong(name, summary));
+    }
     Ok(crate::options::ServiceOptions {
         contract: raw.contract,
         version: raw.version,
         cursor_scope,
         parts_depth: raw.parts_depth,
         events_kept: raw.events_kept,
+        guidance: raw.guidance,
     })
 }
 
@@ -667,6 +752,8 @@ mod wire {
         pub examples: Vec<WireExample>,
         #[prost(uint32, optional, tag = "14")]
         pub ask_within_secs: Option<u32>,
+        #[prost(bool, tag = "15")]
+        pub orient: bool,
     }
 
     #[derive(Clone, PartialEq, prost::Message)]
@@ -748,6 +835,8 @@ mod wire {
         pub parts_depth: u32,
         #[prost(uint32, tag = "5")]
         pub events_kept: u32,
+        #[prost(string, tag = "6")]
+        pub guidance: String,
     }
 }
 
@@ -845,6 +934,7 @@ mod tests {
                 ),
                 message("LandReply", &[]),
                 message("QueueReply", &[("trains", 1, Type::String, Label::Repeated)]),
+                message("OrientRequest", &[]),
             ],
             ..Default::default()
         }
@@ -879,6 +969,7 @@ mod tests {
             cursor_scope: 2,
             parts_depth: 1,
             events_kept: 64,
+            guidance: String::new(),
         }
     }
 
@@ -981,7 +1072,106 @@ mod tests {
             runs_to_completion: false,
             examples: Vec::new(),
             ask_within_secs: None,
+            orient: false,
         }
+    }
+
+    /// A good orient (ORIENTATION.md `#orient-is-one-bounded-read`): a unary agent read with no argument, its
+    /// result bound at the most an orient may state.
+    fn orient() -> wire::MethodOptions {
+        wire::MethodOptions {
+            description: "What matters to you in Herald now: your trains and the approvals they wait on.".into(),
+            result: Some(wire::Result { shape: Some(wire::Shape::Bound(crate::options::ORIENT_BOUND_MAX)) }),
+            effect: 1,
+            orient: true,
+            ..good()
+        }
+    }
+
+    /// guidance-is-a-service-option: a product's guidance is read whole from its one service, its first line is its
+    /// summary, and both bounds are admitted exactly and refused one past, by name, saying the length.
+    #[test]
+    fn guidance_is_read_with_its_summary_and_refused_past_its_bounds() {
+        let mut said = herald();
+        said.guidance = "Herald lands trains and releases them.\nAsk `herald waits <repo>` what a train lacks.".into();
+        let read = service_of(&services(&[("Herald", Some(&said))])).expect("admitted");
+        assert_eq!(read.guidance, said.guidance);
+        assert_eq!(read.summary(), "Herald lands trains and releases them.");
+        assert_eq!(service_of(&services(&[("Herald", Some(&herald()))])).expect("none yet").summary(), "");
+
+        let summary = "s".repeat(crate::options::GUIDANCE_SUMMARY_MAX_CHARS);
+        let body = "b".repeat(crate::options::GUIDANCE_MAX_CHARS - summary.len() - 1);
+        let mut full = herald();
+        full.guidance = format!("{summary}\n{body}");
+        assert_eq!(full.guidance.chars().count(), crate::options::GUIDANCE_MAX_CHARS);
+        service_of(&services(&[("Herald", Some(&full))])).expect("both bounds, exactly");
+
+        let mut long = herald();
+        long.guidance = format!("{summary}\n{body}b");
+        let refused = service_of(&services(&[("Herald", Some(&long))])).expect_err("one past");
+        assert_eq!(refused, DescriptorRefusal::GuidanceTooLong("herald.v2.Herald".into(), 1_201));
+        assert!(refused.to_string().contains("1201 characters, past 1200"), "{refused}");
+
+        let mut headed = herald();
+        headed.guidance = format!("{summary}s\nthe rest");
+        let refused = service_of(&services(&[("Herald", Some(&headed))])).expect_err("a summary one past");
+        assert_eq!(refused, DescriptorRefusal::GuidanceSummaryTooLong("herald.v2.Herald".into(), 161));
+        // Characters, never bytes: a multi-byte summary at the bound is admitted.
+        let mut wide = herald();
+        wide.guidance = "é".repeat(crate::options::GUIDANCE_SUMMARY_MAX_CHARS);
+        service_of(&services(&[("Herald", Some(&wide))])).expect("160 characters, 320 bytes");
+    }
+
+    /// orient-is-one-bounded-read: one orient is admitted and read as such; a second, a write, one taking input,
+    /// one unbounded or bound past 1,500, one for products, and one that streams are each refused by name.
+    #[test]
+    fn an_orient_is_one_unary_agent_read_with_no_input_and_a_bound() {
+        let empty = ".herald.v2.OrientRequest";
+        let reply = ".herald.v2.LandReply";
+        let methods = check_descriptor(&set(vec![
+            method("Orient", empty, reply, Some(&orient())),
+            method("Land", ".herald.v2.LandRequest", reply, Some(&good())),
+        ]))
+        .expect("admitted");
+        let marked: Vec<_> = methods.iter().map(|m| (m.path.as_str(), m.options.orient)).collect();
+        assert_eq!(marked, [("/herald.v2.Herald/Orient", true), ("/herald.v2.Herald/Land", false)]);
+
+        let refused = |options: wire::MethodOptions, input: &str| {
+            check_descriptor(&set(vec![method("Orient", input, reply, Some(&options))]))
+                .expect_err("refused")
+                .iter()
+                .map(DescriptorRefusal::name)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(refused(wire::MethodOptions { effect: 2, ..orient() }, empty), ["orient-not-a-read"]);
+        assert_eq!(refused(orient(), ".herald.v2.LandRequest"), ["orient-takes-input"]);
+        let past = Some(wire::Result { shape: Some(wire::Shape::Bound(crate::options::ORIENT_BOUND_MAX + 1)) });
+        assert_eq!(refused(wire::MethodOptions { result: past, ..orient() }, empty), ["orient-unbounded"]);
+        let one = Some(wire::Result { shape: Some(wire::Shape::One(wire::Empty {})) });
+        assert_eq!(refused(wire::MethodOptions { result: one, ..orient() }, empty), ["orient-unbounded"]);
+        assert_eq!(refused(wire::MethodOptions { callers: 2, ..orient() }, empty), ["orient-not-for-agents"]);
+
+        let twice = check_descriptor(&set(vec![
+            method("Orient", empty, reply, Some(&orient())),
+            method("Now", empty, reply, Some(&orient())),
+        ]))
+        .expect_err("two orients");
+        assert_eq!(
+            twice,
+            [DescriptorRefusal::OrientTwice("/herald.v2.Herald/Orient".into(), "/herald.v2.Herald/Now".into())]
+        );
+
+        let mut streaming = MethodDescriptorProto {
+            name: Some("Orient".into()),
+            input_type: Some(empty.into()),
+            output_type: Some(reply.into()),
+            server_streaming: Some(true),
+            ..Default::default()
+        }
+        .encode_to_vec();
+        streaming.extend(ld(4, &ld(METHOD_OPTIONS_FIELD, &orient().encode_to_vec())));
+        let refused = check_descriptor(&set(vec![streaming])).expect_err("a stream");
+        assert_eq!(refused.iter().map(DescriptorRefusal::name).collect::<Vec<_>>(), ["orient-streams"]);
     }
 
     /// an-ask-is-bounded-in-the-call: absent reads 45 and never 0, an explicit 0 stays 0 (it never asks),

@@ -1,6 +1,8 @@
 use serde_json::json;
 
-use super::{EVENTS_PATH, EVENTS_TOOL, FlattenRefusal, Stamp, StampLease, ToolKind, flatten, op_name, resolve};
+use super::{
+    EVENTS_PATH, EVENTS_TOOL, FlattenRefusal, Stamp, StampLease, ToolKind, flatten, instructions, op_name, resolve,
+};
 use crate::descriptor::{Field, FieldKind, Method};
 use crate::options::{
     Callers, CursorScope, Effect, Example, MethodOptions, Permission, Presence, ResultShape, ServiceOptions, Session,
@@ -18,6 +20,7 @@ fn service(events_kept: u32) -> ServiceOptions {
         cursor_scope: CursorScope::Instance,
         parts_depth: 1,
         events_kept,
+        guidance: String::new(),
     }
 }
 
@@ -288,4 +291,35 @@ fn an_external_caller_is_parsed_here_and_trusted_only_from_its_peer() {
     );
     assert_eq!(Stamp::from_metadata(b"not json").0, Stamp::unvouched());
     assert_eq!(super::STAMP_METADATA_KEY, "anemnez-caller-bin");
+}
+
+/// ORIENTATION.md §4: the orient tool says it is the orient under `_meta.anemnez`, and only it does, so every other
+/// tool's listing stays byte for byte as it was; and a server's `instructions` are the product's guidance, whole,
+/// or nothing when it has none yet.
+#[test]
+fn the_orient_tool_says_so_and_the_instructions_are_the_guidance() {
+    let mut now = MethodOptions::new(
+        "What matters to you now.",
+        ResultShape::Bound(1_500),
+        Effect::Read,
+        Presence::Full,
+        Permission::Allow,
+        Callers::Agent,
+    );
+    now.orient = true;
+    let methods = [
+        method("/pkg.S/Orient", now, vec![]),
+        method("/pkg.S/Get", agent("Get one.", Effect::Read, Permission::Allow), vec![]),
+    ];
+    let tools = flatten(&service(0), &methods).expect("flattens");
+    assert!(tools[0].orient);
+    assert_eq!(tools[0].to_json()["_meta"]["anemnez"]["orient"], true);
+    assert!(!tools[1].orient);
+    assert!(tools[1].to_json()["_meta"]["anemnez"].get("orient").is_none(), "said only on the orient");
+
+    assert_eq!(instructions(&service(0)), None, "no guidance yet: nothing");
+    let mut guided = service(0);
+    guided.guidance = "Pkg keeps your items.\nEach tool answers its help.".into();
+    assert_eq!(instructions(&guided), Some("Pkg keeps your items.\nEach tool answers its help."));
+    assert_eq!(guided.summary(), "Pkg keeps your items.");
 }

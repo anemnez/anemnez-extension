@@ -48,6 +48,9 @@ pub struct Tool {
     /// The method's part in a session: `opens` answers an id that `within` and `closes` take as a
     /// field of their request.
     pub session: Option<Session>,
+    /// The product's orient (ORIENTATION.md `#orient-is-one-bounded-read`): the one tool a host calls to say
+    /// what matters to this caller now (Agora's `agora__orient`).
+    pub orient: bool,
 }
 
 impl Tool {
@@ -56,7 +59,7 @@ impl Tool {
     #[must_use]
     pub fn to_json(&self) -> Value {
         let read_only = self.effect == Effect::Read;
-        json!({
+        let mut tool = json!({
             "name": self.name,
             "description": self.description,
             "inputSchema": self.input_schema,
@@ -73,7 +76,12 @@ impl Tool {
                 "result": self.result,
                 "session": self.session,
             } },
-        })
+        });
+        // Said only on the orient tool, so every other tool's listing stays byte for byte as it was.
+        if self.orient {
+            tool["_meta"]["anemnez"]["orient"] = json!(true);
+        }
+        tool
     }
 }
 
@@ -149,6 +157,7 @@ pub fn flatten(service: &ServiceOptions, methods: &[Method]) -> Result<Vec<Tool>
             long: method.options.blocks || method.options.runs_to_completion,
             result: method.options.result,
             session: method.options.session,
+            orient: method.options.orient,
         });
     }
     if !refusals.is_empty() {
@@ -195,7 +204,17 @@ fn events_tool() -> Tool {
         long: false,
         result: ResultShape::Cursor,
         session: None,
+        orient: false,
     }
+}
+
+/// What an MCP server's `instructions` carry for this product: its guidance, whole (ORIENTATION.md §4). `None`
+/// when it has none yet. Built from the descriptor alone, never from whether the product answered just now, so it
+/// is byte-stable per build and a client's prompt cache keeps it; a host showing guidance at Minimal shows
+/// [`ServiceOptions::summary`] instead.
+#[must_use]
+pub fn instructions(service: &ServiceOptions) -> Option<&str> {
+    (!service.guidance.is_empty()).then_some(service.guidance.as_str())
 }
 
 /// A closed object schema: no key but these, since a typo must not become a different act.

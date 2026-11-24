@@ -121,6 +121,26 @@ pub struct ServiceOptions {
     pub parts_depth: u32,
     /// How many events it keeps.
     pub events_kept: u32,
+    /// What the product is to an agent working beside it, and how to learn the rest (ORIENTATION.md
+    /// `#guidance-is-a-service-option`): byte-stable per build, naming no state. Empty says nothing yet.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub guidance: String,
+}
+
+/// The most characters a product's guidance may hold (`guidance-too-long`).
+pub const GUIDANCE_MAX_CHARS: usize = 1_200;
+/// The most characters guidance's first line, its summary, may hold (`guidance-summary-too-long`).
+pub const GUIDANCE_SUMMARY_MAX_CHARS: usize = 160;
+/// The largest `result: Bound` an `orient` method may state (`orient-unbounded`).
+pub const ORIENT_BOUND_MAX: u32 = 1_500;
+
+impl ServiceOptions {
+    /// The guidance's summary: its first line, split by rule and never by finding a sentence's end, so it is
+    /// byte-stable (C). What a caller shows at Minimal. Empty when there is no guidance.
+    #[must_use]
+    pub fn summary(&self) -> &str {
+        self.guidance.lines().next().unwrap_or_default()
+    }
 }
 
 /// How a method's result comes back: a collection is a cursor or capped, never unbounded.
@@ -288,6 +308,10 @@ pub struct MethodOptions {
     /// never asks (CONTRACT.md §8.1).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ask_within_secs: Option<u32>,
+    /// This method is the product's orient: what matters to the calling agent now (ORIENTATION.md
+    /// `#orient-is-one-bounded-read`). At most one per descriptor, a unary agent read with no argument.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub orient: bool,
 }
 
 /// What an absent `ask_within_secs` reads as: Claude Code's hook hold, the longest a person-facing call
@@ -321,6 +345,7 @@ impl MethodOptions {
             runs_to_completion: false,
             examples: Vec::new(),
             ask_within_secs: None,
+            orient: false,
         }
     }
 

@@ -39,6 +39,11 @@ message MethodOptions {
   // an-ask-is-bounded-in-the-call). Absent reads as 45, never 0; a method that never asks says 0;
   // past 120 the descriptor is refused, ask-bound-over-cap. A caller's own bound must exceed it.
   optional uint32 ask_within_secs = 14;
+  // This method is the product's orient: what matters to the calling agent now, as counts and pointers, never
+  // history (ORIENTATION.md #orient-is-one-bounded-read). At most one per descriptor; a unary agent read that
+  // takes no argument, its result bounded at 1,500 or fewer; refused otherwise, each by name (orient-twice,
+  // orient-not-a-read, orient-takes-input, orient-unbounded, orient-not-for-agents, orient-streams).
+  bool orient = 15;
 }
 
 // One worked call.
@@ -157,6 +162,12 @@ message ServiceOptions {
   // ends with data-loss, and how old a cursor may be before it is out-of-range. A consumer sizes
   // its reading to it.
   uint32 events_kept = 5;
+  // What the product is to an agent working beside it, and how to learn the rest: plain text written for the
+  // agent that reads it, naming no state (no counts, dates or hosts), so it is byte-stable per build and sits
+  // where a prompt cache keeps it (ORIENTATION.md #guidance-is-a-service-option). Its first line is its summary,
+  // the Minimal line. At most 1,200 characters, its first line at most 160; refused otherwise, by name
+  // (guidance-too-long, guidance-summary-too-long). Empty says nothing yet (readers first).
+  string guidance = 6;
 }
 
 enum CursorScope {
