@@ -26,3 +26,9 @@ repo = "anemnez/anemnez-sim"
 rev = "87aa91889129"
 why = "the deterministic simulation's runner, dev-only (MACHINES §4), its clock the same rev as ours"
 owner = "M"
+
+[anemnez-trust-family]
+repo = "anemnez/anemnez-service"
+rev = "e2066107cafc"
+why = "the house's trust anchor (ANEMNEZ_TEAM), its one home: the carried product caller's team is judged against it, never a literal of our own"
+owner = "M"

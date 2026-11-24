@@ -33,6 +33,14 @@ pub const PRODUCT_CALLER_UNPROVEN: &str = "product-caller-unproven";
 /// A carried call to a `callers = PRODUCT` method whose preface's code identity names a team this house doesn't trust
 /// (anemnez-trust's anchor): refused by name, never dropped (D m/32698).
 pub const PRODUCT_CALLER_UNTRUSTED: &str = "product-caller-untrusted";
+/// A carried call to a `callers = PRODUCT` method its product named no callers for (D m/32983): the team alone never
+/// admits, since the house's CLIs are team-signed too, so a method with no allow-list fails closed.
+pub const PRODUCT_CALLERS_UNNAMED: &str = "product-callers-unnamed";
+/// A carried call to a `callers = PRODUCT` method from a proven, house-signed caller whose identifier isn't on the
+/// method's allow-list (a house CLI an agent runs, say): refused by name (D m/32983).
+pub const PRODUCT_CALLER_NOT_ALLOWED: &str = "product-caller-not-allowed";
+/// An allow-list entry for a method whose descriptor doesn't say `callers = PRODUCT`, or that names no identifier.
+pub const PRODUCT_CALLERS_NOT_A_PRODUCT_METHOD: &str = "product-callers-not-a-product-method";
 /// A carried call to a write its product lists for claimed lanes (D m/28960), from an aegisd that said no preface: the
 /// node it came from is unknown, so its claim names no carrier, and it is refused.
 pub const CARRIED_NO_PREFACE: &str = "carried-no-preface";

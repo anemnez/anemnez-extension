@@ -60,13 +60,29 @@ pub struct ApiFaces {
     health: Board,
     events: EventsFace,
     claimed: crate::plane::ClaimedWrites,
+    products: crate::plane::ProductCallers,
 }
 
 impl ApiFaces {
     /// The three faces [`serve`] puts beside the product's calls. `events` is the product's Journal (an
     /// `EventsService`, retiring) or its own log (a `LogEvents`), as an [`EventsFace`].
     pub fn new(describe: Describe, health: Board, events: impl Into<EventsFace>) -> ApiFaces {
-        ApiFaces { describe, health, events: events.into(), claimed: crate::plane::ClaimedWrites::default() }
+        // The descriptor's callers = PRODUCT methods, none allowed: a carried call to one is product-callers-unnamed
+        // until the product names who may call it (D m/32983).
+        let products = crate::plane::ProductCallers::of(describe.descriptor(), &[]).unwrap_or_default();
+        ApiFaces { describe, health, events: events.into(), claimed: crate::plane::ClaimedWrites::default(), products }
+    }
+
+    /// The same, with the API plane admitting carried calls to `allow`'s methods, each `(method, identifiers)`, from a
+    /// proven, house-signed caller whose signing identifier is listed (D m/32662, m/32983). A replica stream lists this
+    /// product's own service identifier; a CLI's is never on a service-to-service list.
+    ///
+    /// # Errors
+    /// [`PRODUCT_CALLERS_NOT_A_PRODUCT_METHOD`](anemnez_extension::peer::PRODUCT_CALLERS_NOT_A_PRODUCT_METHOD) and the
+    /// method, for one the descriptor doesn't say `callers = PRODUCT`, or that names no identifier.
+    pub fn product_callers(self, allow: &[(&str, &[&str])]) -> Result<ApiFaces, (&'static str, String)> {
+        let products = crate::plane::ProductCallers::of(self.describe.descriptor(), allow)?;
+        Ok(ApiFaces { products, ..self })
     }
 
     /// The same, with the API plane admitting carried calls with a claimed lane to `methods` (D m/28960), each a
@@ -316,7 +332,7 @@ where
         .layer(
             ApiPlaneLayer::new(crate::plane::Reads::of(faces.describe.descriptor()))
                 .claiming(faces.claimed)
-                .products(crate::plane::ProductCallers::of(faces.describe.descriptor())),
+                .products(faces.products),
         )
         .layer(digested)
         .add_routes(routes)

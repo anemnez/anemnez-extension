@@ -212,7 +212,7 @@ spoken_for("a-carried-write-may-be-admitted-for-a-claimed-lane (a lane)", "plane
 spoken_for("a-carried-write-may-be-admitted-for-a-claimed-lane (preface)", "plane_tests::a_carried_write_with_no_preface_is_refused")
 spoken_for("a-carried-write-may-be-admitted-for-a-claimed-lane (other peers)", "plane_tests::a_listed_write_from_any_other_peer_is_judged_as_before")
 spoken_for("a-carried-write-may-be-admitted-for-a-claimed-lane (layer)", "plane_tests::the_layer_hands_the_service_the_claim")
-spoken_for("a-carried-product-caller-is-proven-by-its-code", "plane_tests::a_carried_product_caller_is_admitted_only_when_proven_and_the_houses")
+spoken_for("a-carried-product-caller-is-proven-by-its-code", "plane_tests::a_carried_product_caller_is_admitted_only_when_proven_the_houses_and_listed")
 spoken_for("a-carried-product-caller-is-proven-by-its-code (descriptor)", "plane_tests::the_methods_products_call_are_read_from_the_descriptor")
 spoken_for("a-carried-product-caller-is-proven-by-its-code (layer)", "plane_tests::the_layer_admits_a_proven_product_and_hands_its_caller_to_the_service")
 spoken_for("a-carried-write-may-be-admitted-for-a-claimed-lane (reads)", "plane_tests::a_carried_read_with_a_stamp_is_admitted_as_a_read_and_its_stamp_unused")

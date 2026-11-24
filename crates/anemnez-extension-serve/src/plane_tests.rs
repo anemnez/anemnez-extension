@@ -463,6 +463,9 @@ fn every_name_the_plane_refuses_with_is_on_its_one_list() {
         ("CLAIMED_METHOD_NOT_A_READ_OR_WRITE", CLAIMED_METHOD_NOT_A_READ_OR_WRITE),
         ("PRODUCT_CALLER_UNPROVEN", anemnez_extension::peer::PRODUCT_CALLER_UNPROVEN),
         ("PRODUCT_CALLER_UNTRUSTED", anemnez_extension::peer::PRODUCT_CALLER_UNTRUSTED),
+        ("PRODUCT_CALLERS_UNNAMED", anemnez_extension::peer::PRODUCT_CALLERS_UNNAMED),
+        ("PRODUCT_CALLER_NOT_ALLOWED", anemnez_extension::peer::PRODUCT_CALLER_NOT_ALLOWED),
+        ("PRODUCT_CALLERS_NOT_A_PRODUCT_METHOD", anemnez_extension::peer::PRODUCT_CALLERS_NOT_A_PRODUCT_METHOD),
     ];
     assert!(found.len() >= 6, "the census reads the plane's refusals: {found:?}");
     for name in &found {
@@ -477,46 +480,62 @@ fn every_name_the_plane_refuses_with_is_on_its_one_list() {
 // ── Carried product callers (D m/32662, m/32698; A's replica Open) ────────────────────────────────────────────────
 
 /// A carried connection whose preface says who signed the far caller.
-fn carried_signed(team: &str) -> Judged {
+fn carried_signed(team: &str, identifier: &str) -> Judged {
     let mut judged = carried(Some("node-b"));
     if let Some(preface) = judged.carried.as_mut() {
         preface.code =
-            Some(anemnez_extension::carried::CodeIdentity { team: team.into(), identifier: "ai.anemnez.stoad".into() });
+            Some(anemnez_extension::carried::CodeIdentity { team: team.into(), identifier: identifier.into() });
     }
     judged
 }
 
-/// D m/32662: a carried call to a `callers = PRODUCT` method is admitted only on a present, house-signed code identity,
-/// its caller named for the handler's predicate; absent is unproven, one meaning whether there's no preface or no code
-/// in it; another team is untrusted, refused by name.
+/// D m/32662, m/32983: a carried call to a `callers = PRODUCT` method is admitted only on a present, house-signed code
+/// identity whose identifier the method's product lists; absent is unproven, one meaning whether there's no preface or no
+/// code in it; another team is untrusted; a team-signed house CLI (an agent can run one) isn't on a service's list; and a
+/// method its product named no callers for fails closed.
 #[test]
-fn a_carried_product_caller_is_admitted_only_when_proven_and_the_houses() {
+fn a_carried_product_caller_is_admitted_only_when_proven_the_houses_and_listed() {
     use crate::plane::{ProductCaller, product_admits};
-    use anemnez_extension::peer::{PRODUCT_CALLER_UNPROVEN, PRODUCT_CALLER_UNTRUSTED};
+    use anemnez_extension::peer::{
+        PRODUCT_CALLER_NOT_ALLOWED, PRODUCT_CALLER_UNPROVEN, PRODUCT_CALLER_UNTRUSTED, PRODUCT_CALLERS_UNNAMED,
+    };
     let house = anemnez_trust::ANEMNEZ_TEAM;
-    let proven = product_admits(&carried_signed(house)).expect("proven");
+    let stoad = ["ai.anemnez.stoad".to_owned()];
+    let proven = product_admits(&carried_signed(house, "ai.anemnez.stoad"), Some(&stoad)).expect("proven, listed");
+    let identity =
+        anemnez_extension::carried::CodeIdentity { team: house.into(), identifier: "ai.anemnez.stoad".into() };
+    assert_eq!(proven, ProductCaller { node: "node-b".into(), identity });
+    let cli = carried_signed(house, "ai.anemnez.ergon");
     assert_eq!(
-        proven,
-        ProductCaller {
-            node: "node-b".into(),
-            identity: anemnez_extension::carried::CodeIdentity {
-                team: house.into(),
-                identifier: "ai.anemnez.stoad".into()
-            }
-        }
+        product_admits(&cli, Some(&stoad)),
+        Err(PRODUCT_CALLER_NOT_ALLOWED),
+        "a house CLI, team-signed, refused"
     );
-    assert_eq!(product_admits(&carried(Some("node-b"))), Err(PRODUCT_CALLER_UNPROVEN), "a preface with no code");
-    assert_eq!(product_admits(&carried(None)), Err(PRODUCT_CALLER_UNPROVEN), "no preface at all: the same meaning");
-    assert_eq!(product_admits(&carried_signed("ABCDE12345")), Err(PRODUCT_CALLER_UNTRUSTED), "another team");
+    assert_eq!(product_admits(&carried(Some("node-b")), Some(&stoad)), Err(PRODUCT_CALLER_UNPROVEN), "no code");
+    assert_eq!(product_admits(&carried(None), Some(&stoad)), Err(PRODUCT_CALLER_UNPROVEN), "no preface: the same");
+    let other = carried_signed("ABCDE12345", "ai.anemnez.stoad");
+    assert_eq!(product_admits(&other, Some(&stoad)), Err(PRODUCT_CALLER_UNTRUSTED), "another team");
+    let listless = product_admits(&carried_signed(house, "ai.anemnez.stoad"), None);
+    assert_eq!(listless, Err(PRODUCT_CALLERS_UNNAMED), "the team alone never admits: no list fails closed");
 }
 
 /// The descriptor says which methods products call, read once: Land is `callers = PRODUCT`, Describe isn't.
 #[test]
 fn the_methods_products_call_are_read_from_the_descriptor() {
-    let products = crate::plane::ProductCallers::of(&land_descriptor_with(pb::Effect::Write));
-    assert!(products.lists("/h.v1.H/Land"));
+    use anemnez_extension::peer::PRODUCT_CALLERS_NOT_A_PRODUCT_METHOD;
+    let land = land_descriptor_with(pb::Effect::Write);
+    let products = crate::plane::ProductCallers::of(&land, &[(LAND, &["ai.anemnez.stoad"])]).expect("Land is PRODUCT");
+    assert!(products.lists(LAND));
+    assert_eq!(products.allowed(LAND), Some(&["ai.anemnez.stoad".to_owned()][..]));
     assert!(!products.lists(DESCRIBE));
-    assert!(!crate::plane::ProductCallers::of(b"\xff not a descriptor").lists("/h.v1.H/Land"), "none, the safe way");
+    let unlisted = crate::plane::ProductCallers::of(&land, &[]).expect("none named");
+    assert!(unlisted.lists(LAND) && unlisted.allowed(LAND).is_none(), "known, but nobody allowed");
+    let not_product = crate::plane::ProductCallers::of(&land, &[(DESCRIBE, &["ai.anemnez.stoad"])]);
+    assert_eq!(not_product.map(|_| ()), Err((PRODUCT_CALLERS_NOT_A_PRODUCT_METHOD, DESCRIBE.to_owned())));
+    let empty = crate::plane::ProductCallers::of(&land, &[(LAND, &[])]);
+    assert_eq!(empty.map(|_| ()), Err((PRODUCT_CALLERS_NOT_A_PRODUCT_METHOD, LAND.to_owned())), "a list names one");
+    let junk = crate::plane::ProductCallers::of(b"\xff not a descriptor", &[]).expect("none, the safe way");
+    assert!(!junk.lists(LAND));
 }
 
 /// End to end through the layer: a proven product's carried call reaches the handler with its ProductCaller; an
@@ -530,7 +549,8 @@ async fn the_layer_admits_a_proven_product_and_hands_its_caller_to_the_service()
 
     let send = |judged: Judged, path: &'static str| {
         let seen = Seen::<ProductCaller>::default();
-        let products = ProductCallers::of(&land_descriptor_with(pb::Effect::Write));
+        let products = ProductCallers::of(&land_descriptor_with(pb::Effect::Write), &[(LAND, &["ai.anemnez.stoad"])])
+            .expect("Land is PRODUCT");
         let mut service = ApiPlaneLayer::new(Reads::default()).products(products).layer(seen.clone());
         let mut request = http::Request::builder()
             .uri(path)
@@ -544,7 +564,7 @@ async fn the_layer_admits_a_proven_product_and_hands_its_caller_to_the_service()
             (said, seen.got())
         }
     };
-    let (said, seen) = send(carried_signed(anemnez_trust::ANEMNEZ_TEAM), LAND).await;
+    let (said, seen) = send(carried_signed(anemnez_trust::ANEMNEZ_TEAM, "ai.anemnez.stoad"), LAND).await;
     assert_eq!(said, None, "served");
     assert_eq!(seen.flatten().map(|c| c.node), Some("node-b".to_owned()), "its caller, on the request");
 
@@ -552,7 +572,11 @@ async fn the_layer_admits_a_proven_product_and_hands_its_caller_to_the_service()
     assert!(said.is_some_and(|m| m.starts_with("product-caller-unproven")), "refused before the handler");
     assert!(seen.is_none(), "the handler never ran");
 
-    let (said, _) = send(carried_signed(anemnez_trust::ANEMNEZ_TEAM), FUNCTIONAL).await;
+    let (said, seen) = send(carried_signed(anemnez_trust::ANEMNEZ_TEAM, "ai.anemnez.ergon"), LAND).await;
+    assert!(said.is_some_and(|m| m.starts_with("product-caller-not-allowed")), "a house CLI, refused at the plane");
+    assert!(seen.is_none());
+
+    let (said, _) = send(carried_signed(anemnez_trust::ANEMNEZ_TEAM, "ai.anemnez.stoad"), FUNCTIONAL).await;
     assert!(said.is_some_and(|m| m.starts_with(CARRIED_WRITE_UNBOUND)), "a code identity opens only PRODUCT methods");
 
     let (said, seen) = send(judged(Role::Other), LAND).await;
