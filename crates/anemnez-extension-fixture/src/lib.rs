@@ -15,7 +15,7 @@
 //! | `Run()` | `runs_to_completion`: bounded only by its own end, with no budget |
 //! | `Wait(timeout_ms)` | owns its budget through the field, not the flag (C) |
 //! | `Snapshot()` | a reply whose bytes fields are tagged `image/png`, one singular, one repeated |
-//! | `Orient()` | the product's orient: an agent read, no input, `bound(1)`, answering [`ORIENT_NOW`] |
+//! | `Orient()` | the product's orient: an agent read, no input, `bound(1)`, answering [`ORIENT_NOW`], held by [`Running::hold_orient`] |
 //! | `Ping()` | no anemnez options: not exposed |
 //!
 //! plus the contract's `Describe`, `Health` and `Events`. Every unary reply carries the caller's
@@ -118,7 +118,15 @@ pub struct Running {
     pub version: &'static str,
     /// Its events journal, so a test can publish or read.
     pub journal: Journal,
+    /// Whether `Orient` holds its answer ([`Running::hold_orient`]), and the fixture's word that it holds one.
+    orient: Arc<OrientHold>,
     server: tokio::task::JoinHandle<()>,
+}
+
+/// `Orient`'s hold: while `held` is true it answers nothing; `holding` is told each time one waits.
+struct OrientHold {
+    held: tokio::sync::watch::Sender<bool>,
+    holding: tokio::sync::Notify,
 }
 
 impl Running {
@@ -138,6 +146,18 @@ impl Running {
                 }
             }))
             .await
+    }
+}
+
+impl Running {
+    /// Hold (`true`) or let go (`false`) every `Orient` answer: a host's proof of a late orient, with no timer.
+    pub fn hold_orient(&self, held: bool) {
+        self.orient.held.send_replace(held);
+    }
+
+    /// Answered once an `Orient` call is held here.
+    pub async fn orient_held(&self) {
+        self.orient.holding.notified().await;
     }
 }
 
@@ -166,7 +186,9 @@ pub async fn serve(dir: &Path, clock: Clock, variant: Variant) -> std::io::Resul
         Arc::new(NoKeysYet),
         Arc::new(MemoryNonces::new(clock.clone())),
     );
-    let fixture = Fixture { journal: journal.clone(), clock };
+    let orient =
+        Arc::new(OrientHold { held: tokio::sync::watch::Sender::new(false), holding: tokio::sync::Notify::new() });
+    let fixture = Fixture { journal: journal.clone(), clock, orient: Arc::clone(&orient) };
     let router = tonic::transport::Server::builder()
         .layer(DigestLayer::for_paths([anemnez_extension_serve::journal::EVENTS_METHOD]))
         .add_service(pb::fixture_server::FixtureServer::new(fixture))
@@ -188,6 +210,7 @@ pub async fn serve(dir: &Path, clock: Clock, variant: Variant) -> std::io::Resul
         contract: variant.contract(),
         version: variant.version(),
         journal,
+        orient,
         server,
     })
 }
@@ -232,6 +255,7 @@ fn item(i: usize) -> pb::Item {
 struct Fixture {
     journal: Journal,
     clock: Clock,
+    orient: Arc<OrientHold>,
 }
 
 /// The reply, with the caller's token's digest in its metadata when it carried one.
@@ -319,6 +343,11 @@ impl pb::fixture_server::Fixture for Fixture {
         &self,
         request: tonic::Request<pb::OrientRequest>,
     ) -> Result<tonic::Response<pb::OrientReply>, tonic::Status> {
+        let mut held = self.orient.held.subscribe();
+        if *held.borrow_and_update() {
+            self.orient.holding.notify_one();
+            let _ = held.wait_for(|held| !held).await;
+        }
         Ok(reply(&request, pb::OrientReply { now: ORIENT_NOW.into() }))
     }
 

@@ -226,3 +226,19 @@ fn snapshot_tags_its_image_fields() {
     assert!(untagged.into_iter().all(|m| m.output_media.is_empty()), "no other reply carries an image");
     assert!(crate::PNG_1X1.starts_with(b"\x89PNG\r\n\x1a\n") && crate::PNG_1X1.ends_with(b"IEND\xAE\x42\x60\x82"));
 }
+
+/// A host's late-orient proof needs a native orient that can be held: while held, Orient answers nothing until it is
+/// let go (or its call is dropped), and then answers `ORIENT_NOW`. No timer: the fixture says when it holds one.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_held_orient_answers_only_once_let_go() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let running = serve(dir.path(), ManualClock::new().clock(), Variant::Good).await.expect("serves");
+    let mut fixture = pb::fixture_client::FixtureClient::new(running.channel().await.expect("connects"));
+    running.hold_orient(true);
+    let asked = tokio::spawn(async move { fixture.orient(pb::OrientRequest {}).await });
+    running.orient_held().await;
+    assert!(!asked.is_finished(), "held: no answer yet");
+    running.hold_orient(false);
+    let now = asked.await.expect("ran").expect("answered").into_inner().now;
+    assert_eq!(now, crate::ORIENT_NOW);
+}

@@ -13,7 +13,7 @@ anemnez-extension-serve = { path = "../anemnez-extension-serve", version = "0.9.
 anemnez-clock.workspace = true
 tonic.workspace = true
 prost.workspace = true
-tokio = { workspace = true, features = ["net", "rt"] }
+tokio = { workspace = true, features = ["net", "rt", "sync"] }
 tokio-stream.workspace = true
 # Running::channel, a test's way in over the fixture's socket.
 hyper-util.workspace = true
