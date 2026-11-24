@@ -355,6 +355,8 @@ impl Keys for Silent {
 struct Held {
     release: tokio::sync::Mutex<Option<oneshot::Receiver<()>>>,
     recorded: Arc<std::sync::atomic::AtomicBool>,
+    /// Said once the write has run to its end, so a row waits on that event, never on a count of yields.
+    landed: Arc<tokio::sync::Notify>,
 }
 
 #[tonic::async_trait]
@@ -364,6 +366,7 @@ impl Nonces for Held {
             let _ = release.await;
         }
         self.recorded.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.landed.notify_one();
         Ok(())
     }
 }
@@ -396,7 +399,12 @@ async fn a_nonce_write_held_past_its_bound_is_refused_and_still_lands() {
     let clock = manual.clock();
     let (let_go, release) = oneshot::channel();
     let recorded = Arc::new(AtomicBool::new(false));
-    let held = Held { release: tokio::sync::Mutex::new(Some(release)), recorded: Arc::clone(&recorded) };
+    let landed = Arc::new(tokio::sync::Notify::new());
+    let held = Held {
+        release: tokio::sync::Mutex::new(Some(release)),
+        recorded: Arc::clone(&recorded),
+        landed: Arc::clone(&landed),
+    };
     let keys = Arc::new(OneKey { absent_admitted: false, extra: Vec::new() });
     let verifier = Verifier::new(AUDIENCE, clock, keys, Arc::new(held));
     let token = mint(&manual, METHOD, [1; 32], 60, 2);
@@ -407,13 +415,10 @@ async fn a_nonce_write_held_past_its_bound_is_refused_and_still_lands() {
     assert_eq!(refused.expect_err("never admitted"), Refusal::LookupUnanswered(Lookup::Nonce));
     assert!(!recorded.load(Ordering::SeqCst), "still held when the caller was answered");
     let_go.send(()).expect("the write is still waiting");
-    for _ in 0..100_000 {
-        if recorded.load(Ordering::SeqCst) {
-            return;
-        }
-        tokio::task::yield_now().await;
-    }
-    panic!("the write never ran to its end once let go");
+    // The write's own word that it landed, within a hang guard on real time: a count of yields ran out on a loaded
+    // gate host before the write's task was scheduled (2 in 10 workspace runs at 64 threads).
+    let landed = anemnez_clock::Clock::system().timeout(Duration::from_secs(10), landed.notified()).await;
+    assert!(landed.is_ok() && recorded.load(Ordering::SeqCst), "the write never ran to its end once let go");
 }
 
 /// E m/15582: what a call carries is three states, so an unreadable header is never read as absent.
