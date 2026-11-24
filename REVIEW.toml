@@ -1,10 +1,11 @@
-# Who may approve a train's head (standards repo/review-declared; E m/10346, m/10350). K stewards it
-# since 2026-11-16 (from H, m/13501).
+# Who may approve a train's head (standards repo/review-declared; E m/10346, m/10350). M stewards it beside the SDK
+# since 2026-11-24 (the User; from K, m/32603, M's yes m/32609), as K did from 2026-11-16 (from H, m/13501).
 schema = 1
-steward = "K"
+steward = "M"
 
-# The steward never approves their own train, so every path names who else may: D (the contract's
-# architect) or E (standards, and Prova and Archetect, which take this crate from git).
+# The steward never approves their own train, so every path names who else may: D (the contract's architect), E
+# (standards, and Prova and Archetect, which take this crate from git), or B (Substrate's mount, a client of the
+# contract; the User, 2026-11-24).
 [[paths]]
 glob = "**"
-reviewers = ["D", "E"]
+reviewers = ["D", "E", "B"]
