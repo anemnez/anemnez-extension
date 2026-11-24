@@ -26,6 +26,7 @@ pub mod log_events;
 pub mod opening;
 pub mod plane;
 pub mod principal;
+pub mod reread;
 pub mod serve;
 pub mod watch;
 

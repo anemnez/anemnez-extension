@@ -235,3 +235,5 @@ spoken_for("a-products-http-routes-ride-the-plane (expect-continue, a streamed u
 spoken_for("a-products-http-routes-ride-the-plane (length and chunked smuggle nothing)", "serve::http_routes_tests::a_request_with_both_length_and_chunked_smuggles_nothing")
 spoken_for("a-products-http-routes-ride-the-plane (the opening's HTTP/1 by name)", "opening::tests::an_http1_plane_opens_a_whole_request_head_and_refuses_the_rest_by_name")
 spoken_for("a-log-is-read-through-one-seam", "log_events_tests::a_log_opened_per_read_serves_call_once_per_call_and_says_busy")
+spoken_for("a-log-is-read-through-one-seam (a write between a read and its wait is never lost)", "reread::tests::a_write_between_the_read_and_the_wait_is_never_lost")
+spoken_for("a-log-is-read-through-one-seam (the wait is outside the open)", "reread::tests::a_wait_is_outside_the_open_and_woken_by_changes_or_its_bound")

@@ -210,15 +210,25 @@ impl std::fmt::Debug for Authorize {
 /// product's today), or opened for each read under its writer's lock, as horaid opens Horai's logs, whose writer is
 /// Horai's CLI and whose library is one process per log (horai HORAID.md §4).
 pub trait Log: Send + Sync + 'static {
+    /// The log's name, as positions in it carry it.
+    fn name(&self) -> &str;
+
     /// Run `read` once with the log open, opening it within `within` when it isn't held.
     ///
     /// # Errors
     /// [`Busy`] when the log couldn't be opened within `within`: its writer holds it.
     fn with(&self, within: Duration, read: &mut dyn FnMut(&Events)) -> Result<(), Busy>;
 
-    /// The log, when it is held open: what a Watch streams from. A log opened for each read has none, so its Watch is
-    /// refused `events-call-unserved` until a Watch's re-read is served (ergon:K/log-events-seam, its second step).
+    /// The log, when it is held open: a Call reads it and a Watch streams from it as they always have. A log opened
+    /// for each read has none, and is served through [`crate::reread::ReRead`] instead.
     fn held(&self) -> Option<Arc<Events>> {
+        None
+    }
+
+    /// What tells a wait the log changed, for a log opened per read: its owner bumps it on every write it learns of
+    /// (horaid, from its kqueue on the stream's file, following the file through a replace: D m/31023). None waits on
+    /// the bound alone (L m/31024).
+    fn changes(&self) -> Option<Arc<crate::reread::Changes>> {
         None
     }
 }
@@ -229,6 +239,10 @@ pub struct Busy(pub String);
 
 /// A log held open for the server's life: every read is at once, and its Watch streams from it.
 impl Log for Arc<Events> {
+    fn name(&self) -> &str {
+        Events::name(self)
+    }
+
     fn with(&self, _within: Duration, read: &mut dyn FnMut(&Events)) -> Result<(), Busy> {
         read(self);
         Ok(())
@@ -390,7 +404,7 @@ struct Watching {
     driver: Driver,
     frames: tokio::sync::mpsc::Receiver<Vec<u8>>,
     stopper: Stopper,
-    log: Arc<Events>,
+    log: Arc<dyn hydramq_events::Face>,
     clock: Clock,
     expires: Mono,
     until: Option<Mono>,
@@ -505,12 +519,17 @@ impl pb::events_server::Events for LogEvents {
             |a| a.expires,
         );
         let drain = request.extensions().get::<StreamEnd>().map(StreamEnd::ended);
-        // A log opened for each read has no Watch yet: said as a Journal says it, so the client reads watch-unserved.
-        let Some(log) = self.log.held() else {
-            return Err(tonic::Status::unimplemented(format!(
-                "{}: this product's log is opened for each read, so its Watch isn't served yet; read it with Events/Call",
-                refusal::EVENTS_CALL_UNSERVED
-            )));
+        // A held log streams as it always has; one opened for each read streams through a ReRead, each read one open
+        // and each wait outside the lock (L m/31024), the same Watching over it.
+        let log: Arc<dyn hydramq_events::Face> = match self.log.held() {
+            Some(events) => events,
+            None => {
+                let reread = crate::reread::ReRead::new(Arc::clone(&self.log), CALL_WITHIN, &self.clock);
+                if !reread.sourced() {
+                    tracing::info!(log = %self.log.name(), "a watch re-reads on its beat alone: the log has no source of changes");
+                }
+                Arc::new(reread)
+            }
         };
         let bytes = request.into_inner().request;
         // Read the request before taking a thread for it.
@@ -586,11 +605,22 @@ impl pb::events_server::Events for LogEvents {
         })?;
         let (log, bytes) = (Arc::clone(&self.log), request.into_inner().request);
         let within = CALL_WITHIN.min(self.left(deadline));
+        let clock = self.clock.clone();
         let read = tokio::task::spawn_blocking(move || {
             // Held while the thread reads, so a read past its bound still counts until it ends.
             let _slot = slot;
-            let mut served = None;
-            log.with(within, &mut |events| served = Some(wire::serve(events, &bytes))).map(|()| served)
+            if log.held().is_some() {
+                let mut served = None;
+                return log.with(within, &mut |events| served = Some(wire::serve(events, &bytes))).map(|()| served);
+            }
+            // Opened for each read: a long-poll's wait sits outside the log's lock, so its writer never waits on a
+            // caller's within (L m/31024). A read that found the writer holding it is busy, by name.
+            let reread = crate::reread::ReRead::new(log, within, &clock);
+            let reply = wire::serve(&reread, &bytes);
+            match reread.busy() {
+                Some(why) => Err(Busy(why)),
+                None => Ok(Some(reply)),
+            }
         });
         match self.clock.timeout(within, read).await {
             Ok(Ok(Ok(Some(reply)))) => Ok(tonic::Response::new(pb::CallReply { reply })),
