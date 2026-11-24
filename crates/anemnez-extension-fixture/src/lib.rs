@@ -15,6 +15,7 @@
 //! | `Run()` | `runs_to_completion`: bounded only by its own end, with no budget |
 //! | `Wait(timeout_ms)` | owns its budget through the field, not the flag (C) |
 //! | `Snapshot()` | a reply whose bytes fields are tagged `image/png`, one singular, one repeated |
+//! | `Orient()` | the product's orient: an agent read, no input, `bound(1)`, answering [`ORIENT_NOW`] |
 //! | `Ping()` | no anemnez options: not exposed |
 //!
 //! plus the contract's `Describe`, `Health` and `Events`. Every unary reply carries the caller's
@@ -210,6 +211,9 @@ impl Keys for NoKeysYet {
     }
 }
 
+/// What the fixture's `Orient` answers, so a host's orient fan-out is proven against a native face.
+pub const ORIENT_NOW: &str = "Twelve items; Recent has the newest five.";
+
 const ITEMS: usize = 12;
 const PAGE: usize = 5;
 
@@ -309,6 +313,13 @@ impl pb::fixture_server::Fixture for Fixture {
         let page_png = PNG_1X1.to_vec();
         let frame_pngs = vec![page_png.clone(), page_png.clone()];
         Ok(reply(&request, pb::SnapshotReply { page_png, frame_pngs, caption: "one pixel".into() }))
+    }
+
+    async fn orient(
+        &self,
+        request: tonic::Request<pb::OrientRequest>,
+    ) -> Result<tonic::Response<pb::OrientReply>, tonic::Status> {
+        Ok(reply(&request, pb::OrientReply { now: ORIENT_NOW.into() }))
     }
 
     async fn ping(
