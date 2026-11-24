@@ -36,6 +36,10 @@ pub const CARRIED_CLAIM_NOT_A_LANE: &str = "carried-claim-not-a-lane";
 /// A product listing a method for claimed carried writes that its own descriptor doesn't say is a `write`: an `act`,
 /// a `read` or no such method. Refused when the plane is built, so an `act` can never be listed (D m/28960 (1)).
 pub const CLAIMED_WRITE_NOT_A_WRITE: &str = "claimed-write-not-a-write";
+/// A product listing a method for claimed lanes that its own descriptor says is neither a `read` nor a `write`: an `act`
+/// or no such method (D m/29220: a product lists reads, for attribution, as well as writes). Refused when the plane is
+/// built. Supersedes [`CLAIMED_WRITE_NOT_A_WRITE`], kept for its readers.
+pub const CLAIMED_METHOD_NOT_A_READ_OR_WRITE: &str = "claimed-method-not-a-read-or-write";
 
 /// A product's own service named under a package the contract reserves (`anemnez.extension.`, `anemnez.fabric.`):
 /// the API plane serves the contract's faces itself and never Lifecycle, so a product can't shadow or add one

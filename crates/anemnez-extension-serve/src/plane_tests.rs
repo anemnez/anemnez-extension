@@ -5,15 +5,15 @@ use anemnez_extension::carried::{Holder, Preface};
 use anemnez_extension::mcp::STAMP_METADATA_KEY;
 use anemnez_extension::mcp::Stamp;
 use anemnez_extension::peer::{
-    CARRIED_CLAIM_NOT_A_LANE, CARRIED_NO_PREFACE, CARRIED_WRITE_UNBOUND, CLAIMED_WRITE_NOT_A_WRITE, Code,
-    FABRICD_READS_DESCRIBE_ONLY, NOT_JUDGED, Peer, Role, STAMP_NOT_FROM_AGORA,
+    CARRIED_CLAIM_NOT_A_LANE, CARRIED_NO_PREFACE, CARRIED_WRITE_UNBOUND, CLAIMED_METHOD_NOT_A_READ_OR_WRITE,
+    CLAIMED_WRITE_NOT_A_WRITE, Code, FABRICD_READS_DESCRIBE_ONLY, NOT_JUDGED, Peer, Role, STAMP_NOT_FROM_AGORA,
 };
 
 use crate::accepted::{Accepted, Judged};
 use crate::pb;
 use crate::plane::{
-    ApiPlaneLayer, Claimed, ClaimedWrites, Reads, api_admits, carried_admits, carried_claim, plane_admits, said,
-    stamp_bytes,
+    ApiPlaneLayer, Claimed, ClaimedMethods, ClaimedWrites, Reads, api_admits, carried_admits, carried_claim,
+    plane_admits, said, stamp_bytes,
 };
 use crate::serve_tests::land_descriptor_with;
 
@@ -165,26 +165,64 @@ fn claiming_land() -> ClaimedWrites {
     ClaimedWrites::of(&land_descriptor_with(pb::Effect::Write), &[LAND], ours).expect("Land is a write")
 }
 
-/// D m/28960 (1): a product lists methods, never itself, and only its descriptor's writes: an act, a read, or a path
-/// it doesn't have is refused when the plane is built, by name. (A host-touching verb a descriptor calls a write, as
-/// Ergon's Place is, stays out by the product's own list: O m/29051.)
+/// D m/28960 (1), m/29220: a product lists methods, never itself, and only its descriptor's reads and writes: an act,
+/// or a path it doesn't have, is refused when the plane is built, by name. (A host-touching verb a descriptor calls a
+/// write, as Ergon's Place is, stays out by the product's own list: O m/29051.)
 #[test]
-fn only_a_descriptors_writes_can_be_listed_for_claimed_lanes() {
+fn only_a_descriptors_reads_and_writes_can_be_listed_for_claimed_lanes() {
     for effect in [pb::Effect::Write, pb::Effect::Act, pb::Effect::Read] {
         let checked = anemnez_extension::descriptor::check_descriptor(&land_descriptor_with(effect));
         assert!(checked.is_ok(), "{effect:?}: the fixture is a descriptor the check admits, so no row is vacuous");
     }
-    assert!(ClaimedWrites::of(&land_descriptor_with(pb::Effect::Write), &[LAND], ours).is_ok());
-    for effect in [pb::Effect::Act, pb::Effect::Read] {
+    for effect in [pb::Effect::Write, pb::Effect::Read] {
+        assert!(ClaimedMethods::of(&land_descriptor_with(effect), &[LAND], ours).is_ok(), "{effect:?} may be listed");
+    }
+    assert_eq!(
+        ClaimedMethods::of(&land_descriptor_with(pb::Effect::Act), &[LAND], ours).err(),
+        Some((CLAIMED_METHOD_NOT_A_READ_OR_WRITE, LAND.to_owned())),
+        "an act never"
+    );
+    let missing = ClaimedMethods::of(&land_descriptor_with(pb::Effect::Write), &["/h.v1.H/Place"], ours).err();
+    assert_eq!(
+        missing,
+        Some((CLAIMED_METHOD_NOT_A_READ_OR_WRITE, "/h.v1.H/Place".to_owned())),
+        "a path it doesn't have"
+    );
+    assert!(ClaimedMethods::of(b"not a descriptor", &[], ours).is_ok(), "listing nothing is always fine");
+}
+
+/// D m/29220: a carried read its product lists carries a claim that holds for attribution, metering and fairness, and
+/// one that doesn't is served unattributed, never refused: a read is admitted whatever it carries. An unlisted read
+/// never reads its stamp at all.
+#[test]
+fn a_listed_carried_read_is_attributed_when_its_claim_holds_and_served_when_it_doesnt() {
+    let reads = Reads(std::sync::Arc::new(std::iter::once(LAND.to_owned()).collect()));
+    let listed = ClaimedMethods::of(&land_descriptor_with(pb::Effect::Read), &[LAND], ours).expect("a read");
+    let far = carried(Some("node-b"));
+    assert_eq!(
+        plane_admits(Some(&far), LAND, Some(&stamp(Some("K"))), &reads, &listed),
+        Ok(Some(Claimed { lane: "K".into(), via: "node-b".into() })),
+        "a claim that holds is the read's attribution"
+    );
+    for (stamp_bytes, why) in
+        [(Some(stamp(Some("User"))), "the person"), (Some(stamp(None)), "no lane"), (None, "no stamp")]
+    {
         assert_eq!(
-            ClaimedWrites::of(&land_descriptor_with(effect), &[LAND], ours).err(),
-            Some((CLAIMED_WRITE_NOT_A_WRITE, LAND.to_owned())),
-            "{effect:?}"
+            plane_admits(Some(&far), LAND, stamp_bytes.as_deref(), &reads, &listed),
+            Ok(None),
+            "{why}: served, unattributed"
         );
     }
-    let missing = ClaimedWrites::of(&land_descriptor_with(pb::Effect::Write), &["/h.v1.H/Place"], ours).err();
-    assert_eq!(missing, Some((CLAIMED_WRITE_NOT_A_WRITE, "/h.v1.H/Place".to_owned())), "a path it doesn't have");
-    assert!(ClaimedWrites::of(b"not a descriptor", &[], ours).is_ok(), "listing nothing is always fine");
+    assert_eq!(
+        plane_admits(Some(&carried(None)), LAND, Some(&stamp(Some("K"))), &reads, &listed),
+        Ok(None),
+        "no preface: served, unattributed, never refused"
+    );
+    assert_eq!(
+        plane_admits(Some(&far), LAND, Some(&stamp(Some("K"))), &reads, &ClaimedMethods::default()),
+        Ok(None),
+        "unlisted: its stamp is never read"
+    );
 }
 
 /// A carried call to a listed write, from aegisd's preface and with a lane claimed, is admitted with its claim: the

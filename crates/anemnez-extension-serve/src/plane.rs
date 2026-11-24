@@ -26,8 +26,8 @@ use std::sync::Arc;
 use anemnez_extension::mcp::Stamp;
 use anemnez_extension::options::Effect;
 use anemnez_extension::peer::{
-    CARRIED_CLAIM_NOT_A_LANE, CARRIED_NO_PREFACE, CARRIED_WRITE_UNBOUND, CLAIMED_WRITE_NOT_A_WRITE,
-    FABRICD_READS_DESCRIBE_ONLY, NOT_JUDGED, Role, STAMP_NOT_FROM_AGORA,
+    CARRIED_CLAIM_NOT_A_LANE, CARRIED_NO_PREFACE, CARRIED_WRITE_UNBOUND, CLAIMED_METHOD_NOT_A_READ_OR_WRITE,
+    CLAIMED_WRITE_NOT_A_WRITE, FABRICD_READS_DESCRIBE_ONLY, NOT_JUDGED, Role, STAMP_NOT_FROM_AGORA,
 };
 use tonic::body::BoxBody;
 
@@ -93,56 +93,74 @@ pub fn carried_admits(role: Role, path: &str, reads: &Reads) -> Result<(), &'sta
 /// What a product says a lane is: its own predicate, since the shared plane can't know a product's lanes (D m/29077).
 type IsLane = Arc<dyn Fn(&str) -> bool + Send + Sync>;
 
-/// The writes a product admits from a carried call with a claimed lane (D m/28960 (1)), and what it says a lane is
-/// (D m/29077): opted in per method, never per product, and each one a `write` in the product's own descriptor.
-/// Default none, so a product that lists nothing keeps every carried write refused `carried-write-unbound`. Which of
-/// its writes to list is the product's own call: the check refuses an `act`, but a product whose descriptor says a
+/// The methods a product lists for claimed lanes, and what it says a lane is (D m/29077): opted in per method, never per
+/// product, each a `read` or a `write` in the product's own descriptor (D m/28960 (1), m/29220).
+/// - A listed **write** is admitted from a carried call only with a claim that holds, else refused.
+/// - A listed **read** is admitted whatever its claim, as every carried read is. A claim that holds rides it for
+///   attribution, metering and fairness only, and one that doesn't is served unattributed, never refused.
+///
+/// Default none: every carried write is refused `carried-write-unbound` and every carried read unattributed. Which of
+/// its methods to list is the product's own call: the check refuses an `act`, but a product whose descriptor says a
 /// host-touching verb is a `write` keeps it out by its own list.
 #[derive(Clone)]
-pub struct ClaimedWrites {
-    methods: Arc<HashSet<String>>,
+pub struct ClaimedMethods {
+    writes: Arc<HashSet<String>>,
+    reads: Arc<HashSet<String>>,
     is_lane: IsLane,
 }
 
-impl Default for ClaimedWrites {
-    fn default() -> ClaimedWrites {
-        ClaimedWrites { methods: Arc::default(), is_lane: Arc::new(|_| false) }
+/// [`ClaimedMethods`] by the name its first adopters took (Ergon's): one type, never a second copy (rule 2).
+pub type ClaimedWrites = ClaimedMethods;
+
+impl Default for ClaimedMethods {
+    fn default() -> ClaimedMethods {
+        ClaimedMethods { writes: Arc::default(), reads: Arc::default(), is_lane: Arc::new(|_| false) }
     }
 }
 
-impl std::fmt::Debug for ClaimedWrites {
+impl std::fmt::Debug for ClaimedMethods {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ClaimedWrites").field("methods", &self.methods).finish_non_exhaustive()
+        f.debug_struct("ClaimedMethods")
+            .field("writes", &self.writes)
+            .field("reads", &self.reads)
+            .finish_non_exhaustive()
     }
 }
 
-impl ClaimedWrites {
+impl ClaimedMethods {
     /// `methods` (gRPC paths, `/pkg.Service/Method`), each checked against the encoded `FileDescriptorSet` the plane
-    /// serves, and `is_lane`, the product's own word on whether a claimed name is one of its lanes (Ergon's: an owner
-    /// that holds a book). No product opts in without saying what a lane is.
+    /// serves and sorted by its effect there, and `is_lane`, the product's own word on whether a claimed name is one of
+    /// its lanes (Ergon's: an owner that holds a book). No product opts in without saying what a lane is.
     ///
     /// # Errors
-    /// [`CLAIMED_WRITE_NOT_A_WRITE`] and the method, for one the descriptor doesn't say is a `write`: an `act`, a
-    /// `read`, or a path it doesn't have. A descriptor the check doesn't admit has no writes, so any list is refused.
+    /// [`CLAIMED_METHOD_NOT_A_READ_OR_WRITE`] and the method, for one the descriptor says is an `act`, or a path it
+    /// doesn't have. A descriptor the check doesn't admit has no methods, so any list is refused.
     pub fn of(
         file_descriptor_set: &[u8],
         methods: &[&str],
         is_lane: impl Fn(&str) -> bool + Send + Sync + 'static,
-    ) -> Result<ClaimedWrites, (&'static str, String)> {
-        let writes: HashSet<String> = anemnez_extension::descriptor::check_descriptor(file_descriptor_set)
-            .map(|all| all.into_iter().filter(|m| m.options.effect == Effect::Write).map(|m| m.path).collect())
-            .unwrap_or_default();
-        match methods.iter().find(|m| !writes.contains(**m)) {
-            Some(not_a_write) => Err((CLAIMED_WRITE_NOT_A_WRITE, (*not_a_write).to_owned())),
-            None => Ok(ClaimedWrites {
-                methods: Arc::new(methods.iter().map(|m| (*m).to_owned()).collect()),
-                is_lane: Arc::new(is_lane),
-            }),
+    ) -> Result<ClaimedMethods, (&'static str, String)> {
+        let effects: std::collections::HashMap<String, Effect> =
+            anemnez_extension::descriptor::check_descriptor(file_descriptor_set)
+                .map(|all| all.into_iter().map(|m| (m.path, m.options.effect)).collect())
+                .unwrap_or_default();
+        let (mut writes, mut reads) = (HashSet::new(), HashSet::new());
+        for method in methods {
+            match effects.get(*method) {
+                Some(Effect::Write) => writes.insert((*method).to_owned()),
+                Some(Effect::Read) => reads.insert((*method).to_owned()),
+                _ => return Err((CLAIMED_METHOD_NOT_A_READ_OR_WRITE, (*method).to_owned())),
+            };
         }
+        Ok(ClaimedMethods { writes: Arc::new(writes), reads: Arc::new(reads), is_lane: Arc::new(is_lane) })
     }
 
-    pub(crate) fn lists(&self, path: &str) -> bool {
-        self.methods.contains(path)
+    pub(crate) fn lists_write(&self, path: &str) -> bool {
+        self.writes.contains(path)
+    }
+
+    pub(crate) fn lists_read(&self, path: &str) -> bool {
+        self.reads.contains(path)
     }
 }
 
@@ -172,7 +190,7 @@ fn lane_shaped(lane: &str) -> bool {
 /// # Errors
 /// [`CARRIED_NO_PREFACE`] when aegisd said no node; [`CARRIED_CLAIM_NOT_A_LANE`] for no stamp, a stamp with no lane, a
 /// lane not shaped as a plain name, or one the product says isn't its lane.
-pub fn carried_claim(judged: &Judged, stamp: Option<&[u8]>, claimed: &ClaimedWrites) -> Result<Claimed, &'static str> {
+pub fn carried_claim(judged: &Judged, stamp: Option<&[u8]>, claimed: &ClaimedMethods) -> Result<Claimed, &'static str> {
     let via = judged.carried.as_ref().map(|preface| preface.node.clone()).ok_or(CARRIED_NO_PREFACE)?;
     let stamp = Stamp::from_metadata(stamp.ok_or(CARRIED_CLAIM_NOT_A_LANE)?);
     let lane = stamp.claimed_lane().ok_or(CARRIED_CLAIM_NOT_A_LANE)?;
@@ -193,13 +211,16 @@ pub fn plane_admits(
     path: &str,
     stamp: Option<&[u8]>,
     reads: &Reads,
-    claimed: &ClaimedWrites,
+    claimed: &ClaimedMethods,
 ) -> Result<Option<Claimed>, &'static str> {
     match judged {
-        Some(j) if j.role == Role::Carried && claimed.lists(path) => carried_claim(j, stamp, claimed).map(Some),
-        // A carried read is admitted as a read whatever it carries: Agora sends its stamp on every far call, and a
-        // read's stamp is never parsed nor believed, so reads stay location agnostic (O m/29572, a live regression).
-        Some(j) if j.role == Role::Carried && reads.reads(path) => Ok(None),
+        Some(j) if j.role == Role::Carried && claimed.lists_write(path) => carried_claim(j, stamp, claimed).map(Some),
+        // A carried read is admitted as a read whatever it carries: Agora sends its stamp on every far call, so reads
+        // stay location agnostic (O m/29572). Only a read its product lists has the stamp read at all, and then a
+        // claim that holds is attribution only, and one that doesn't is no claim, never a refusal (D m/29220).
+        Some(j) if j.role == Role::Carried && reads.reads(path) => {
+            Ok(if claimed.lists_read(path) { carried_claim(j, stamp, claimed).ok() } else { None })
+        }
         _ => api_admits(judged, path, stamp.is_some())
             .and_then(|()| judged.map_or(Ok(()), |j| carried_admits(j.role, path, reads)))
             .map(|()| None),
@@ -223,6 +244,9 @@ pub fn said(name: &'static str) -> String {
         }
         CARRIED_CLAIM_NOT_A_LANE => "a carried write's stamp must claim one of the product's lanes, by a plain name",
         CLAIMED_WRITE_NOT_A_WRITE => "only a method the descriptor says is a write may be listed for claimed lanes",
+        CLAIMED_METHOD_NOT_A_READ_OR_WRITE => {
+            "only a method the descriptor says is a read or a write may be listed for claimed lanes, never an act"
+        }
         _ => "refused by the API plane",
     };
     format!("{name}: {why}")
