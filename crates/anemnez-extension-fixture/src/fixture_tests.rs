@@ -258,3 +258,71 @@ async fn orient_held_within_names_a_call_that_never_came() {
     });
     assert!(waited.expect_err("bounded").contains("no Orient call reached the fixture within 5s"));
 }
+
+/// The fixture as a gate drives it for `#the-static-half-is-byte-stable`: up serves `variants[n]` for the nth time up
+/// (the last one from then on), change publishes an event and holds then lets go its orient, down stops it.
+struct Restarts {
+    dir: tempfile::TempDir,
+    clock: anemnez_clock::Clock,
+    variants: Vec<Variant>,
+    ups: usize,
+    running: Option<crate::Running>,
+}
+
+impl Restarts {
+    fn of(clock: anemnez_clock::Clock, variants: Vec<Variant>) -> Self {
+        Restarts { dir: tempfile::tempdir().expect("a temp dir"), clock, variants, ups: 0, running: None }
+    }
+}
+
+#[tonic::async_trait]
+impl anemnez_extension_serve::stable::Restartable for Restarts {
+    async fn up(&mut self) -> Result<tonic::transport::Channel, String> {
+        let variant = self.variants[self.ups.min(self.variants.len() - 1)];
+        self.ups += 1;
+        let running = serve(self.dir.path(), self.clock.clone(), variant).await.map_err(|e| e.to_string())?;
+        let channel = running.channel().await.map_err(|e| e.to_string())?;
+        self.running = Some(running);
+        Ok(channel)
+    }
+
+    async fn change(&mut self) -> Result<(), String> {
+        let running = self.running.as_ref().ok_or("not up")?;
+        running.journal.publish("moved", b"a live change".to_vec());
+        running.hold_orient(true);
+        running.hold_orient(false);
+        Ok(())
+    }
+
+    async fn down(&mut self) {
+        if let Some(running) = self.running.take() {
+            let socket = running.socket.clone();
+            drop(running);
+            let _ = std::fs::remove_file(socket);
+        }
+    }
+}
+
+/// ORIENTATION.md `#the-static-half-is-byte-stable`, the row each product's gate runs (K), here over the fixture: its
+/// guidance, read as Agora reads it (Describe, then mcp::instructions), is the same bytes across a change of state
+/// and across going down and back.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_fixtures_static_half_is_byte_stable() {
+    let clock = ManualClock::new().clock();
+    let mut fixture = Restarts::of(clock.clone(), vec![Variant::Good]);
+    anemnez_extension_serve::stable::the_static_half_is_byte_stable(&mut fixture, &clock).await.expect("byte-stable");
+    assert_eq!(fixture.ups, 2, "read up, after a change, and after a restart");
+}
+
+/// The same check is red for a product whose static half isn't the same after a restart (here, a build whose
+/// guidance is gone), and says which read differed and both texts.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_static_half_that_changes_across_a_restart_is_red() {
+    let clock = ManualClock::new().clock();
+    let mut fixture = Restarts::of(clock.clone(), vec![Variant::Good, Variant::WrongMajor]);
+    let red =
+        anemnez_extension_serve::stable::the_static_half_is_byte_stable(&mut fixture, &clock).await.expect_err("red");
+    assert!(red.contains("the static half's instructions changed after it went down and came back"), "{red}");
+    assert!(red.contains("Recent is the newest five") && red.contains("then:  \"\""), "{red}");
+    assert!(fixture.running.is_none(), "down, whatever it answered");
+}

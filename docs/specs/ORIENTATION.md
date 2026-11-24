@@ -97,7 +97,9 @@ never from liveness (I):** an MCP server's
 call.** Its answer lands in the conversation's history, where it is cached from then on, and never in a
 prefix. A face that puts a count, a time or a live read into the static half is red by a row that
 renders it twice, across a change of state and across a product going down and back, and compares the
-bytes. The row lives once, in anemnez-extension-serve, and each product's gate runs it (K).
+bytes. The row lives once, in anemnez-extension-serve, and each product's gate runs it (K): a product implements
+`stable::Restartable` (up, change, down) for itself and calls `stable::the_static_half_is_byte_stable`, which reads
+the static half as Agora does (Describe, then `mcp::instructions`). The fixture's own rows show the shape.
 
 "Byte-stable per build" doesn't mean only per build. A change to guidance's presence, or to the products
 present, is a settings change, as a method's presence is. It re-renders the prefix, deliberately, at

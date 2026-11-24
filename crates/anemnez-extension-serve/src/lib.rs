@@ -30,6 +30,7 @@ pub mod plane;
 pub mod principal;
 pub mod reread;
 pub mod serve;
+pub mod stable;
 pub mod watch;
 
 pub use accepted::{Accepted, Judged, PeerToken, judged, peer_token};
