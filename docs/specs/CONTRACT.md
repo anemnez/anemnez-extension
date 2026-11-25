@@ -235,7 +235,8 @@ consumer such as Stoa's bridge says once that this product does not serve it and
 named by path (`memory/index`), nesting to the depth the descriptor declares, each `{name, state, detail,
 since}`; a part's name is segments of printable ASCII, never whitespace, joined by `/`, none empty, at most 128 bytes
 (`check_part_name`, the one rule: a model id rides a segment as it is, `runtimes/qwen3-embedding:0.6b`; anything else
-is `part-name-malformed`, M m/30713); `as_of` a cursor. A watcher reads it, then subscribes `Events(after: as_of, kinds = [health])`, so
+is `part-name-malformed`, M m/30713; -serve's board says it at WARN as such a part is added and still serves it, warn
+first, readers first, refusing it only in a later minor once every product's names pass); `as_of` a cursor. A watcher reads it, then subscribes `Events(after: as_of, kinds = [health])`, so
 it never races the snapshot and never replays history. To Fabric, `SERVING` and `DEGRADED` are both
 serving: an upgrade verifies on either and records the degradation, because the product is the judge of
 whether it can do its work, and a product that should be rolled back says `FAILING`. (Substrate's

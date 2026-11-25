@@ -152,10 +152,22 @@ fn upsert(parts: &mut Vec<pb::Part>, name: &str, state: i32, detail: &str, now: 
             true
         }
         None => {
+            // Warn first, readers first (M m/30713): a malformed name is still served, and said once, as it's added.
+            if let Some(said) = malformed(name) {
+                tracing::warn!(part = name, "{said}");
+            }
             parts.push(pb::Part { name: name.to_owned(), state, detail: detail.to_owned(), since: now });
             true
         }
     }
+}
+
+/// What a new part's name says, if it isn't one by the contract's one rule (`check_part_name`): the house-form
+/// `part-name-malformed` words, said at WARN as the part is added. It's still served, since a refusal would break a
+/// product today; a later minor refuses it, once every product's names pass. Pure.
+#[must_use]
+pub(crate) fn malformed(name: &str) -> Option<String> {
+    anemnez_extension::health::check_part_name(name).err()
 }
 
 /// The proto's state for the kernel's.
@@ -291,5 +303,19 @@ mod tests {
         assert_eq!(names, ["runtimes/phi", "runtimes/qwen"]);
         assert!(!board.sync_parts([("runtimes/qwen", State::Degraded, "slow"), ("runtimes/phi", State::Starting, "")]));
         assert_eq!(journal.head(), after_one, "the same set again publishes nothing");
+    }
+
+    /// M m/30713, warn first: a part whose name breaks the contract's one rule is still served, and what it says is
+    /// the kernel's own words; a well-formed one, a model id riding a segment as it is, says nothing.
+    #[test]
+    fn a_malformed_part_name_is_served_and_said() {
+        assert_eq!(super::malformed("runtimes/qwen3-embedding:0.6b"), None);
+        for bad in ["", "a//b", "/a", "a b", "a/"] {
+            let said = super::malformed(bad).unwrap_or_else(|| panic!("{bad:?} is malformed"));
+            assert!(said.starts_with(anemnez_extension::health::PART_NAME_MALFORMED), "{said}");
+        }
+        let board = Board::new(Journal::new("a1b2c3d4.boot1", 8, ManualClock::new().clock()));
+        assert!(board.set_part("a b", State::Serving, ""), "still served: readers first");
+        assert!(board.get().parts.iter().any(|p| p.name == "a b"));
     }
 }
