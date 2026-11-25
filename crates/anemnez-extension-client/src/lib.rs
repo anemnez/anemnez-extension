@@ -13,6 +13,8 @@
 
 pub mod events;
 pub mod health;
+#[cfg(test)]
+mod test_socket;
 
 pub use health::{HEALTH_PATH, HealthUnread, health};
 
