@@ -21,6 +21,36 @@ pub fn app_requirement(identifier: &str, team: &str) -> Result<String, String> {
     Ok(format!(r#"identifier "{identifier}" and anchor apple generic and certificate leaf[subject.OU] = "{team}""#))
 }
 
+/// The prefix of every house signing identifier, bundle identifier and launchd label: `ai.anemnez.<product>` (J m/35366).
+/// A check that something is the house's by its identifier reads this, never a literal of its own.
+pub const IDENTIFIER_PREFIX: &str = "ai.anemnez.";
+
+/// The `Info.plist` of a daemon's `.app` bundle, the only writer of it (rule 2; D m/35806): its bundle identifier is the
+/// product's signing identifier, `ai.anemnez.<product>`, so macOS keys a privacy grant to the product and its signing
+/// requirement, and every build and every instance on a host holds it. Its executable is `Contents/MacOS/<product>`.
+/// Byte for byte the one fabric-core's `layout::info_plist` writes for a bare binary it wraps, so a sealed `.app` the
+/// release ships and a bundle fabricd makes are one shape; fabric-core becomes its caller at its next family bump.
+///
+/// # Errors
+/// [`IDENTIFIER_NOT_PLAIN`], naming a product that isn't plain, never spliced into the XML.
+pub fn daemon_info_plist(product: &str) -> Result<String, String> {
+    let product = plain(product)?;
+    Ok(format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key><string>{IDENTIFIER_PREFIX}{product}</string>
+	<key>CFBundleExecutable</key><string>{product}</string>
+	<key>CFBundleName</key><string>{product}</string>
+	<key>CFBundlePackageType</key><string>APPL</string>
+	<key>LSBackgroundOnly</key><true/>
+</dict>
+</plist>
+"#
+    ))
+}
+
 /// The refusal of a value spliced into a requirement that isn't plain (J m/29701).
 pub const IDENTIFIER_NOT_PLAIN: &str = "identifier-not-plain";
 
@@ -38,7 +68,7 @@ pub fn plain(value: &str) -> Result<&str, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ANEMNEZ_TEAM, IDENTIFIER_NOT_PLAIN, app_requirement, plain};
+    use super::{ANEMNEZ_TEAM, IDENTIFIER_NOT_PLAIN, IDENTIFIER_PREFIX, app_requirement, daemon_info_plist, plain};
 
     /// `text` compiled by `csreq`, as fabric compares an app's designated requirement. std only: this crate takes no
     /// dependency, dev ones included.
@@ -92,6 +122,29 @@ mod tests {
         assert!(app_requirement("ai.anemnez.agora-cli_2", ANEMNEZ_TEAM).is_ok());
         assert_eq!(plain("ai.anemnez.agora-cli_2"), Ok("ai.anemnez.agora-cli_2"));
         assert!(plain("a b").is_err_and(|why| why.starts_with(IDENTIFIER_NOT_PLAIN)));
+    }
+
+    /// D m/35806: a daemon's Info.plist is, byte for byte, the one fabric-core's `layout::info_plist` writes (copied
+    /// from fabric main 2026-11-25), so a sealed `.app` the release ships and one fabricd wraps are one shape. A product
+    /// that isn't plain is refused by name, never spliced into the XML.
+    #[test]
+    fn a_daemons_info_plist_is_fabrics_byte_for_byte() {
+        let fabrics = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n\
+<plist version=\"1.0\">\n\
+<dict>\n\
+\t<key>CFBundleIdentifier</key><string>ai.anemnez.herald</string>\n\
+\t<key>CFBundleExecutable</key><string>herald</string>\n\
+\t<key>CFBundleName</key><string>herald</string>\n\
+\t<key>CFBundlePackageType</key><string>APPL</string>\n\
+\t<key>LSBackgroundOnly</key><true/>\n\
+</dict>\n\
+</plist>\n";
+        assert_eq!(daemon_info_plist("herald").as_deref(), Ok(fabrics));
+        assert!(fabrics.contains(&format!("<string>{IDENTIFIER_PREFIX}herald</string>")));
+        for bad in ["", "a<b", "a&b", "her ald", "x</string>"] {
+            assert!(daemon_info_plist(bad).is_err_and(|why| why.starts_with(IDENTIFIER_NOT_PLAIN)), "{bad:?}");
+        }
     }
 
     /// C m/32481, D m/32487: the trust anchor takes no dependency, so whatever takes it takes nothing else. Read from

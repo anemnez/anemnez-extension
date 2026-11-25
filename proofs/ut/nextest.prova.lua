@@ -227,6 +227,7 @@ spoken_for("the-trust-anchor-takes-no-dependency", "tests::the_trust_anchor_take
 spoken_for("the-trust-anchor-takes-no-dependency (shape)", "tests::the_team_is_a_team_identifier")
 spoken_for("an-apps-requirement-has-one-writer", "tests::an_apps_requirement_compiles_identifier_first")
 spoken_for("an-apps-requirement-has-one-writer (plain)", "tests::a_value_that_isnt_plain_is_never_spliced_into_a_requirement")
+spoken_for("a-daemons-info-plist-has-one-writer", "tests::a_daemons_info_plist_is_fabrics_byte_for_byte")
 spoken_for("a-carried-product-caller-is-proven-by-its-code (descriptor)", "plane_tests::the_methods_products_call_are_read_from_the_descriptor")
 spoken_for("a-carried-product-caller-is-proven-by-its-code (layer)", "plane_tests::the_layer_admits_a_proven_product_and_hands_its_caller_to_the_service")
 spoken_for("a-carried-product-caller-is-proven-by-its-code (another descriptor, the unnamed said)", "plane_tests::another_descriptors_product_methods_merge_and_the_unnamed_are_said")

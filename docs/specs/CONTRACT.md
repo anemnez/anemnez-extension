@@ -830,6 +830,16 @@ family bump, J m/35197; anemnez-xtask's `team_requirement` at the SDK's next ext
 requirement compiled, where clause order counts, so two writers in two orders refused every app the library signed. Each caller keeps its own `csreq` compile; this crate
 stays std only.
 
+<!-- claim: a-daemons-info-plist-has-one-writer -->
+**A daemon's `Info.plist` has one writer** (rule 2; D m/35806, J m/35366). `anemnez_trust::daemon_info_plist(product)`
+writes the `Info.plist` of a daemon's `.app`: bundle identifier `IDENTIFIER_PREFIX` + product (`ai.anemnez.<product>`),
+executable, name, package type `APPL`, and background-only. It is byte for byte the plist fabric-core's
+`layout::info_plist` writes when it wraps a bare binary, so a sealed `.app` the release ships and one that fabricd makes
+are one shape, and macOS keys a grant to the same identifier either way. A product that isn't plain is refused
+(`identifier-not-plain`), never spliced into the XML. The release library's sealed daemon `.app` (D's step 3) calls it,
+and fabric-core becomes its caller at its next family bump, deleting its own body. `IDENTIFIER_PREFIX` is the one
+spelling of `ai.anemnez.`.
+
 <!-- claim: a-connection-opens-within-its-bound -->
 **A connection gives its whole opening within its bound, or it closes by name** (rule 4; M m/26881, K m/26883,
 D m/26884, m/26885). -serve's accept (`opening::Openings`, which the SDK's control `Incoming` runs too) reads every
