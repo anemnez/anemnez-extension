@@ -48,8 +48,14 @@ mod tests {
         static NEXT: AtomicU32 = AtomicU32::new(0);
         let n = NEXT.fetch_add(1, Ordering::Relaxed);
         let out = std::env::temp_dir().join(format!("anemnez-trust-csreq-{}-{n}.bin", std::process::id()));
-        let made = std::process::Command::new("/usr/bin/csreq").arg(format!("-r={text}")).arg("-b").arg(&out).status();
-        assert!(made.is_ok_and(|s| s.success()), "csreq compiles {text}");
+        // Bounded (rule 4, E m/35227): the child is waited for on its own thread and the row ends at the bound, said
+        // by name, never a hang. std only, so a channel's recv_timeout is the bound.
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut command = std::process::Command::new("/usr/bin/csreq");
+        command.arg(format!("-r={text}")).arg("-b").arg(&out);
+        std::thread::spawn(move || tx.send(command.status()));
+        let made = rx.recv_timeout(std::time::Duration::from_secs(30));
+        assert!(made.is_ok_and(|s| s.is_ok_and(|s| s.success())), "csreq compiles {text} within 30s");
         let bytes = std::fs::read(&out).expect("compiled");
         let _ = std::fs::remove_file(&out);
         bytes
