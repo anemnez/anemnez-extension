@@ -10,8 +10,9 @@
 //!   own Describe or Health, else it is refused `carried-write-unbound` ([`carried_admits`]; K m/23155). The log's
 //!   Events are refused to a carried call whole, since Call carries an opaque request (E m/23165);
 //! - a carried call whose principal the SDK's carried verify bound ([`CarriedBound`] on the request, K m/29120) reaches
-//!   any method its product's descriptor has, read, write or act, before the claimed path and with no claim made of its
-//!   stamp ([`bound_admits`]); never a contract face, never a method products call, and never on another role;
+//!   a method its product says it decides bound callers on itself ([`BoundDecided`], E m/36065), read, write or act,
+//!   before the claimed path and with no claim made of its stamp ([`bound_admits`]); any other method as an unbound
+//!   one, and never on another role;
 //! - a carried call to a write its product lists for claimed lanes ([`ClaimedWrites`], D m/28960) is admitted with
 //!   its stamp's lane as a claim, [`Claimed`] `{ lane, via }` on the request, when aegisd said the node it came from
 //!   and the stamp names one of the product's lanes, by its own predicate ([`carried_claim`]); else `carried-no-preface` or
@@ -39,9 +40,9 @@ use std::sync::Arc;
 use anemnez_extension::mcp::Stamp;
 use anemnez_extension::options::Effect;
 use anemnez_extension::peer::{
-    CARRIED_CLAIM_NOT_A_LANE, CARRIED_NO_PREFACE, CARRIED_WRITE_UNBOUND, CLAIMED_METHOD_NOT_A_READ_OR_WRITE,
-    CLAIMED_WRITE_NOT_A_WRITE, DESCRIPTOR_UNCHECKED, FABRICD_READS_DESCRIBE_ONLY, NOT_JUDGED,
-    PRODUCT_CALLER_NOT_ALLOWED, PRODUCT_CALLER_UNPROVEN, PRODUCT_CALLER_UNTRUSTED,
+    BOUND_DECIDED_NOT_A_METHOD, CARRIED_CLAIM_NOT_A_LANE, CARRIED_NO_PREFACE, CARRIED_WRITE_UNBOUND,
+    CLAIMED_METHOD_NOT_A_READ_OR_WRITE, CLAIMED_WRITE_NOT_A_WRITE, DESCRIPTOR_UNCHECKED, FABRICD_READS_DESCRIBE_ONLY,
+    NOT_JUDGED, PRODUCT_CALLER_NOT_ALLOWED, PRODUCT_CALLER_UNPROVEN, PRODUCT_CALLER_UNTRUSTED,
     PRODUCT_CALLERS_NOT_A_PRODUCT_METHOD, PRODUCT_CALLERS_TWICE, PRODUCT_CALLERS_UNNAMED, Role, STAMP_NOT_FROM_AGORA,
 };
 use anemnez_extension::teaching::{RetryClass, Teaching, Whose, status_details};
@@ -78,41 +79,37 @@ const FACE_READS: [&str; 1] = ["/anemnez.extension.v1.Describe/"];
 /// checks), so nothing outside the house needs it. A direct caller is judged as before.
 pub const HEALTH_FACE: &str = "/anemnez.extension.v1.Health/";
 
-/// The product's methods a carried call may reach: those its descriptor says are `read`, and every method it has for a
-/// caller whose principal is bound ([`CarriedBound`]), read once when the plane is built, never per call. A descriptor
-/// `check_descriptor` doesn't admit has none of either, so every carried call to a product method is refused, the safe
-/// direction.
+/// The product's methods a carried call may reach: those its descriptor says are `read`, read once when the plane
+/// is built, never per call. A descriptor `check_descriptor` doesn't admit reads as none, so every carried call to a
+/// product method is refused, the safe direction.
 #[derive(Clone, Debug, Default)]
-pub struct Reads {
-    pub(crate) reads: Arc<HashSet<String>>,
-    pub(crate) methods: Arc<HashSet<String>>,
-}
+pub struct Reads(pub(crate) Arc<HashSet<String>>);
 
 impl Reads {
-    /// The read methods of the encoded `FileDescriptorSet`, and all of its methods.
+    /// The read methods of the encoded `FileDescriptorSet`.
     #[must_use]
     pub fn of(file_descriptor_set: &[u8]) -> Reads {
-        let checked = anemnez_extension::descriptor::check_descriptor(file_descriptor_set).unwrap_or_default();
-        let reads = checked.iter().filter(|m| m.options.effect == Effect::Read).map(|m| m.path.clone()).collect();
-        let methods = checked.into_iter().map(|m| m.path).collect();
-        Reads { reads: Arc::new(reads), methods: Arc::new(methods) }
+        let reads = anemnez_extension::descriptor::check_descriptor(file_descriptor_set)
+            .map(|methods| methods.into_iter().filter(|m| m.options.effect == Effect::Read).map(|m| m.path).collect())
+            .unwrap_or_default();
+        Reads(Arc::new(reads))
     }
 
     pub(crate) fn reads(&self, path: &str) -> bool {
-        self.reads.contains(path) || FACE_READS.iter().any(|face| path.starts_with(face))
+        self.0.contains(path) || FACE_READS.iter().any(|face| path.starts_with(face))
     }
 }
 
-/// The contract's own services, every one ruled by its own face's rule (Describe a read, Health house-signed, the log's
-/// Events never carried), so none is reached as a product method, bound or not.
-const CONTRACT_PREFIX: &str = "/anemnez.extension.v1.";
-
 /// A carried caller whose principal the SDK's carried verify bound (anemnez-service `product::carried::verify`, K
 /// m/29120): its far token verified for this product over the preface's channel and is held by the preface's holder.
-/// The admit layer the SDK puts outermost on the API plane sets it on the request's extensions, and nothing else does;
-/// -serve owns the type, so it never takes prosopon-token. The plane reads it ([`bound_admits`]); the product reads it
-/// with `request.extensions().get::<CarriedBound>()` and decides what the principal may do (its grant, scoped with
-/// reach: `one-decision-per-call-at-the-product`).
+/// The SDK's admit layer, outermost on the API plane, removes any it finds on a request and then sets the one its
+/// verify found. -serve owns the type, so it never takes prosopon-token. The plane reads it ([`bound_admits`]); a
+/// product reads it with `request.extensions().get::<CarriedBound>()` and decides what the principal may do (its
+/// grant, scoped with reach: `one-decision-per-call-at-the-product`).
+///
+/// It has no public constructor (E m/36065, M m/36068): only [`CarriedBound::minted_by_the_sdks_carried_verify`],
+/// hidden from the docs and named for its one caller, so no code reaches it by accident. It is no fence against code in
+/// the product's own process that means to; the SDK's layer, outermost, removing any it didn't mint, is.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct CarriedBound {
@@ -123,25 +120,63 @@ pub struct CarriedBound {
 }
 
 impl CarriedBound {
-    /// What the SDK's carried verify found, for its admit layer alone.
+    /// For anemnez-service's carried verify alone: what it found good. Nothing else calls this.
+    #[doc(hidden)]
     #[must_use]
-    pub fn new(principal: String, via: String) -> CarriedBound {
+    pub fn minted_by_the_sdks_carried_verify(principal: String, via: String) -> CarriedBound {
         CarriedBound { principal, via }
     }
 }
 
-/// Whether the call to `path` on the connection `judged` is a carried call whose principal is `bound`, to one of the
-/// product's own methods: then it is admitted whatever the method's effect, read, write or act (K m/29120), and which
-/// one runs is the product's grant. Checked before the claimed path, so a verified principal wins over a claim on the
-/// same call and a stamp beside it is never read (D m/28960). A bound caller on any other role changes nothing, the
-/// contract's own faces keep their rules, and a method products call stays theirs (the layer asks
-/// [`product_admits`] first). Pure.
+/// The contract's own services, every one ruled by its own face's rule (Describe a read, Health house-signed, the log's
+/// Events never carried), so none can be decided by a product for a bound caller.
+const CONTRACT_PREFIX: &str = "/anemnez.extension.v1.";
+
+/// The methods a product says it decides bound carried callers on itself (E m/36065, M m/36068): it reads
+/// [`CarriedBound`] there and checks the principal's grant before it acts. Opted in per method, as each one's check
+/// lands, never per product; default none, so a bound caller reaches reads only, as an unbound one does. Each method is
+/// one of the descriptor's own, never the contract's and never one products call, checked when the plane is built.
+#[derive(Clone, Debug, Default)]
+pub struct BoundDecided(Arc<HashSet<String>>);
+
+impl BoundDecided {
+    /// `methods` (gRPC paths), each held to the encoded `FileDescriptorSet` the plane serves.
+    ///
+    /// # Errors
+    /// [`DESCRIPTOR_UNCHECKED`] and the checker's refusals, for a descriptor `check_descriptor` refuses;
+    /// [`BOUND_DECIDED_NOT_A_METHOD`] and the method, for a path the descriptor doesn't have, one of the contract's own,
+    /// or one it says `callers = PRODUCT` (a code identity's, never an agent's).
+    pub fn of(file_descriptor_set: &[u8], methods: &[&str]) -> Result<BoundDecided, (&'static str, String)> {
+        let decidable: HashSet<String> = checked(file_descriptor_set, !methods.is_empty())?
+            .into_iter()
+            .filter(|m| m.options.callers != anemnez_extension::options::Callers::Product)
+            .map(|m| m.path)
+            .filter(|path| !path.starts_with(CONTRACT_PREFIX))
+            .collect();
+        let mut decided = HashSet::new();
+        for method in methods {
+            if !decidable.contains(*method) {
+                return Err((BOUND_DECIDED_NOT_A_METHOD, (*method).to_owned()));
+            }
+            decided.insert((*method).to_owned());
+        }
+        Ok(BoundDecided(Arc::new(decided)))
+    }
+
+    fn decides(&self, path: &str) -> bool {
+        self.0.contains(path)
+    }
+}
+
+/// Whether the call to `path` on the connection `judged` is a carried call whose principal is `bound`, to a method its
+/// product says it decides bound callers on ([`BoundDecided`]): then it is admitted whatever the method's effect, read,
+/// write or act (K m/29120), and the product's grant decides. Checked before the claimed path, so a verified principal
+/// wins over a claim on the same call and a stamp beside it is never read (D m/28960). A bound caller to any other
+/// method is judged as an unbound one, reads only; on any other role it changes nothing; and the contract's faces and
+/// methods products call can't be listed. Pure.
 #[must_use]
-pub fn bound_admits(judged: Option<&Judged>, path: &str, bound: Option<&CarriedBound>, reads: &Reads) -> bool {
-    judged.is_some_and(|j| j.role == Role::Carried)
-        && bound.is_some()
-        && !path.starts_with(CONTRACT_PREFIX)
-        && reads.methods.contains(path)
+pub fn bound_admits(judged: Option<&Judged>, path: &str, bound: Option<&CarriedBound>, decided: &BoundDecided) -> bool {
+    judged.is_some_and(|j| j.role == Role::Carried) && bound.is_some() && decided.decides(path)
 }
 
 /// The methods of a descriptor a product names methods of, or [`DESCRIPTOR_UNCHECKED`] with the checker's refusals,
@@ -466,6 +501,9 @@ pub fn said(name: &'static str) -> String {
         DESCRIPTOR_UNCHECKED => {
             "methods are named only of a descriptor the contract's check admits: fix what it refused"
         }
+        BOUND_DECIDED_NOT_A_METHOD => {
+            "only a method of the product's own descriptor that products don't call may be decided for bound callers"
+        }
         PRODUCT_CALLERS_NOT_A_PRODUCT_METHOD => {
             "only a method the descriptor says products call may list its callers, and it must name at least one"
         }
@@ -489,7 +527,7 @@ pub fn said_on(name: &'static str, path: &str) -> String {
 
 /// Every name the API plane refuses with, at a call or when the plane is built: the one list [`said`] and [`taught`]
 /// answer for, held by a row that reads this file's own refusals, so a new name can't go untaught (D m/30986).
-pub const PLANE_REFUSALS: [&str; 15] = [
+pub const PLANE_REFUSALS: [&str; 16] = [
     NOT_JUDGED,
     FABRICD_READS_DESCRIBE_ONLY,
     STAMP_NOT_FROM_AGORA,
@@ -505,6 +543,7 @@ pub const PLANE_REFUSALS: [&str; 15] = [
     PRODUCT_CALLERS_NOT_A_PRODUCT_METHOD,
     PRODUCT_CALLERS_TWICE,
     DESCRIPTOR_UNCHECKED,
+    BOUND_DECIDED_NOT_A_METHOD,
 ];
 
 /// A plane refusal of a call to `path` as a teaching (house rule 15, AX3): its name as the code, what `said_on` says
@@ -543,13 +582,19 @@ pub struct ApiPlaneLayer {
     reads: Reads,
     claimed: ClaimedWrites,
     products: ProductCallers,
+    bound: BoundDecided,
 }
 
 impl ApiPlaneLayer {
     /// The layer for a product whose read methods are `reads`, admitting no claimed carried writes.
     #[must_use]
     pub fn new(reads: Reads) -> ApiPlaneLayer {
-        ApiPlaneLayer { reads, claimed: ClaimedWrites::default(), products: ProductCallers::default() }
+        ApiPlaneLayer {
+            reads,
+            claimed: ClaimedWrites::default(),
+            products: ProductCallers::default(),
+            bound: BoundDecided::default(),
+        }
     }
 
     /// The same, admitting carried calls with a claimed lane to `claimed` (D m/28960).
@@ -563,6 +608,13 @@ impl ApiPlaneLayer {
     pub fn products(self, products: ProductCallers) -> ApiPlaneLayer {
         ApiPlaneLayer { products, ..self }
     }
+
+    /// The same, admitting a bound carried caller ([`CarriedBound`]) to the methods `bound` says the product decides
+    /// such callers on itself (E m/36065).
+    #[must_use]
+    pub fn bound_decided(self, bound: BoundDecided) -> ApiPlaneLayer {
+        ApiPlaneLayer { bound, ..self }
+    }
 }
 
 impl<S> tower_layer::Layer<S> for ApiPlaneLayer {
@@ -574,6 +626,7 @@ impl<S> tower_layer::Layer<S> for ApiPlaneLayer {
             reads: self.reads.clone(),
             claimed: self.claimed.clone(),
             products: self.products.clone(),
+            bound: self.bound.clone(),
         }
     }
 }
@@ -591,6 +644,7 @@ pub struct ApiPlaneService<S> {
     reads: Reads,
     claimed: ClaimedWrites,
     products: ProductCallers,
+    bound: BoundDecided,
 }
 
 impl<S> tower_service::Service<http::Request<BoxBody>> for ApiPlaneService<S>
@@ -625,7 +679,7 @@ where
                 }
                 // A bound principal, carried, to a product method: admitted as itself, its CarriedBound already on
                 // the request, and no claim made of its stamp.
-                _ if bound_admits(judged, path, request.extensions().get::<CarriedBound>(), &self.reads) => Ok(None),
+                _ if bound_admits(judged, path, request.extensions().get::<CarriedBound>(), &self.bound) => Ok(None),
                 _ => plane_admits(judged, path, stamp.as_deref(), &self.reads, &self.claimed)
                     .map(|claimed| claimed.map(Admitted::Claimed)),
             }

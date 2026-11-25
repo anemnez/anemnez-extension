@@ -358,6 +358,16 @@ pub(crate) fn land_descriptor() -> Vec<u8> {
 
 /// [`land_descriptor`], with Land's effect `effect`.
 pub(crate) fn land_descriptor_with(effect: pb::Effect) -> Vec<u8> {
+    land_descriptor_as(effect, pb::Callers::Product)
+}
+
+/// Land's descriptor, its effect `effect` and its callers `callers`.
+pub(crate) fn land_descriptor_as(effect: pb::Effect, callers: pb::Callers) -> Vec<u8> {
+    land_descriptor_in("h.v1", effect, callers)
+}
+
+/// The same, in `package`.
+pub(crate) fn land_descriptor_in(package: &str, effect: pb::Effect, callers: pb::Callers) -> Vec<u8> {
     fn ld(field: u32, bytes: &[u8]) -> Vec<u8> {
         let mut out = Vec::new();
         prost::encoding::encode_key(field, prost::encoding::WireType::LengthDelimited, &mut out);
@@ -373,7 +383,7 @@ pub(crate) fn land_descriptor_with(effect: pb::Effect) -> Vec<u8> {
         person_act: true,
         presence: pb::Presence::Minimal as i32,
         permission: pb::Permission::Ask as i32,
-        callers: pb::Callers::Product as i32,
+        callers: callers as i32,
         session: pb::Session::Opens as i32,
         blocks: true,
         runs_to_completion: true,
@@ -384,8 +394,8 @@ pub(crate) fn land_descriptor_with(effect: pb::Effect) -> Vec<u8> {
     };
     let mut method = prost_types::MethodDescriptorProto {
         name: Some("Land".into()),
-        input_type: Some(".h.v1.Req".into()),
-        output_type: Some(".h.v1.Req".into()),
+        input_type: Some(format!(".{package}.Req")),
+        output_type: Some(format!(".{package}.Req")),
         ..Default::default()
     }
     .encode_to_vec();
@@ -394,7 +404,7 @@ pub(crate) fn land_descriptor_with(effect: pb::Effect) -> Vec<u8> {
         prost_types::ServiceDescriptorProto { name: Some("H".into()), ..Default::default() }.encode_to_vec();
     service.extend(ld(2, &method));
     let mut file = prost_types::FileDescriptorProto {
-        package: Some("h.v1".into()),
+        package: Some(package.into()),
         message_type: vec![prost_types::DescriptorProto {
             name: Some("Req".into()),
             field: vec![prost_types::FieldDescriptorProto {
