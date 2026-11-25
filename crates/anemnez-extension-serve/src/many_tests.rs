@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anemnez_clock::ManualClock;
-use hydramq_events::wire::{latest_reply, latest_request, read_reply, read_request};
+use hydramq_events::wire::{latest_reply, read_reply, read_request};
 use hydramq_events::{Events, Face, Position, Read};
 
 use super::ManyLogs;
@@ -25,6 +25,16 @@ fn log(dir: &std::path::Path, log: &str, n: usize) -> Arc<Events> {
     Arc::new(events)
 }
 
+/// A many-log face over owed (two events) and forecast (three), Horai's two streams.
+fn owed_and_forecast(dir: &std::path::Path) -> ManyLogs {
+    let faces: std::collections::BTreeMap<String, Arc<dyn Face>> = [
+        ("owed".to_owned(), log(dir, "owed", 2) as Arc<dyn Face>),
+        ("forecast".to_owned(), log(dir, "forecast", 3) as Arc<dyn Face>),
+    ]
+    .into();
+    ManyLogs::new(faces)
+}
+
 fn at(log: &str) -> Position {
     Position { log: log.into(), offset: 0 }
 }
@@ -42,12 +52,7 @@ fn count(reply: &[u8]) -> Result<usize, String> {
 #[test]
 fn a_read_goes_to_the_log_its_position_names() {
     let dir = tempfile::tempdir().unwrap();
-    let faces: std::collections::BTreeMap<String, Arc<dyn Face>> = [
-        ("owed".to_owned(), log(dir.path(), "owed", 2) as Arc<dyn Face>),
-        ("forecast".to_owned(), log(dir.path(), "forecast", 3) as Arc<dyn Face>),
-    ]
-    .into();
-    let many = ManyLogs::new(faces);
+    let many = owed_and_forecast(dir.path());
     let serve = |log: &str| hydramq_events::wire::serve(&many, &read_request(&at(log), 10, Duration::ZERO).unwrap());
     assert_eq!(count(&serve("owed")), Ok(2), "owed's own two");
     assert_eq!(count(&serve("forecast")), Ok(3), "forecast's own three");
@@ -55,17 +60,29 @@ fn a_read_goes_to_the_log_its_position_names() {
     assert!(unknown.contains("ship") && unknown.contains("forecast, owed"), "named, with the logs served: {unknown}");
 }
 
-/// D m/32100: Latest is never routed by a prefix's spelling. Until a request names its log, it's refused by name on a
-/// many-log face, saying how to read instead.
+/// D m/32100, K m/33557 item 4, L m/34051: Latest on a many-log face is answered from the log its request names, that
+/// log's own subjects only (owed's latest never forecast's), so a follower starts with latest_all_in("owed", "owed/").
+/// One naming no log is refused by name, never routed by a prefix's spelling, and one naming a log the face doesn't
+/// serve is ForeignLog, naming the logs it does.
 #[test]
-fn latest_on_a_many_log_face_is_refused_by_name() {
+fn latest_on_a_many_log_face_reads_the_log_it_names_and_never_routes_by_spelling() {
+    use hydramq_events::wire::{latest_reply_in, latest_request_in};
     let dir = tempfile::tempdir().unwrap();
-    let faces: std::collections::BTreeMap<String, Arc<dyn Face>> =
-        [("owed".to_owned(), log(dir.path(), "owed", 1) as Arc<dyn Face>)].into();
-    let many = ManyLogs::new(faces);
-    let reply = hydramq_events::wire::serve(&many, &latest_request("owed/").unwrap());
-    let refused = latest_reply(&reply).expect_err("refused").to_string();
-    assert!(refused.contains("latest-needs-its-log"), "{refused}");
+    let many = owed_and_forecast(dir.path());
+    let latest = |log: Option<&str>, prefix: &str| {
+        hydramq_events::wire::serve(&many, &latest_request_in(log, prefix).expect("encodes"))
+    };
+    let (owed, as_of) = latest_reply_in("owed", &latest(Some("owed"), "owed/")).expect("owed's latest");
+    assert_eq!(owed.iter().map(|e| e.subject.as_str()).collect::<Vec<_>>(), ["owed/0", "owed/1"]);
+    assert_eq!(as_of.log, "owed", "as of owed's own position");
+    let (forecast, _) = latest_reply_in("forecast", &latest(Some("forecast"), "")).expect("forecast's latest");
+    assert_eq!(forecast.len(), 3, "forecast's own three, every subject");
+    let (none, _) = latest_reply_in("forecast", &latest(Some("forecast"), "owed/")).expect("answered");
+    assert!(none.is_empty(), "owed/ in forecast is forecast's, empty: never another log's");
+    let unnamed = latest_reply(&latest(None, "owed/")).expect_err("refused").to_string();
+    assert!(unnamed.contains("latest-needs-its-log") && unnamed.contains("latest_all_in"), "{unnamed}");
+    let foreign = latest_reply(&latest(Some("ship"), "ship/")).expect_err("refused").to_string();
+    assert!(foreign.contains("ship") && foreign.contains("forecast, owed"), "{foreign}");
 }
 
 /// over_many takes one or more logs, each by a name, never two of one name; and a Call through the face reads the log

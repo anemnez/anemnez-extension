@@ -4,9 +4,9 @@
 //!
 //! [`ManyLogs`] is a hydramq-events [`Face`] that routes each read by the log its request's `Position` names, so
 //! `wire::serve` (Call) and `wire::watch` (Watch) take it unchanged, as they take one log. A request never opens a log
-//! it doesn't name. A log the face doesn't serve is `ForeignLog`, naming every log it does. `Latest` is refused by
-//! name until it can name its log on the wire (hydramq's latest_in, readers first): it is never routed by a prefix's
-//! spelling (D m/32100).
+//! it doesn't name. A log the face doesn't serve is `ForeignLog`, naming every log it does. `Latest` is answered from
+//! the log its request names (hydramq's `latest_in`, a client's `latest_all_in(log, prefix)`; K m/33557 item 4, L
+//! m/34051), and one naming no log is refused by name: it is never routed by a prefix's spelling (D m/32100).
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -18,7 +18,7 @@ use hydramq_events::{Event, EventsError, Face, Position, Read, Refused};
 use crate::log_events::Log;
 use crate::reread::ReRead;
 
-/// The refusal of a many-log face's `Latest`, until a request can name its log.
+/// The refusal of a many-log face's `Latest` that names no log: a client names it (`latest_all_in(log, prefix)`).
 pub const LATEST_NEEDS_ITS_LOG: &str = "latest-needs-its-log";
 
 /// What a [`crate::LogEvents`] reads: one log, or several by name.
@@ -129,10 +129,19 @@ impl Face for ManyLogs {
         Err(EventsError::Refused(Refused::ByProducer {
             why: format!(
                 "{LATEST_NEEDS_ITS_LOG}: this face serves several logs ({}), and Latest for {prefix:?} names none of \
-                 them; read by Call from a position in the log you want",
+                 them; name the one you want (latest_all_in(log, prefix))",
                 self.names
             ),
         }))
+    }
+
+    /// Latest from the log the request names, that log's own answer, never another's; a log this face doesn't serve is
+    /// `ForeignLog`, and naming none is [`LATEST_NEEDS_ITS_LOG`].
+    fn latest_in(&self, log: Option<&str>, prefix: &str) -> Result<(Vec<Event>, Position), EventsError> {
+        match log {
+            Some(named) => self.route(named)?.latest_in(Some(named), prefix),
+            None => self.latest_all(prefix),
+        }
     }
 
     fn wake(&self) {

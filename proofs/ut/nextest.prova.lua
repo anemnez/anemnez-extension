@@ -252,7 +252,7 @@ spoken_for("a-log-is-read-through-one-seam", "log_events_tests::a_log_opened_per
 spoken_for("a-log-is-read-through-one-seam (a write between a read and its wait is never lost)", "reread::tests::a_write_between_the_read_and_the_wait_is_never_lost")
 spoken_for("a-log-is-read-through-one-seam (the wait is outside the open)", "reread::tests::a_wait_is_outside_the_open_and_woken_by_changes_or_its_bound")
 spoken_for("one-face-serves-several-logs-by-name", "many::tests::a_read_goes_to_the_log_its_position_names")
-spoken_for("one-face-serves-several-logs-by-name (latest)", "many::tests::latest_on_a_many_log_face_is_refused_by_name")
+spoken_for("one-face-serves-several-logs-by-name (latest)", "many::tests::latest_on_a_many_log_face_reads_the_log_it_names_and_never_routes_by_spelling")
 spoken_for("one-face-serves-several-logs-by-name (built)", "many::tests::over_many_names_each_log_once_and_a_call_reads_the_named_one")
 spoken_for("a-followed-log-wakes-its-watch-as-its-file-moves", "follow::tests::a_write_and_a_replace_each_wake_a_reader_before_the_beat_and_the_watch_follows")
 spoken_for("a-followed-log-wakes-its-watch-as-its-file-moves (absent)", "follow::tests::a_delete_wakes_at_once_and_a_recreated_file_is_found_at_the_beat")
