@@ -824,8 +824,9 @@ manifest has an empty `[dependencies]` and no other table of crates, so a pure k
 **An app's designated requirement has one writer** (rule 2; K m/35136, D m/35154). `anemnez_trust::app_requirement(identifier,
 team)` writes it, identifier first, then the Apple anchor, then the leaf's OU, and refuses an identifier or team that
 isn't plain (`identifier-not-plain`) rather than splice it in. Fabric's admission and the release library's signing
-both call it, and neither keeps a body of its own: fabric compares the requirement compiled, where clause order counts,
-so two writers in two orders refused every app the library signed. Each caller keeps its own `csreq` compile; this crate
+become its callers, each deleting its own body at its next bump (fabric-core's `app::requirement` at fabric's next
+family bump, J m/35197; anemnez-xtask's `team_requirement` at the SDK's next extension bump, M): fabric compares the
+requirement compiled, where clause order counts, so two writers in two orders refused every app the library signed. Each caller keeps its own `csreq` compile; this crate
 stays std only.
 
 <!-- claim: a-connection-opens-within-its-bound -->
