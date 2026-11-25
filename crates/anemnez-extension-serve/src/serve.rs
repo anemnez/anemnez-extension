@@ -61,6 +61,7 @@ pub struct ApiFaces {
     events: EventsFace,
     claimed: crate::plane::ClaimedWrites,
     products: crate::plane::ProductCallers,
+    bound: crate::plane::BoundDecided,
 }
 
 impl ApiFaces {
@@ -70,7 +71,14 @@ impl ApiFaces {
         // The descriptor's callers = PRODUCT methods, none allowed: a carried call to one is product-callers-unnamed
         // until the product names who may call it (D m/32983).
         let products = crate::plane::ProductCallers::of(describe.descriptor(), &[]).unwrap_or_default();
-        ApiFaces { describe, health, events: events.into(), claimed: crate::plane::ClaimedWrites::default(), products }
+        ApiFaces {
+            describe,
+            health,
+            events: events.into(),
+            claimed: crate::plane::ClaimedWrites::default(),
+            products,
+            bound: crate::plane::BoundDecided::default(),
+        }
     }
 
     /// The same, with the API plane admitting carried calls to `allow`'s methods, each `(method, identifiers)`, from a
@@ -114,6 +122,19 @@ impl ApiFaces {
     ) -> Result<ApiFaces, (&'static str, String)> {
         let claimed = crate::plane::ClaimedWrites::of(self.describe.descriptor(), methods, is_lane)?;
         Ok(ApiFaces { claimed, ..self })
+    }
+
+    /// The same, with the API plane admitting a carried call whose principal the SDK bound (`CarriedBound`) to
+    /// `methods`, whatever their effect: the methods where this product reads `CarriedBound` and checks the principal's
+    /// grant itself (E m/36065). List a method only once its check has landed; a bound caller to any other is judged
+    /// as an unbound one, reads only.
+    ///
+    /// # Errors
+    /// [`BOUND_DECIDED_NOT_A_METHOD`](anemnez_extension::peer::BOUND_DECIDED_NOT_A_METHOD) and the method, for one that
+    /// isn't the descriptor's own, or that products call; `descriptor-unchecked` for a descriptor the check refuses.
+    pub fn bound_decided(self, methods: &[&str]) -> Result<ApiFaces, (&'static str, String)> {
+        let bound = crate::plane::BoundDecided::of(self.describe.descriptor(), methods)?;
+        Ok(ApiFaces { bound, ..self })
     }
 }
 
@@ -348,6 +369,7 @@ where
         .layer(
             ApiPlaneLayer::new(crate::plane::Reads::of(faces.describe.descriptor()))
                 .claiming(faces.claimed)
+                .bound_decided(faces.bound)
                 .products({
                     // Said once, at build: a method products call that no allow-list names fails closed at the call.
                     for method in faces.products.unnamed() {

@@ -44,6 +44,9 @@ pub const PRODUCT_CALLERS_NOT_A_PRODUCT_METHOD: &str = "product-callers-not-a-pr
 /// A `callers = PRODUCT` method given two allow-lists, from two places (D m/33063): refused when the faces are built,
 /// never one silently over the other.
 pub const PRODUCT_CALLERS_TWICE: &str = "product-callers-twice";
+/// A product naming a method it decides bound carried callers on (E m/36065) that isn't one of its own descriptor's,
+/// is one of the contract's, or is one products call: refused when the faces are built.
+pub const BOUND_DECIDED_NOT_A_METHOD: &str = "bound-decided-not-a-method";
 /// A carried call to a write its product lists for claimed lanes (D m/28960), from an aegisd that said no preface: the
 /// node it came from is unknown, so its claim names no carrier, and it is refused.
 pub const CARRIED_NO_PREFACE: &str = "carried-no-preface";

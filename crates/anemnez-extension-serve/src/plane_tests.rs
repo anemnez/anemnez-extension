@@ -5,17 +5,18 @@ use anemnez_extension::carried::{Holder, Preface};
 use anemnez_extension::mcp::STAMP_METADATA_KEY;
 use anemnez_extension::mcp::Stamp;
 use anemnez_extension::peer::{
-    CARRIED_CLAIM_NOT_A_LANE, CARRIED_NO_PREFACE, CARRIED_WRITE_UNBOUND, CLAIMED_METHOD_NOT_A_READ_OR_WRITE,
-    CLAIMED_WRITE_NOT_A_WRITE, Code, FABRICD_READS_DESCRIBE_ONLY, NOT_JUDGED, Peer, Role, STAMP_NOT_FROM_AGORA,
+    BOUND_DECIDED_NOT_A_METHOD, CARRIED_CLAIM_NOT_A_LANE, CARRIED_NO_PREFACE, CARRIED_WRITE_UNBOUND,
+    CLAIMED_METHOD_NOT_A_READ_OR_WRITE, CLAIMED_WRITE_NOT_A_WRITE, Code, FABRICD_READS_DESCRIBE_ONLY, NOT_JUDGED, Peer,
+    Role, STAMP_NOT_FROM_AGORA,
 };
 
 use crate::accepted::{Accepted, Judged};
 use crate::pb;
 use crate::plane::{
-    ApiPlaneLayer, CarriedBound, Claimed, ClaimedMethods, ClaimedWrites, PLANE_REFUSALS, Reads, api_admits,
-    bound_admits, carried_admits, carried_claim, plane_admits, refused, said, said_on, stamp_bytes, taught,
+    ApiPlaneLayer, BoundDecided, CarriedBound, Claimed, ClaimedMethods, ClaimedWrites, PLANE_REFUSALS, Reads,
+    api_admits, bound_admits, carried_admits, carried_claim, plane_admits, refused, said, said_on, stamp_bytes, taught,
 };
-use crate::serve_tests::land_descriptor_with;
+use crate::serve_tests::{land_descriptor_as, land_descriptor_in, land_descriptor_with};
 
 const DESCRIBE: &str = "/anemnez.extension.v1.Describe/Get";
 const FUNCTIONAL: &str = "/minion.v1.Minion/AppsList";
@@ -53,12 +54,6 @@ impl<T: Clone + Send + Sync + 'static> tower_service::Service<http::Request<toni
         *self.0.lock().expect("seen") = Some(request.extensions().get::<T>().cloned());
         std::future::ready(Ok(http::Response::new(tonic::body::empty_body())))
     }
-}
-
-/// `reads`, of `methods`: a descriptor's effects without the descriptor.
-fn listing(reads: &[&str], methods: &[&str]) -> Reads {
-    let set = |paths: &[&str]| std::sync::Arc::new(paths.iter().map(|p| (*p).to_owned()).collect());
-    Reads { reads: set(reads), methods: set(methods) }
 }
 
 /// A call on a connection not judged at accept is refused by name, whatever it asks and whoever it says it is.
@@ -129,7 +124,7 @@ async fn the_layer_applies_the_rules_before_any_service() {
 /// A stamp it carries is never believed. No other role is touched by the rule.
 #[test]
 fn a_carried_call_reaches_reads_only() {
-    let reads = listing(&[FUNCTIONAL], &[FUNCTIONAL]);
+    let reads = Reads(std::sync::Arc::new(std::iter::once(FUNCTIONAL.to_owned()).collect()));
     const WRITE: &str = "/minion.v1.Minion/AppsLaunch";
     assert_eq!(carried_admits(Role::Carried, FUNCTIONAL, &reads), Ok(()), "a read");
     assert_eq!(carried_admits(Role::Carried, WRITE, &reads), Err(CARRIED_WRITE_UNBOUND), "a write");
@@ -234,7 +229,7 @@ fn only_a_descriptors_reads_and_writes_can_be_listed_for_claimed_lanes() {
 /// never reads its stamp at all.
 #[test]
 fn a_listed_carried_read_is_attributed_when_its_claim_holds_and_served_when_it_doesnt() {
-    let reads = listing(&[LAND], &[LAND]);
+    let reads = Reads(std::sync::Arc::new(std::iter::once(LAND.to_owned()).collect()));
     let listed = ClaimedMethods::of(&land_descriptor_with(pb::Effect::Read), &[LAND], ours).expect("a read");
     let far = carried(Some("node-b"));
     assert_eq!(
@@ -392,59 +387,75 @@ async fn the_layer_hands_the_service_the_claim() {
 
 /// What the SDK's carried verify would have found.
 fn bound() -> CarriedBound {
-    CarriedBound::new("agent:K".into(), "node-b".into())
+    CarriedBound::minted_by_the_sdks_carried_verify("agent:K".into(), "node-b".into())
 }
 
-/// K m/29120: a carried call whose principal the SDK bound reaches any method its product's descriptor has, read, write
-/// or act, with no claim made of it; which one runs is the product's grant. Without the bound principal, nothing
-/// changes: reads only, else carried-write-unbound.
+/// Land as an agents' method of `effect`, which the product says it decides bound callers on.
+fn deciding(effect: pb::Effect) -> BoundDecided {
+    BoundDecided::of(&land_descriptor_as(effect, pb::Callers::Agent), &[LAND]).expect("Land is the product's own")
+}
+
+/// K m/29120, E m/36065: a carried call whose principal the SDK bound reaches a method its product says it decides
+/// bound callers on, read, write or act. A method the product hasn't listed is judged as an unbound call is, so no
+/// product serves a bound caller before its own check has landed.
 #[test]
-fn a_bound_carried_call_reaches_any_product_method() {
+fn a_bound_carried_call_reaches_only_a_method_its_product_decides() {
     let far = carried(Some("node-b"));
     for effect in [pb::Effect::Read, pb::Effect::Write, pb::Effect::Act] {
-        let reads = Reads::of(&land_descriptor_with(effect));
-        assert!(bound_admits(Some(&far), LAND, Some(&bound()), &reads), "{effect:?}");
-        assert!(!bound_admits(Some(&far), LAND, None, &reads), "{effect:?}: unbound, the rules before it decide");
+        assert!(bound_admits(Some(&far), LAND, Some(&bound()), &deciding(effect)), "{effect:?}");
+        assert!(!bound_admits(Some(&far), LAND, None, &deciding(effect)), "{effect:?}: unbound, the rules after it");
+        let none = BoundDecided::default();
+        assert!(!bound_admits(Some(&far), LAND, Some(&bound()), &none), "{effect:?}: not opted in");
     }
-    let reads = Reads::of(&land_descriptor_with(pb::Effect::Act));
-    assert!(!bound_admits(Some(&far), "/h.v1.H/Other", Some(&bound()), &reads), "a path the descriptor hasn't");
-    assert!(!bound_admits(Some(&far), LAND, Some(&bound()), &Reads::of(b"not a descriptor")), "an unchecked one");
+}
+
+/// E m/36065: a product may decide bound callers only on its descriptor's own methods, never one products call (a code
+/// identity's), never the contract's faces, never a path it doesn't have: refused by name when the plane is built.
+#[test]
+fn only_a_products_own_agent_methods_can_be_decided_for_bound_callers() {
+    let agents = land_descriptor_as(pb::Effect::Write, pb::Callers::Agent);
+    assert!(BoundDecided::of(&agents, &[LAND]).is_ok());
+    let refused = |descriptor: &[u8], method: &str| BoundDecided::of(descriptor, &[method]).err();
+    let not = |method: &str| Some((BOUND_DECIDED_NOT_A_METHOD, method.to_owned()));
+    assert_eq!(refused(&land_descriptor_with(pb::Effect::Write), LAND), not(LAND), "a method products call");
+    assert_eq!(refused(&agents, "/h.v1.H/Other"), not("/h.v1.H/Other"), "a path it doesn't have");
+    let contracts = land_descriptor_in("anemnez.extension.v1", pb::Effect::Write, pb::Callers::Agent);
+    let face = "/anemnez.extension.v1.H/Land";
+    assert!(anemnez_extension::descriptor::check_descriptor(&contracts).is_ok(), "the row isn't vacuous");
+    assert_eq!(refused(&contracts, face), not(face), "a method in the contract's own package, even its descriptor's");
+    assert!(BoundDecided::of(b"not a descriptor", &[]).is_ok(), "deciding none is always fine");
+    let unchecked = refused(b"not a descriptor", LAND).map(|(name, _)| name);
+    assert_eq!(unchecked, Some(anemnez_extension::peer::DESCRIPTOR_UNCHECKED));
 }
 
 /// K m/29120 (D's rows): a CarriedBound on any role but Carried changes nothing, since only aegisd's connection carries
-/// a far caller; and the contract's own faces keep their rules, bound or not: the log's Events stay refused (Call is
-/// opaque, E m/23165), and Health stays house-signed (D m/33851), even were a product's descriptor to list them.
+/// a far caller.
 #[test]
-fn a_bound_principal_opens_no_other_role_and_no_contract_face() {
-    let reads = Reads::of(&land_descriptor_with(pb::Effect::Write));
+fn a_bound_principal_opens_no_other_role() {
     for role in [Role::Other, Role::Agora, Role::Fabricd] {
-        assert!(!bound_admits(Some(&judged(role)), LAND, Some(&bound()), &reads), "{role:?}");
+        assert!(!bound_admits(Some(&judged(role)), LAND, Some(&bound()), &deciding(pb::Effect::Write)), "{role:?}");
     }
-    assert!(!bound_admits(None, LAND, Some(&bound()), &reads), "an unjudged connection");
-    let faces = ["/anemnez.extension.v1.Events/Call", "/anemnez.extension.v1.Health/Get"];
-    let listed = listing(&[], &faces);
-    for face in faces {
-        assert!(!bound_admits(Some(&carried(Some("node-b"))), face, Some(&bound()), &listed), "{face}");
-    }
+    assert!(!bound_admits(None, LAND, Some(&bound()), &deciding(pb::Effect::Write)), "an unjudged connection");
 }
 
-/// End to end through the layer: a bound carried call to an act is served, its stamp claiming a lane unread, with no
-/// Claimed on it, even to a write listed for claimed lanes (a verified principal wins, D m/28960); the same call unbound
-/// is refused carried-write-unbound; and a method products call stays theirs, bound or not.
+/// End to end through the layer: a bound carried call to an act the product decides is served, its stamp claiming a
+/// lane unread, with no Claimed on it, even beside a claimed write (a verified principal wins, D m/28960). The same
+/// bound call to a product that hasn't opted in is refused carried-write-unbound, as before (E m/36065), and an
+/// unbound one too.
 #[tokio::test]
-async fn the_layer_serves_a_bound_carried_call_as_itself() {
+async fn the_layer_serves_a_bound_carried_call_only_where_its_product_decides() {
     let call = carried_land;
-    let act = ApiPlaneLayer::new(Reads::of(&land_descriptor_with(pb::Effect::Act)));
-    assert_eq!(call(&act, Some(bound())).await, (http::StatusCode::OK, Some(None)), "an act, served");
-    let (status, seen) = call(&act, None).await;
-    assert_eq!((status, seen), (http::StatusCode::FORBIDDEN, None), "unbound: carried-write-unbound, as before");
-    let write = ApiPlaneLayer::new(Reads::of(&land_descriptor_with(pb::Effect::Write))).claiming(claiming_land());
+    let reads = || Reads::of(&land_descriptor_as(pb::Effect::Act, pb::Callers::Agent));
+    let act = ApiPlaneLayer::new(reads()).bound_decided(deciding(pb::Effect::Act));
+    assert_eq!(call(&act, Some(bound())).await, (http::StatusCode::OK, Some(None)), "an act it decides, served");
+    assert_eq!(call(&act, None).await, (http::StatusCode::FORBIDDEN, None), "unbound: carried-write-unbound");
+    let undecided = ApiPlaneLayer::new(reads());
+    assert_eq!(call(&undecided, Some(bound())).await, (http::StatusCode::FORBIDDEN, None), "not opted in: refused");
+    let claimed = ClaimedWrites::of(&land_descriptor_as(pb::Effect::Write, pb::Callers::Agent), &[LAND], ours)
+        .expect("Land is a write");
+    let write = ApiPlaneLayer::new(Reads::default()).claiming(claimed).bound_decided(deciding(pb::Effect::Write));
     assert_eq!(call(&write, Some(bound())).await, (http::StatusCode::OK, Some(None)), "bound wins over the claim");
     assert_eq!(call(&write, None).await.1, Some(Some(Claimed { lane: "K".into(), via: "node-b".into() })));
-    let products = crate::plane::ProductCallers::of(&land_descriptor_with(pb::Effect::Act), &[(LAND, &["ai.x"])])
-        .expect("Land is called by products");
-    let theirs = ApiPlaneLayer::new(Reads::of(&land_descriptor_with(pb::Effect::Act))).products(products);
-    assert_eq!(call(&theirs, Some(bound())).await.1, None, "a method products call stays theirs");
 }
 
 /// O m/29572, a live regression: Agora carries its stamp on every far send (I's narrowed `{class, lane}`), so a carried
@@ -452,7 +463,7 @@ async fn the_layer_serves_a_bound_carried_call_as_itself() {
 /// it, so reads stay location agnostic whatever the caller sends. A carried stamp to an unlisted write is still refused.
 #[test]
 fn a_carried_read_with_a_stamp_is_admitted_as_a_read_and_its_stamp_unused() {
-    let reads = listing(&[FUNCTIONAL], &[FUNCTIONAL]);
+    let reads = Reads(std::sync::Arc::new(std::iter::once(FUNCTIONAL.to_owned()).collect()));
     let far = carried(Some("node-b"));
     let lane = stamp(Some("K"));
     assert_eq!(plane_admits(Some(&far), FUNCTIONAL, Some(&lane), &reads, &claiming_land()), Ok(None), "a read");
