@@ -820,6 +820,14 @@ anemnez-secret's trust table, anemnez-consent's floor) reads it from here by nam
 manifest has an empty `[dependencies]` and no other table of crates, so a pure kernel or a wasm build takes it freely
 (C m/32481). Its first release here is 0.10.1, above every 0.3.x the SDK released of it (E m/33177).
 
+<!-- claim: an-apps-requirement-has-one-writer -->
+**An app's designated requirement has one writer** (rule 2; K m/35136, D m/35154). `anemnez_trust::app_requirement(identifier,
+team)` writes it, identifier first, then the Apple anchor, then the leaf's OU, and refuses an identifier or team that
+isn't plain (`identifier-not-plain`) rather than splice it in. Fabric's admission and the release library's signing
+both call it, and neither keeps a body of its own: fabric compares the requirement compiled, where clause order counts,
+so two writers in two orders refused every app the library signed. Each caller keeps its own `csreq` compile; this crate
+stays std only.
+
 <!-- claim: a-connection-opens-within-its-bound -->
 **A connection gives its whole opening within its bound, or it closes by name** (rule 4; M m/26881, K m/26883,
 D m/26884, m/26885). -serve's accept (`opening::Openings`, which the SDK's control `Incoming` runs too) reads every

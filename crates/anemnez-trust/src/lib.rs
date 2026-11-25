@@ -8,8 +8,80 @@
 /// compares against this; a build can't read "my team" from its own signature and call that trust (circular).
 pub const ANEMNEZ_TEAM: &str = "P9DJA3JCKP";
 
+/// The designated requirement of the house team's signature of `identifier`, the only writer of it (rule 2; D m/35154):
+/// its identifier, anchored at Apple, the leaf's OU `team`, in exactly this order. Fabric compares an app's
+/// requirement compiled (`csreq`), where clause order counts and quoting doesn't, so two writers in two orders made
+/// fabric refuse every app the release library signed (K m/35136). Fabric's admission and the release library's
+/// signing both call this; each keeps its own `csreq` compile.
+///
+/// # Errors
+/// [`IDENTIFIER_NOT_PLAIN`], naming an identifier or team that isn't plain, never spliced in.
+pub fn app_requirement(identifier: &str, team: &str) -> Result<String, String> {
+    let (identifier, team) = (plain(identifier)?, plain(team)?);
+    Ok(format!(r#"identifier "{identifier}" and anchor apple generic and certificate leaf[subject.OU] = "{team}""#))
+}
+
+/// The refusal of a value spliced into a requirement that isn't plain (J m/29701).
+pub const IDENTIFIER_NOT_PLAIN: &str = "identifier-not-plain";
+
+/// `value`, when it is only what a signing identifier or team is made of: ASCII letters, digits, `.`, `-` and `_`, and
+/// not empty. A positive rule, so a quote, a backslash, a space or a control character can never widen the
+/// requirement it's spliced into, whatever spelling comes next.
+fn plain(value: &str) -> Result<&str, String> {
+    let ok = !value.is_empty() && value.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_'));
+    if ok { Ok(value) } else { Err(format!("{IDENTIFIER_NOT_PLAIN}: {value:?} isn't a plain signing identifier")) }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::{ANEMNEZ_TEAM, IDENTIFIER_NOT_PLAIN, app_requirement};
+
+    /// `text` compiled by `csreq`, as fabric compares an app's designated requirement. std only: this crate takes no
+    /// dependency, dev ones included.
+    #[cfg(target_os = "macos")]
+    fn compiled(text: &str) -> Vec<u8> {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static NEXT: AtomicU32 = AtomicU32::new(0);
+        let n = NEXT.fetch_add(1, Ordering::Relaxed);
+        let out = std::env::temp_dir().join(format!("anemnez-trust-csreq-{}-{n}.bin", std::process::id()));
+        let made = std::process::Command::new("/usr/bin/csreq").arg(format!("-r={text}")).arg("-b").arg(&out).status();
+        assert!(made.is_ok_and(|s| s.success()), "csreq compiles {text}");
+        let bytes = std::fs::read(&out).expect("compiled");
+        let _ = std::fs::remove_file(&out);
+        bytes
+    }
+
+    /// K m/35136, D m/35154: the one requirement compiles to the bytes of the identifier-first form fabric places, and
+    /// not to the anchor-first form the release library once wrote, which fabric refused. Order counts once compiled.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn an_apps_requirement_compiles_identifier_first() {
+        let id = "ai.anemnez.ergon-app";
+        let ours = compiled(&app_requirement(id, ANEMNEZ_TEAM).expect("plain"));
+        let identifier_first = format!(
+            r#"identifier "{id}" and anchor apple generic and certificate leaf[subject.OU] = "{ANEMNEZ_TEAM}""#
+        );
+        let anchor_first = format!(
+            r#"anchor apple generic and certificate leaf[subject.OU] = "{ANEMNEZ_TEAM}" and identifier "{id}""#
+        );
+        assert_eq!(ours, compiled(&identifier_first));
+        assert_ne!(ours, compiled(&anchor_first), "clause order must count once compiled, or this row proves nothing");
+    }
+
+    /// J m/29701: an identifier or team that could widen its requirement is refused by name, never spliced in.
+    #[test]
+    fn a_value_that_isnt_plain_is_never_spliced_into_a_requirement() {
+        for bad in ["", r#"ai.anemnez.x" or anchor apple"#, "a b", "a\\b", "a\nb", "a\u{0}b", "ai.anemnez.é"] {
+            for refused in [app_requirement(bad, ANEMNEZ_TEAM), app_requirement("ai.anemnez.x", bad)] {
+                assert!(
+                    refused.as_ref().is_err_and(|why| why.starts_with(IDENTIFIER_NOT_PLAIN)),
+                    "{bad:?}: {refused:?}"
+                );
+            }
+        }
+        assert!(app_requirement("ai.anemnez.agora-cli_2", ANEMNEZ_TEAM).is_ok());
+    }
+
     /// C m/32481, D m/32487: the trust anchor takes no dependency, so whatever takes it takes nothing else. Read from
     /// this crate's own manifest: its `[dependencies]` table is empty, and it has no other table of crates (build,
     /// dev, a `[dependencies.x]` or a target-gated one).
