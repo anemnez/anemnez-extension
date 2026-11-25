@@ -12,8 +12,8 @@ use anemnez_extension::peer::{
 use crate::accepted::{Accepted, Judged};
 use crate::pb;
 use crate::plane::{
-    ApiPlaneLayer, Claimed, ClaimedMethods, ClaimedWrites, PLANE_REFUSALS, Reads, api_admits, carried_admits,
-    carried_claim, plane_admits, refused, said, said_on, stamp_bytes, taught,
+    ApiPlaneLayer, CarriedBound, Claimed, ClaimedMethods, ClaimedWrites, PLANE_REFUSALS, Reads, api_admits,
+    bound_admits, carried_admits, carried_claim, plane_admits, refused, said, said_on, stamp_bytes, taught,
 };
 use crate::serve_tests::land_descriptor_with;
 
@@ -53,6 +53,12 @@ impl<T: Clone + Send + Sync + 'static> tower_service::Service<http::Request<toni
         *self.0.lock().expect("seen") = Some(request.extensions().get::<T>().cloned());
         std::future::ready(Ok(http::Response::new(tonic::body::empty_body())))
     }
+}
+
+/// `reads`, of `methods`: a descriptor's effects without the descriptor.
+fn listing(reads: &[&str], methods: &[&str]) -> Reads {
+    let set = |paths: &[&str]| std::sync::Arc::new(paths.iter().map(|p| (*p).to_owned()).collect());
+    Reads { reads: set(reads), methods: set(methods) }
 }
 
 /// A call on a connection not judged at accept is refused by name, whatever it asks and whoever it says it is.
@@ -123,7 +129,7 @@ async fn the_layer_applies_the_rules_before_any_service() {
 /// A stamp it carries is never believed. No other role is touched by the rule.
 #[test]
 fn a_carried_call_reaches_reads_only() {
-    let reads = Reads(std::sync::Arc::new(std::iter::once(FUNCTIONAL.to_owned()).collect()));
+    let reads = listing(&[FUNCTIONAL], &[FUNCTIONAL]);
     const WRITE: &str = "/minion.v1.Minion/AppsLaunch";
     assert_eq!(carried_admits(Role::Carried, FUNCTIONAL, &reads), Ok(()), "a read");
     assert_eq!(carried_admits(Role::Carried, WRITE, &reads), Err(CARRIED_WRITE_UNBOUND), "a write");
@@ -228,7 +234,7 @@ fn only_a_descriptors_reads_and_writes_can_be_listed_for_claimed_lanes() {
 /// never reads its stamp at all.
 #[test]
 fn a_listed_carried_read_is_attributed_when_its_claim_holds_and_served_when_it_doesnt() {
-    let reads = Reads(std::sync::Arc::new(std::iter::once(LAND.to_owned()).collect()));
+    let reads = listing(&[LAND], &[LAND]);
     let listed = ClaimedMethods::of(&land_descriptor_with(pb::Effect::Read), &[LAND], ours).expect("a read");
     let far = carried(Some("node-b"));
     assert_eq!(
@@ -351,22 +357,94 @@ fn a_stamp_reads_back_from_its_bin_header_as_sent() {
     assert!(stamp_bytes(b"!!not base64!!").is_empty(), "undecodable reads as no bytes, so no lane");
 }
 
-/// End to end through the layer: an admitted claimed write reaches the service with its Claimed on the request.
-#[tokio::test]
-async fn the_layer_hands_the_service_the_claim() {
+/// One carried call to Land from node-b, its stamp claiming K, through `layer`, with `bound` on it when given: the
+/// status answered, and the Claimed the service saw (`None` when the plane refused before it).
+async fn carried_land(
+    layer: &ApiPlaneLayer,
+    bound: Option<CarriedBound>,
+) -> (http::StatusCode, Option<Option<Claimed>>) {
     use tower_layer::Layer as _;
     use tower_service::Service as _;
 
     let seen = Seen::<Claimed>::default();
-    let mut service = ApiPlaneLayer::new(Reads::default()).claiming(claiming_land()).layer(seen.clone());
+    let mut service = layer.layer(seen.clone());
     let mut metadata = tonic::metadata::MetadataMap::new();
     metadata.insert_bin(STAMP_METADATA_KEY, tonic::metadata::MetadataValue::from_bytes(&stamp(Some("K"))));
     let mut request = http::Request::builder().uri(LAND).body(tonic::body::empty_body()).expect("a request");
     *request.headers_mut() = metadata.into_headers();
     request.extensions_mut().insert(carried(Some("node-b")));
+    if let Some(bound) = bound {
+        request.extensions_mut().insert(bound);
+    }
     let response = service.call(request).await.expect("answered");
-    assert_eq!(response.status(), http::StatusCode::OK, "served, not refused");
-    assert_eq!(seen.got(), Some(Some(Claimed { lane: "K".into(), via: "node-b".into() })));
+    (response.status(), seen.got())
+}
+
+/// End to end through the layer: an admitted claimed write reaches the service with its Claimed on the request.
+#[tokio::test]
+async fn the_layer_hands_the_service_the_claim() {
+    let layer = ApiPlaneLayer::new(Reads::default()).claiming(claiming_land());
+    let claimed = Some(Some(Claimed { lane: "K".into(), via: "node-b".into() }));
+    assert_eq!(carried_land(&layer, None).await, (http::StatusCode::OK, claimed), "served, not refused");
+}
+
+// ── A carried caller whose principal is bound (K m/29120) ─────────────────────────────────────────────────────
+
+/// What the SDK's carried verify would have found.
+fn bound() -> CarriedBound {
+    CarriedBound::new("agent:K".into(), "node-b".into())
+}
+
+/// K m/29120: a carried call whose principal the SDK bound reaches any method its product's descriptor has, read, write
+/// or act, with no claim made of it; which one runs is the product's grant. Without the bound principal, nothing
+/// changes: reads only, else carried-write-unbound.
+#[test]
+fn a_bound_carried_call_reaches_any_product_method() {
+    let far = carried(Some("node-b"));
+    for effect in [pb::Effect::Read, pb::Effect::Write, pb::Effect::Act] {
+        let reads = Reads::of(&land_descriptor_with(effect));
+        assert!(bound_admits(Some(&far), LAND, Some(&bound()), &reads), "{effect:?}");
+        assert!(!bound_admits(Some(&far), LAND, None, &reads), "{effect:?}: unbound, the rules before it decide");
+    }
+    let reads = Reads::of(&land_descriptor_with(pb::Effect::Act));
+    assert!(!bound_admits(Some(&far), "/h.v1.H/Other", Some(&bound()), &reads), "a path the descriptor hasn't");
+    assert!(!bound_admits(Some(&far), LAND, Some(&bound()), &Reads::of(b"not a descriptor")), "an unchecked one");
+}
+
+/// K m/29120 (D's rows): a CarriedBound on any role but Carried changes nothing, since only aegisd's connection carries
+/// a far caller; and the contract's own faces keep their rules, bound or not: the log's Events stay refused (Call is
+/// opaque, E m/23165), and Health stays house-signed (D m/33851), even were a product's descriptor to list them.
+#[test]
+fn a_bound_principal_opens_no_other_role_and_no_contract_face() {
+    let reads = Reads::of(&land_descriptor_with(pb::Effect::Write));
+    for role in [Role::Other, Role::Agora, Role::Fabricd] {
+        assert!(!bound_admits(Some(&judged(role)), LAND, Some(&bound()), &reads), "{role:?}");
+    }
+    assert!(!bound_admits(None, LAND, Some(&bound()), &reads), "an unjudged connection");
+    let faces = ["/anemnez.extension.v1.Events/Call", "/anemnez.extension.v1.Health/Get"];
+    let listed = listing(&[], &faces);
+    for face in faces {
+        assert!(!bound_admits(Some(&carried(Some("node-b"))), face, Some(&bound()), &listed), "{face}");
+    }
+}
+
+/// End to end through the layer: a bound carried call to an act is served, its stamp claiming a lane unread, with no
+/// Claimed on it, even to a write listed for claimed lanes (a verified principal wins, D m/28960); the same call unbound
+/// is refused carried-write-unbound; and a method products call stays theirs, bound or not.
+#[tokio::test]
+async fn the_layer_serves_a_bound_carried_call_as_itself() {
+    let call = carried_land;
+    let act = ApiPlaneLayer::new(Reads::of(&land_descriptor_with(pb::Effect::Act)));
+    assert_eq!(call(&act, Some(bound())).await, (http::StatusCode::OK, Some(None)), "an act, served");
+    let (status, seen) = call(&act, None).await;
+    assert_eq!((status, seen), (http::StatusCode::FORBIDDEN, None), "unbound: carried-write-unbound, as before");
+    let write = ApiPlaneLayer::new(Reads::of(&land_descriptor_with(pb::Effect::Write))).claiming(claiming_land());
+    assert_eq!(call(&write, Some(bound())).await, (http::StatusCode::OK, Some(None)), "bound wins over the claim");
+    assert_eq!(call(&write, None).await.1, Some(Some(Claimed { lane: "K".into(), via: "node-b".into() })));
+    let products = crate::plane::ProductCallers::of(&land_descriptor_with(pb::Effect::Act), &[(LAND, &["ai.x"])])
+        .expect("Land is called by products");
+    let theirs = ApiPlaneLayer::new(Reads::of(&land_descriptor_with(pb::Effect::Act))).products(products);
+    assert_eq!(call(&theirs, Some(bound())).await.1, None, "a method products call stays theirs");
 }
 
 /// O m/29572, a live regression: Agora carries its stamp on every far send (I's narrowed `{class, lane}`), so a carried
@@ -374,7 +452,7 @@ async fn the_layer_hands_the_service_the_claim() {
 /// it, so reads stay location agnostic whatever the caller sends. A carried stamp to an unlisted write is still refused.
 #[test]
 fn a_carried_read_with_a_stamp_is_admitted_as_a_read_and_its_stamp_unused() {
-    let reads = Reads(std::sync::Arc::new(std::iter::once(FUNCTIONAL.to_owned()).collect()));
+    let reads = listing(&[FUNCTIONAL], &[FUNCTIONAL]);
     let far = carried(Some("node-b"));
     let lane = stamp(Some("K"));
     assert_eq!(plane_admits(Some(&far), FUNCTIONAL, Some(&lane), &reads, &claiming_land()), Ok(None), "a read");
