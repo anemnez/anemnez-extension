@@ -103,6 +103,10 @@ spoken_for("a-products-own-stream-ends-at-its-drain", "journal::streams_tests::a
 spoken_for("async-cancelled-only-by-its-owner", "serve_tests::a_dropped_subscriber_cancels_nothing")
 spoken_for("health-is-state-with-parts", "serve_tests::a_watcher_reads_health_then_sees_only_later_changes")
 spoken_for("health-is-state-with-parts (a part's name is one shape)", "health::tests::a_part_name_is_a_path_of_printable_segments")
+spoken_for("health-is-read-through-one-asker", "health::tests::a_products_health_reads_back_by_value_through_the_one_asker")
+spoken_for("health-is-read-through-one-asker (bound)", "health::tests::a_health_that_never_answers_is_unanswered_at_its_bound")
+spoken_for("health-is-read-through-one-asker (refused)", "health::tests::a_refused_health_ask_is_said_refused_by_its_name")
+spoken_for("health-is-read-through-one-asker (wire)", "health::tests::the_kernels_health_wire_is_the_served_reply_byte_for_byte")
 spoken_for("health-may-say-what-a-restart-costs", "health::tests::a_restart_cost_is_said_once_per_change_and_can_be_taken_back")
 spoken_for("a-product-pushes-events-as-a-stream-it-serves", "serve_tests::a_foreign_cursor_is_not_mine_and_an_old_one_is_out_of_range")
 spoken_for("a-keyed-route-names-a-string-field", "options::tests::a_keyed_route_names_a_top_level_string_field")
@@ -205,6 +209,7 @@ spoken_for("one-mapping-flattens-a-descriptor (map_entry)", "descriptor::tests::
 spoken_for("an-external-caller-is-parsed-here-and-trusted-only-from-its-peer", "mcp::tests::an_external_caller_is_parsed_here_and_trusted_only_from_its_peer")
 
 spoken_for("a-carried-call-reaches-reads-only", "plane_tests::a_carried_call_reaches_reads_only")
+spoken_for("a-carried-call-reaches-reads-only (Health, house-signed)", "plane_tests::a_carried_health_ask_is_admitted_only_from_a_house_signed_caller")
 spoken_for("a-carried-write-may-be-admitted-for-a-claimed-lane", "plane_tests::a_listed_carried_write_with_a_lane_is_admitted_with_its_claim")
 spoken_for("a-carried-write-may-be-admitted-for-a-claimed-lane (writes only)", "plane_tests::only_a_descriptors_reads_and_writes_can_be_listed_for_claimed_lanes")
 spoken_for("a-carried-write-may-be-admitted-for-a-claimed-lane (unlisted)", "plane_tests::an_unlisted_carried_write_is_refused_as_before")

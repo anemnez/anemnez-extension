@@ -173,6 +173,51 @@ pub fn proto_state(state: State) -> pb::State {
 
 #[cfg(test)]
 mod tests {
+
+    /// health-is-read-through-one-asker: the kernel's `health::wire` is this crate's generated `HealthReply`, field for
+    /// field and number for number. A full reply encodes to the same bytes from either side, and decodes across both
+    /// ways, so the one asker reads exactly what every product's Board serves.
+    #[test]
+    fn the_kernels_health_wire_is_the_served_reply_byte_for_byte() {
+        use anemnez_extension::health::wire;
+        use prost::Message;
+        let served = pb::HealthReply {
+            state: pb::State::Degraded as i32,
+            parts: vec![
+                pb::Part {
+                    name: "memory/index".into(),
+                    state: pb::State::Failing as i32,
+                    detail: "d".into(),
+                    since: -7,
+                },
+                pb::Part { name: "a".into(), state: pb::State::Drained as i32, detail: String::new(), since: 1 << 40 },
+            ],
+            as_of: "a1b2c3d4.boot1:9".into(),
+            detail: "the index is rebuilding".into(),
+            restart_cost: Some(pb::RestartCost { line: "warm".into(), secs: Some(0) }),
+        };
+        let ours = wire::HealthReply {
+            state: 3,
+            parts: vec![
+                wire::Part { name: "memory/index".into(), state: 4, detail: "d".into(), since: -7 },
+                wire::Part { name: "a".into(), state: 6, detail: String::new(), since: 1 << 40 },
+            ],
+            as_of: "a1b2c3d4.boot1:9".into(),
+            detail: "the index is rebuilding".into(),
+            restart_cost: Some(wire::RestartCost { line: "warm".into(), secs: Some(0) }),
+        };
+        assert_eq!(served.encode_to_vec(), ours.encode_to_vec(), "the same bytes");
+        assert_eq!(wire::HealthReply::decode(served.encode_to_vec().as_slice()).expect("decodes"), ours);
+        assert_eq!(pb::HealthReply::decode(ours.encode_to_vec().as_slice()).expect("decodes"), served);
+        let unset = wire::HealthReply::decode(
+            pb::HealthReply { restart_cost: Some(pb::RestartCost { line: "l".into(), secs: None }), ..served }
+                .encode_to_vec()
+                .as_slice(),
+        )
+        .expect("decodes");
+        assert_eq!(unset.restart_cost.and_then(|c| c.secs), None, "an unmeasured cost stays unset, never 0");
+        assert_eq!(anemnez_extension::health::State::from_wire(99), anemnez_extension::health::State::Unknown);
+    }
     use super::*;
     use anemnez_clock::ManualClock;
 

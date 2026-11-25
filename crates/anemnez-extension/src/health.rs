@@ -100,6 +100,75 @@ impl Health {
     }
 }
 
+impl State {
+    /// The state a wire `State` number names; a number this build doesn't know (a newer product's state) is
+    /// [`State::Unknown`], never a guess at its meaning.
+    #[must_use]
+    pub fn from_wire(number: i32) -> State {
+        usize::try_from(number).ok().and_then(|i| State::ALL.get(i).copied()).unwrap_or(State::Unknown)
+    }
+}
+
+/// `Health/Get`'s messages as they ride the wire, field for field and number for number with `health.proto` (held by
+/// -serve's row against its generated types): what a reader decodes, then reads as a [`Health`] (CONTRACT.md
+/// `#health-is-read-through-one-asker`).
+pub mod wire {
+    use prost::Message;
+
+    /// `anemnez.extension.v1.HealthReply`.
+    #[derive(Clone, PartialEq, Message)]
+    pub struct HealthReply {
+        #[prost(int32, tag = "1")]
+        pub state: i32,
+        #[prost(message, repeated, tag = "2")]
+        pub parts: Vec<Part>,
+        #[prost(string, tag = "3")]
+        pub as_of: String,
+        #[prost(string, tag = "4")]
+        pub detail: String,
+        #[prost(message, optional, tag = "5")]
+        pub restart_cost: Option<RestartCost>,
+    }
+
+    /// `anemnez.extension.v1.Part`.
+    #[derive(Clone, PartialEq, Message)]
+    pub struct Part {
+        #[prost(string, tag = "1")]
+        pub name: String,
+        #[prost(int32, tag = "2")]
+        pub state: i32,
+        #[prost(string, tag = "3")]
+        pub detail: String,
+        #[prost(int64, tag = "4")]
+        pub since: i64,
+    }
+
+    /// `anemnez.extension.v1.RestartCost`.
+    #[derive(Clone, PartialEq, Message)]
+    pub struct RestartCost {
+        #[prost(string, tag = "1")]
+        pub line: String,
+        #[prost(uint32, optional, tag = "2")]
+        pub secs: Option<u32>,
+    }
+}
+
+impl From<wire::HealthReply> for Health {
+    fn from(reply: wire::HealthReply) -> Health {
+        Health {
+            state: State::from_wire(reply.state),
+            parts: reply
+                .parts
+                .into_iter()
+                .map(|p| Part { name: p.name, state: State::from_wire(p.state), detail: p.detail, since: p.since })
+                .collect(),
+            as_of: reply.as_of,
+            detail: reply.detail,
+            restart_cost: reply.restart_cost.map(|c| RestartCost { line: c.line, secs: c.secs }),
+        }
+    }
+}
+
 /// The most a part's name may be, in bytes.
 pub const PART_NAME_MAX: usize = 128;
 
