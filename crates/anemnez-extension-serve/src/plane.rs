@@ -9,6 +9,9 @@
 //! - a carried call (Aegis's peer) reaches a method only when its descriptor says `read`, or one of the contract's
 //!   own Describe or Health, else it is refused `carried-write-unbound` ([`carried_admits`]; K m/23155). The log's
 //!   Events are refused to a carried call whole, since Call carries an opaque request (E m/23165);
+//! - a carried call whose principal the SDK's carried verify bound ([`CarriedBound`] on the request, K m/29120) reaches
+//!   any method its product's descriptor has, read, write or act, before the claimed path and with no claim made of its
+//!   stamp ([`bound_admits`]); never a contract face, never a method products call, and never on another role;
 //! - a carried call to a write its product lists for claimed lanes ([`ClaimedWrites`], D m/28960) is admitted with
 //!   its stamp's lane as a claim, [`Claimed`] `{ lane, via }` on the request, when aegisd said the node it came from
 //!   and the stamp names one of the product's lanes, by its own predicate ([`carried_claim`]); else `carried-no-preface` or
@@ -75,25 +78,70 @@ const FACE_READS: [&str; 1] = ["/anemnez.extension.v1.Describe/"];
 /// checks), so nothing outside the house needs it. A direct caller is judged as before.
 pub const HEALTH_FACE: &str = "/anemnez.extension.v1.Health/";
 
-/// The product's methods a carried call may reach: those its descriptor says are `read`, read once when the plane
-/// is built, never per call. A descriptor `check_descriptor` doesn't admit reads as none, so every carried call to a
-/// product method is refused, the safe direction.
+/// The product's methods a carried call may reach: those its descriptor says are `read`, and every method it has for a
+/// caller whose principal is bound ([`CarriedBound`]), read once when the plane is built, never per call. A descriptor
+/// `check_descriptor` doesn't admit has none of either, so every carried call to a product method is refused, the safe
+/// direction.
 #[derive(Clone, Debug, Default)]
-pub struct Reads(pub(crate) Arc<HashSet<String>>);
+pub struct Reads {
+    pub(crate) reads: Arc<HashSet<String>>,
+    pub(crate) methods: Arc<HashSet<String>>,
+}
 
 impl Reads {
-    /// The read methods of the encoded `FileDescriptorSet`.
+    /// The read methods of the encoded `FileDescriptorSet`, and all of its methods.
     #[must_use]
     pub fn of(file_descriptor_set: &[u8]) -> Reads {
-        let reads = anemnez_extension::descriptor::check_descriptor(file_descriptor_set)
-            .map(|methods| methods.into_iter().filter(|m| m.options.effect == Effect::Read).map(|m| m.path).collect())
-            .unwrap_or_default();
-        Reads(Arc::new(reads))
+        let checked = anemnez_extension::descriptor::check_descriptor(file_descriptor_set).unwrap_or_default();
+        let reads = checked.iter().filter(|m| m.options.effect == Effect::Read).map(|m| m.path.clone()).collect();
+        let methods = checked.into_iter().map(|m| m.path).collect();
+        Reads { reads: Arc::new(reads), methods: Arc::new(methods) }
     }
 
     pub(crate) fn reads(&self, path: &str) -> bool {
-        self.0.contains(path) || FACE_READS.iter().any(|face| path.starts_with(face))
+        self.reads.contains(path) || FACE_READS.iter().any(|face| path.starts_with(face))
     }
+}
+
+/// The contract's own services, every one ruled by its own face's rule (Describe a read, Health house-signed, the log's
+/// Events never carried), so none is reached as a product method, bound or not.
+const CONTRACT_PREFIX: &str = "/anemnez.extension.v1.";
+
+/// A carried caller whose principal the SDK's carried verify bound (anemnez-service `product::carried::verify`, K
+/// m/29120): its far token verified for this product over the preface's channel and is held by the preface's holder.
+/// The admit layer the SDK puts outermost on the API plane sets it on the request's extensions, and nothing else does;
+/// -serve owns the type, so it never takes prosopon-token. The plane reads it ([`bound_admits`]); the product reads it
+/// with `request.extensions().get::<CarriedBound>()` and decides what the principal may do (its grant, scoped with
+/// reach: `one-decision-per-call-at-the-product`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct CarriedBound {
+    /// The principal the far token names.
+    pub principal: String,
+    /// The node aegisd said the call came from.
+    pub via: String,
+}
+
+impl CarriedBound {
+    /// What the SDK's carried verify found, for its admit layer alone.
+    #[must_use]
+    pub fn new(principal: String, via: String) -> CarriedBound {
+        CarriedBound { principal, via }
+    }
+}
+
+/// Whether the call to `path` on the connection `judged` is a carried call whose principal is `bound`, to one of the
+/// product's own methods: then it is admitted whatever the method's effect, read, write or act (K m/29120), and which
+/// one runs is the product's grant. Checked before the claimed path, so a verified principal wins over a claim on the
+/// same call and a stamp beside it is never read (D m/28960). A bound caller on any other role changes nothing, the
+/// contract's own faces keep their rules, and a method products call stays theirs (the layer asks
+/// [`product_admits`] first). Pure.
+#[must_use]
+pub fn bound_admits(judged: Option<&Judged>, path: &str, bound: Option<&CarriedBound>, reads: &Reads) -> bool {
+    judged.is_some_and(|j| j.role == Role::Carried)
+        && bound.is_some()
+        && !path.starts_with(CONTRACT_PREFIX)
+        && reads.methods.contains(path)
 }
 
 /// The methods of a descriptor a product names methods of, or [`DESCRIPTOR_UNCHECKED`] with the checker's refusals,
@@ -575,6 +623,9 @@ where
                         Err(name) => Err(name),
                     }
                 }
+                // A bound principal, carried, to a product method: admitted as itself, its CarriedBound already on
+                // the request, and no claim made of its stamp.
+                _ if bound_admits(judged, path, request.extensions().get::<CarriedBound>(), &self.reads) => Ok(None),
                 _ => plane_admits(judged, path, stamp.as_deref(), &self.reads, &self.claimed)
                     .map(|claimed| claimed.map(Admitted::Claimed)),
             }

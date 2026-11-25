@@ -735,8 +735,22 @@ before. Anything else is refused
 `carried-write-unbound` by name, the log's Events included, since Call carries hydramq-events' request opaquely and a
 commit or ack through it would be a write (E m/23165), and a stamp a carried call carries is never believed
 (`stamp-not-from-agora`). A descriptor the check doesn't admit reads as no reads. The rule lifts for a caller whose
-principal is bound through Aegis (I's binding), and never before, but for the writes a product lists for claimed
-lanes (`a-carried-write-may-be-admitted-for-a-claimed-lane`, below).
+principal is bound through Aegis (`a-bound-carried-call-reaches-any-product-method`, below), and never before, but for
+the writes a product lists for claimed lanes (`a-carried-write-may-be-admitted-for-a-claimed-lane`, below).
+
+<!-- claim: a-bound-carried-call-reaches-any-product-method -->
+**A carried call whose principal is bound reaches any method its product has** (K m/29120). The SDK's carried verify
+(anemnez-service `product::carried::verify`) binds a carried caller when its far token verifies for this product over
+the preface's certificate and is held by the preface's holder. The SDK's admit layer, outermost on the API plane, then
+puts `CarriedBound { principal, via }` on the request, and nothing else sets it; -serve owns the type so it never takes
+prosopon-token. The plane admits a carried call carrying one to any method the product's descriptor has, read, write
+or act (`plane::bound_admits`); which one runs, and what the principal may do there, is the product's grant, scoped
+with reach (`one-decision-per-call-at-the-product`). It is decided before the claimed path, so a verified principal wins
+over a claim on the same call and a stamp beside it is never read: the request carries no `Claimed` (D m/28960). It
+opens nothing else: a `CarriedBound` on any other role changes nothing; the contract's own faces keep their rules (the
+log's Events refused carried, since Call is opaque, E m/23165; Health house-signed); and a method whose descriptor says
+`callers = PRODUCT` stays its products', bound or not (D m/32662). A carried call with no `CarriedBound` is judged as
+before: reads only, the listed claimed writes, else `carried-write-unbound`.
 
 <!-- claim: a-carried-write-may-be-admitted-for-a-claimed-lane -->
 **A carried write reaches a product only when it lists the method for claimed lanes, and then as a claim** (D m/28960;
