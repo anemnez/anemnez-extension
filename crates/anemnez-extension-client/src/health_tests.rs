@@ -8,17 +8,7 @@ use anemnez_extension_serve::{Board, Journal, pb};
 
 use super::{HealthUnread, health};
 
-async fn channel(socket: std::path::PathBuf) -> tonic::transport::Channel {
-    tonic::transport::Endpoint::from_static("http://[::]:50051")
-        .connect_with_connector(tower::service_fn(move |_: tonic::transport::Uri| {
-            let socket = socket.clone();
-            async move {
-                Ok::<_, std::io::Error>(hyper_util::rt::TokioIo::new(tokio::net::UnixStream::connect(socket).await?))
-            }
-        }))
-        .await
-        .expect("connects")
-}
+use crate::test_socket::channel;
 
 /// Serves `service` on a socket in `dir` and answers a channel to it.
 async fn serving<S>(dir: &std::path::Path, service: S) -> tonic::transport::Channel

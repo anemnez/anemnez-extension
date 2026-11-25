@@ -59,17 +59,7 @@ impl pb::events_server::Events for Producer {
     }
 }
 
-async fn channel(socket: std::path::PathBuf) -> tonic::transport::Channel {
-    tonic::transport::Endpoint::from_static("http://[::]:50051")
-        .connect_with_connector(tower::service_fn(move |_: tonic::transport::Uri| {
-            let socket = socket.clone();
-            async move {
-                Ok::<_, std::io::Error>(hyper_util::rt::TokioIo::new(tokio::net::UnixStream::connect(socket).await?))
-            }
-        }))
-        .await
-        .expect("connects")
-}
+use crate::test_socket::channel;
 
 /// a-products-events-are-read-through-one-call: a consumer reads a producer's events through
 /// `Events/Call` with the face's own AsyncRemote and the client's adapter, nothing of its own.
