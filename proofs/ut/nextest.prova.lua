@@ -103,6 +103,7 @@ spoken_for("a-products-own-stream-ends-at-its-drain", "journal::streams_tests::a
 spoken_for("async-cancelled-only-by-its-owner", "serve_tests::a_dropped_subscriber_cancels_nothing")
 spoken_for("health-is-state-with-parts", "serve_tests::a_watcher_reads_health_then_sees_only_later_changes")
 spoken_for("health-is-state-with-parts (a part's name is one shape)", "health::tests::a_part_name_is_a_path_of_printable_segments")
+spoken_for("health-is-state-with-parts (-serve says a malformed part, still serving it)", "health::tests::a_malformed_part_name_is_served_and_said")
 spoken_for("health-is-read-through-one-asker", "health::tests::a_products_health_reads_back_by_value_through_the_one_asker")
 spoken_for("health-is-read-through-one-asker (bound)", "health::tests::a_health_that_never_answers_is_unanswered_at_its_bound")
 spoken_for("health-is-read-through-one-asker (refused)", "health::tests::a_refused_health_ask_is_said_refused_by_its_name")
