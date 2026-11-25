@@ -12,6 +12,9 @@
 //!   re-encoding, so the digest is over exactly what the product receives.
 
 pub mod events;
+pub mod health;
+
+pub use health::{HEALTH_PATH, HealthUnread, health};
 
 use bytes::{Buf, BufMut};
 use prost::Message;

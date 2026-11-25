@@ -239,6 +239,15 @@ serving: an upgrade verifies on either and records the degradation, because the 
 whether it can do its work, and a product that should be rolled back says `FAILING`. (Substrate's
 `HealthStatus` and `Diagnostic` are replaced by these, not mapped: B, CONVERGENCE.md.)
 
+<!-- claim: health-is-read-through-one-asker -->
+**Health is read through one asker** (J m/33840, D m/33851, rule 2). `anemnez_extension_client::health(channel, clock,
+within)` asks `Health/Get` within `within` on the handed clock and answers the product's `Health` by value (its state,
+each part, `as_of`, `detail`, `restart_cost`), decoded by the kernel's `health::wire`, field for field the proto's, or
+`HealthUnread` by name: `health-unanswered` (no answer within the bound, or unreachable: ask later), `health-refused`
+(a refusal, its house-form message kept, name first), `health-malformed`. It is never a guessed state, so a reader says
+unknown and why. A state number this build doesn't know reads as `UNKNOWN`. Every reader of another product's Health
+takes it: the SDK's swarm read (`discover::Fabric::health_of`), Fabric's `fabric health`, a rollout's checks.
+
 <!-- claim: health-may-say-what-a-restart-costs -->
 **Health may say what a restart costs** (D, 2026-11-10). `restart_cost`, optional, is `{line, secs}`:
 `line` one sentence a person reads ("qwen-35b-mlx warm (35B, about 40 s to reload) and the embedder"),
@@ -714,7 +723,12 @@ principal the call then runs as, and whether a grant covers it, stays the produc
 from another host arrives on the far product's API socket from aegisd's process, so the accept judges aegisd, never
 the caller. `Role::Carried` is that peer, judged only by its code identity in the SDK's one constructor. The layer
 admits a carried call only to a method its descriptor says is `read` (`Reads::of`, read once when the plane is
-built from the descriptor it serves), or to the contract's own Describe and Health. Anything else is refused
+built from the descriptor it serves), or to the contract's own Describe. **Health, carried, is house-signed only**
+(D m/33851): a carried call reaches `Health` only when aegisd's preface carries the far caller's code identity and its
+team is the house's (`plane::house_signed`, the one proof a method products call takes too), any house identity and no
+allow-list, since a Health detail can name a product's internals and its readers are the house's own; absent is
+`product-caller-unproven` and another team `product-caller-untrusted`, a stamp unread. A direct caller is judged as
+before. Anything else is refused
 `carried-write-unbound` by name, the log's Events included, since Call carries hydramq-events' request opaquely and a
 commit or ack through it would be a write (E m/23165), and a stamp a carried call carries is never believed
 (`stamp-not-from-agora`). A descriptor the check doesn't admit reads as no reads. The rule lifts for a caller whose

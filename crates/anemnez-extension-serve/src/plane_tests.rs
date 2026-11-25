@@ -132,7 +132,12 @@ fn a_carried_call_reaches_reads_only() {
         let path = format!("/anemnez.extension.v1.Events/{events}");
         assert_eq!(carried_admits(Role::Carried, &path, &reads), Err(CARRIED_WRITE_UNBOUND), "the log: {path}");
     }
-    assert_eq!(carried_admits(Role::Carried, "/anemnez.extension.v1.Health/Get", &reads), Ok(()), "Health");
+    // Health is no read any carried call reaches: only a house-signed one, by plane_admits (D m/33851).
+    assert_eq!(
+        carried_admits(Role::Carried, "/anemnez.extension.v1.Health/Get", &reads),
+        Err(CARRIED_WRITE_UNBOUND),
+        "Health"
+    );
     assert_eq!(carried_admits(Role::Carried, WRITE, &Reads::default()), Err(CARRIED_WRITE_UNBOUND), "no reads known");
     for role in [Role::Other, Role::Agora] {
         assert_eq!(carried_admits(role, WRITE, &reads), Ok(()), "{role:?} is not carried");
@@ -639,4 +644,25 @@ fn methods_named_of_an_unchecked_descriptor_are_refused_as_unchecked_with_the_ch
         ClaimedMethods::of(&[], &[LAND], |_| true).map(|_| ()),
         Err((CLAIMED_METHOD_NOT_A_READ_OR_WRITE, LAND.to_owned()))
     );
+}
+
+/// D m/33851: a carried call reaches the contract's Health only from a proven, house-signed caller: absent (no preface,
+/// or no code in it) is unproven, another team is untrusted, and any house identity is admitted with no allow-list, a
+/// stamp unread. Describe stays any carried call's read, and a direct caller of Health is judged as before.
+#[test]
+fn a_carried_health_ask_is_admitted_only_from_a_house_signed_caller() {
+    use anemnez_extension::peer::{PRODUCT_CALLER_UNPROVEN, PRODUCT_CALLER_UNTRUSTED};
+    const HEALTH: &str = "/anemnez.extension.v1.Health/Get";
+    let (reads, claimed) = (Reads::default(), ClaimedMethods::default());
+    let admits = |j: &Judged, path: &str| plane_admits(Some(j), path, None, &reads, &claimed);
+    let house = anemnez_trust::ANEMNEZ_TEAM;
+    assert_eq!(admits(&carried_signed(house, "ai.anemnez.fabric"), HEALTH), Ok(None), "a house CLI, no list");
+    assert_eq!(admits(&carried_signed(house, "ai.anemnez.themisd"), HEALTH), Ok(None), "a house service");
+    assert_eq!(admits(&carried_signed("ABCDE12345", "ai.anemnez.fabric"), HEALTH), Err(PRODUCT_CALLER_UNTRUSTED));
+    assert_eq!(admits(&carried(Some("node-b")), HEALTH), Err(PRODUCT_CALLER_UNPROVEN), "no code in the preface");
+    assert_eq!(admits(&carried(None), HEALTH), Err(PRODUCT_CALLER_UNPROVEN), "no preface");
+    let stamped = plane_admits(Some(&carried(None)), HEALTH, Some(&stamp(Some("K"))), &reads, &claimed);
+    assert_eq!(stamped, Err(PRODUCT_CALLER_UNPROVEN), "a stamp proves nothing");
+    assert_eq!(admits(&carried(None), DESCRIBE), Ok(None), "Describe is any carried call's read");
+    assert_eq!(admits(&judged(Role::Other), HEALTH), Ok(None), "a direct caller, as before");
 }

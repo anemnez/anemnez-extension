@@ -64,11 +64,16 @@ pub fn api_admits(judged: Option<&Judged>, path: &str, carries_stamp: bool) -> R
     }
 }
 
-/// The contract's own faces a carried call may read: Describe and Health. Never the log's Events: Call carries
-/// hydramq-events' wire request opaquely, so whether one is a read isn't the plane's to know, and a commit or an ack
-/// through it would be a write past the descriptor's effects (E m/23165). A carried read of the log waits on a
-/// rule that decodes it, or the caller's binding.
-const FACE_READS: [&str; 2] = ["/anemnez.extension.v1.Describe/", "/anemnez.extension.v1.Health/"];
+/// The contract's own face any carried call may read: Describe. Never the log's Events: Call carries hydramq-events'
+/// wire request opaquely, so whether one is a read isn't the plane's to know, and a commit or an ack through it would
+/// be a write past the descriptor's effects (E m/23165). A carried read of the log waits on a rule that decodes it, or
+/// the caller's binding. Health is read carried only by a house-signed caller ([`HEALTH_FACE`]).
+const FACE_READS: [&str; 1] = ["/anemnez.extension.v1.Describe/"];
+
+/// The contract's Health face. A carried call reaches it only from a proven, house-signed caller (D m/33851): a
+/// Health detail can name a product's internals, and its readers are the house's own (the fabric CLI, a rollout's
+/// checks), so nothing outside the house needs it. A direct caller is judged as before.
+pub const HEALTH_FACE: &str = "/anemnez.extension.v1.Health/";
 
 /// The product's methods a carried call may reach: those its descriptor says are `read`, read once when the plane
 /// is built, never per call. A descriptor `check_descriptor` doesn't admit reads as none, so every carried call to a
@@ -200,13 +205,25 @@ pub struct ProductCaller {
 /// [`PRODUCT_CALLER_NOT_ALLOWED`] for an identifier not on the list.
 pub fn product_admits(judged: &Judged, allowed: Option<&[String]>) -> Result<ProductCaller, &'static str> {
     let Some(allowed) = allowed else { return Err(PRODUCT_CALLERS_UNNAMED) };
+    let caller = house_signed(judged)?;
+    if !allowed.contains(&caller.identity.identifier) {
+        return Err(PRODUCT_CALLER_NOT_ALLOWED);
+    }
+    Ok(caller)
+}
+
+/// The carried caller `judged`, when aegisd's preface carries its code identity and its team is the house's
+/// (anemnez-trust's anchor, never "the far aegisd said so"): the one proof both a method products call and the Health
+/// face take (rule 2). Pure.
+///
+/// # Errors
+/// [`PRODUCT_CALLER_UNPROVEN`] with no preface or no code identity in it, one meaning whatever the cause;
+/// [`PRODUCT_CALLER_UNTRUSTED`] for another team.
+pub fn house_signed(judged: &Judged) -> Result<ProductCaller, &'static str> {
     let Some(preface) = &judged.carried else { return Err(PRODUCT_CALLER_UNPROVEN) };
     let Some(identity) = &preface.code else { return Err(PRODUCT_CALLER_UNPROVEN) };
     if identity.team != anemnez_trust::ANEMNEZ_TEAM {
         return Err(PRODUCT_CALLER_UNTRUSTED);
-    }
-    if !allowed.contains(&identity.identifier) {
-        return Err(PRODUCT_CALLER_NOT_ALLOWED);
     }
     Ok(ProductCaller { node: preface.node.clone(), identity: identity.clone() })
 }
@@ -348,6 +365,8 @@ pub fn plane_admits(
     claimed: &ClaimedMethods,
 ) -> Result<Option<Claimed>, &'static str> {
     match judged {
+        // The Health face, carried: only from a proven, house-signed caller (D m/33851), never as any read.
+        Some(j) if j.role == Role::Carried && path.starts_with(HEALTH_FACE) => house_signed(j).map(|_| None),
         Some(j) if j.role == Role::Carried && claimed.lists_write(path) => carried_claim(j, stamp, claimed).map(Some),
         // A carried read is admitted as a read whatever it carries: Agora sends its stamp on every far call, so reads
         // stay location agnostic (O m/29572). Only a read its product lists has the stamp read at all, and then a
@@ -386,9 +405,13 @@ pub fn said(name: &'static str) -> String {
             "only a method the descriptor says is a read or a write may be listed for claimed lanes, never an act"
         }
         PRODUCT_CALLER_UNPROVEN => {
-            "a carried call to a method products call is admitted only when aegisd says who signed the far caller"
+            "a carried call to a method products call, or to Health, is admitted only when aegisd says who signed the \
+             far caller"
         }
-        PRODUCT_CALLER_UNTRUSTED => "a carried product caller must be signed by the house's team",
+        PRODUCT_CALLER_UNTRUSTED => {
+            "a carried caller of a method products call, or of Health, must be signed by the \
+                                     house's team"
+        }
         PRODUCT_CALLERS_UNNAMED => "a method products call admits a carried caller only once its product names who may",
         PRODUCT_CALLER_NOT_ALLOWED => "a carried product caller must be one the method's product names as its caller",
         PRODUCT_CALLERS_TWICE => "a method products call takes one list of its callers, from one place",
