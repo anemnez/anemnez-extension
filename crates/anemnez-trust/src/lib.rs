@@ -26,15 +26,19 @@ pub const IDENTIFIER_NOT_PLAIN: &str = "identifier-not-plain";
 
 /// `value`, when it is only what a signing identifier or team is made of: ASCII letters, digits, `.`, `-` and `_`, and
 /// not empty. A positive rule, so a quote, a backslash, a space or a control character can never widen the
-/// requirement it's spliced into, whatever spelling comes next.
-fn plain(value: &str) -> Result<&str, String> {
+/// requirement it's spliced into, whatever spelling comes next. The one copy (K m/35223): the release library checks
+/// each identifier it signs by this, as [`app_requirement`] does.
+///
+/// # Errors
+/// [`IDENTIFIER_NOT_PLAIN`], naming the value.
+pub fn plain(value: &str) -> Result<&str, String> {
     let ok = !value.is_empty() && value.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_'));
     if ok { Ok(value) } else { Err(format!("{IDENTIFIER_NOT_PLAIN}: {value:?} isn't a plain signing identifier")) }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ANEMNEZ_TEAM, IDENTIFIER_NOT_PLAIN, app_requirement};
+    use super::{ANEMNEZ_TEAM, IDENTIFIER_NOT_PLAIN, app_requirement, plain};
 
     /// `text` compiled by `csreq`, as fabric compares an app's designated requirement. std only: this crate takes no
     /// dependency, dev ones included.
@@ -80,6 +84,8 @@ mod tests {
             }
         }
         assert!(app_requirement("ai.anemnez.agora-cli_2", ANEMNEZ_TEAM).is_ok());
+        assert_eq!(plain("ai.anemnez.agora-cli_2"), Ok("ai.anemnez.agora-cli_2"));
+        assert!(plain("a b").is_err_and(|why| why.starts_with(IDENTIFIER_NOT_PLAIN)));
     }
 
     /// C m/32481, D m/32487: the trust anchor takes no dependency, so whatever takes it takes nothing else. Read from
