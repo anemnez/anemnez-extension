@@ -41,7 +41,10 @@ pub const STEP_WITHIN: Duration = Duration::from_secs(30);
 
 /// What a client caches of a product, as text compared byte for byte: its `instructions` (empty when it has none)
 /// and its tool list, serialized (or why its descriptor has none).
+///
+/// Non-exhaustive (M m/34106): a part added later (prompts, say) is a patch to every reader, never a broken literal.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct StaticHalf {
     pub instructions: String,
     pub tools: String,
