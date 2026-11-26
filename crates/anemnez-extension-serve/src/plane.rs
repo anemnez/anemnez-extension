@@ -8,7 +8,10 @@
 //! - a call that carries a caller's stamp from any peer but Agora is refused `stamp-not-from-agora`;
 //! - a carried call (Aegis's peer) reaches a method only when its descriptor says `read`, or one of the contract's
 //!   own Describe or Health, else it is refused `carried-write-unbound` ([`carried_admits`]; K m/23155). The log's
-//!   Events are refused to a carried call whole, since Call carries an opaque request (E m/23165);
+//!   Events/Watch is a read, bounded by progress, and its Events/Call is admitted by its request's kind, as
+//!   hydramq-events' own reader names it: read and latest reach, and anything else, a kind it can't name or bytes
+//!   it can't read included, is `carried-write-unbound`, fail closed ([`carried_call_admits`]; E m/38974, narrowing
+//!   E m/23165's "refused whole");
 //! - a carried call whose principal the SDK's carried verify bound ([`CarriedBound`] on the request, K m/29120) reaches
 //!   a method its product says it decides bound callers on itself ([`BoundDecided`], E m/36065), read, write or act,
 //!   before the claimed path and with no claim made of its stamp ([`bound_admits`]); any other method as an unbound
@@ -49,6 +52,9 @@ use anemnez_extension::teaching::{RetryClass, Teaching, Whose, status_details};
 use tonic::body::BoxBody;
 
 use crate::accepted::Judged;
+use crate::digest::{MAX_REQUEST, replay};
+use crate::journal::{CALL_METHOD, WATCH_METHOD};
+use hydramq_events::wire::RequestKind;
 
 /// The path prefix of the contract's `Describe` service, the one thing fabricd reads on the API plane.
 pub const DESCRIBE_PREFIX: &str = "/anemnez.extension.v1.Describe/";
@@ -239,10 +245,10 @@ pub fn api_admits(judged: Option<&Judged>, path: &str, carries_stamp: bool) -> R
     }
 }
 
-/// The contract's own face any carried call may read: Describe. Never the log's Events: Call carries hydramq-events'
-/// wire request opaquely, so whether one is a read isn't the plane's to know, and a commit or an ack through it would
-/// be a write past the descriptor's effects (E m/23165). A carried read of the log waits on a rule that decodes it, or
-/// the caller's binding. Health is read carried only by a house-signed caller ([`HEALTH_FACE`]).
+/// The contract's own face any carried call may read: Describe. Health is read carried only by a house-signed caller
+/// ([`HEALTH_FACE`]). The log's Watch is a read too ([`WATCH_METHOD`]), and its Call is admitted by its request's kind
+/// alone ([`carried_call_admits`]): Call carries hydramq-events' wire request opaquely, so its path doesn't say
+/// whether it reads (E m/23165, m/38974).
 const FACE_READS: [&str; 1] = ["/anemnez.extension.v1.Describe/"];
 
 /// The contract's Health face. A carried call reaches it only from a proven, house-signed caller (D m/33851): a
@@ -267,7 +273,7 @@ impl Reads {
     }
 
     pub(crate) fn reads(&self, path: &str) -> bool {
-        self.0.contains(path) || FACE_READS.iter().any(|face| path.starts_with(face))
+        self.0.contains(path) || path == WATCH_METHOD || FACE_READS.iter().any(|face| path.starts_with(face))
     }
 }
 
@@ -492,6 +498,25 @@ pub fn carried_admits(role: Role, path: &str, reads: &Reads) -> Result<(), &'sta
     match role {
         Role::Carried if !reads.reads(path) => Err(PlaneRefusal::CarriedWriteUnbound.name()),
         _ => Ok(()),
+    }
+}
+
+/// Whether a carried `Events/Call` whose buffered gRPC body is `body` may go on: only when it is one uncompressed
+/// frame holding a `CallRequest` whose request hydramq-events' own reader names a read or a latest (E m/38974, rule 2:
+/// the one reader, never a copy of its kind strings). Pure, so the rule has its rows.
+///
+/// # Errors
+/// [`CARRIED_WRITE_UNBOUND`] for any other kind, one hydramq-events adds later included, and for anything it can't
+/// read: a compressed or short body, more than one frame, a message that isn't a `CallRequest`, or bytes that aren't
+/// a request. Fail closed.
+pub fn carried_call_admits(body: &[u8]) -> Result<(), &'static str> {
+    use prost::Message as _;
+    let kind = crate::digest::one_frame(body)
+        .and_then(|message| crate::pb::CallRequest::decode(message).ok())
+        .and_then(|call| hydramq_events::wire::request_kind(&call.request).ok());
+    match kind {
+        Some(RequestKind::Read | RequestKind::Latest) => Ok(()),
+        _ => Err(PlaneRefusal::CarriedWriteUnbound.name()),
     }
 }
 
@@ -776,22 +801,29 @@ pub struct ApiPlaneService<S> {
     bound: BoundDecided,
 }
 
+type BoxFuture<T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send + 'static>>;
+
 impl<S> tower_service::Service<http::Request<BoxBody>> for ApiPlaneService<S>
 where
-    S: tower_service::Service<http::Request<BoxBody>, Response = http::Response<BoxBody>>,
+    S: tower_service::Service<http::Request<BoxBody>, Response = http::Response<BoxBody>> + Clone + Send + 'static,
     S::Future: Send + 'static,
+    S::Error: Send + 'static,
 {
     type Response = http::Response<BoxBody>;
     type Error = S::Error;
-    type Future =
-        futures_util::future::Either<std::future::Ready<Result<http::Response<BoxBody>, S::Error>>, S::Future>;
+    type Future = futures_util::future::Either<
+        std::future::Ready<Result<http::Response<BoxBody>, S::Error>>,
+        futures_util::future::Either<S::Future, BoxFuture<Result<http::Response<BoxBody>, S::Error>>>,
+    >;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
     }
 
     /// Decided before the inner service is touched, so the inner that was polled ready serves an admitted
-    /// call itself, with no clone and no box.
+    /// call itself, with no clone and no box. The one exception is a carried `Events/Call` no other rule admits: its
+    /// body is read first, as the digest layer reads it (at most [`MAX_REQUEST`]), and admitted by its request's kind
+    /// ([`carried_call_admits`]), the polled inner taken for it and a clone left in its place (tower's rule).
     fn call(&mut self, mut request: http::Request<BoxBody>) -> Self::Future {
         use futures_util::future::Either;
         let admitted = {
@@ -813,7 +845,29 @@ where
                     .map(|claimed| claimed.map(Admitted::Claimed)),
             }
         };
+        let carried_call = request.extensions().get::<Judged>().is_some_and(|j| j.role == Role::Carried)
+            && request.uri().path() == CALL_METHOD;
         match admitted {
+            Err(name) if carried_call && name == PlaneRefusal::CarriedWriteUnbound.name() => {
+                let clone = self.inner.clone();
+                let mut inner = std::mem::replace(&mut self.inner, clone);
+                Either::Right(Either::Right(Box::pin(async move {
+                    let (parts, body) = request.into_parts();
+                    let bytes = http_body_util::BodyExt::collect(http_body_util::Limited::new(body, MAX_REQUEST))
+                        .await
+                        .map(http_body_util::Collected::to_bytes)
+                        .unwrap_or_default();
+                    match carried_call_admits(&bytes) {
+                        Ok(()) => inner.call(http::Request::from_parts(parts, replay(bytes))).await,
+                        Err(name) => Ok(answer_refusal(
+                            &parts.headers,
+                            refused(name, parts.uri.path()),
+                            http::StatusCode::FORBIDDEN,
+                            None,
+                        )),
+                    }
+                })))
+            }
             Err(name) => {
                 let refused = answer_refusal(
                     request.headers(),
@@ -833,7 +887,7 @@ where
                     }
                     None => {}
                 }
-                Either::Right(self.inner.call(request))
+                Either::Right(Either::Left(self.inner.call(request)))
             }
         }
     }

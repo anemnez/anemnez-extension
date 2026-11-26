@@ -29,16 +29,20 @@ pub struct RequestDigest(pub [u8; 32]);
 /// are hashed. `None` for a compressed frame (a token-checked method takes none: the token binds the
 /// bytes the method decodes), for more or fewer than one frame, or for a short body.
 pub fn digest_frame(body: &[u8]) -> Option<RequestDigest> {
+    one_frame(body).map(|message| RequestDigest(Sha256::digest(message).into()))
+}
+
+/// The message of a buffered gRPC request body that is exactly one uncompressed frame, as received: `None` for a
+/// compressed frame, for more or fewer than one frame, or for a short body. The one frame reader, the digest's and
+/// the API plane's carried Events/Call kind (`plane::carried_call_admits`).
+pub(crate) fn one_frame(body: &[u8]) -> Option<&[u8]> {
     let (&flag, rest) = body.split_first()?;
     if flag != 0 || rest.len() < 4 {
         return None;
     }
     let (len, message) = rest.split_at(4);
     let len = u32::from_be_bytes(len.try_into().ok()?) as usize;
-    if message.len() != len {
-        return None;
-    }
-    Some(RequestDigest(Sha256::digest(message).into()))
+    (message.len() == len).then_some(message)
 }
 
 /// The layer, for `tonic::transport::Server::builder().layer(..)`, digesting requests to `paths`
@@ -115,6 +119,6 @@ where
 }
 
 /// The buffered bytes as a body again, for tonic to decode.
-fn replay(bytes: Bytes) -> BoxBody {
+pub(crate) fn replay(bytes: Bytes) -> BoxBody {
     tonic::body::boxed(Full::new(bytes).map_err(|never| match never {}))
 }

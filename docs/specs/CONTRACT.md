@@ -739,9 +739,14 @@ built from the descriptor it serves), or to the contract's own Describe. **Healt
 team is the house's (`plane::house_signed`, the one proof a method products call takes too), any house identity and no
 allow-list, since a Health detail can name a product's internals and its readers are the house's own; absent is
 `product-caller-unproven` and another team `product-caller-untrusted`, a stamp unread. A direct caller is judged as
-before. Anything else is refused
-`carried-write-unbound` by name, the log's Events included, since Call carries hydramq-events' request opaquely and a
-commit or ack through it would be a write (E m/23165), and a stamp a carried call carries is never believed
+before. **The log's face, carried, is read by its request's kind** (E m/38974, narrowing E m/23165's "refused
+whole"): `Events/Watch` is a read, bounded by progress as any watch is; `Events/Call` carries hydramq-events' request
+opaquely, so the plane reads that request's kind with hydramq-events' own reader (`wire::request_kind`, rule 2), the
+body buffered as the digest buffers it, and admits a read or a latest only (`plane::carried_call_admits`). Any other
+kind, one a later build adds included, and anything the reader can't read (a compressed, short or second frame, a
+message that isn't a `CallRequest`, bytes that aren't a request) is `carried-write-unbound`, fail closed, before any
+service sees it. The Journal's `Events/Events` is no read here. Anything else is refused
+`carried-write-unbound` by name, and a stamp a carried call carries is never believed
 (`stamp-not-from-agora`). A descriptor the check doesn't admit reads as no reads. The rule lifts for a caller whose
 principal is bound through Aegis, on the methods its product decides (`a-bound-carried-call-reaches-a-method-its-product-decides`,
 below), and never before, but for

@@ -11,10 +11,12 @@ use anemnez_extension::peer::{
 };
 
 use crate::accepted::{Accepted, Judged};
+use crate::journal::{CALL_METHOD, EVENTS_METHOD, WATCH_METHOD};
 use crate::pb;
 use crate::plane::{
     ApiPlaneLayer, BoundDecided, CarriedBound, Claimed, ClaimedMethods, ClaimedWrites, PLANE_REFUSALS, Reads,
-    api_admits, bound_admits, carried_admits, carried_claim, plane_admits, refused, said, said_on, stamp_bytes, taught,
+    api_admits, bound_admits, carried_admits, carried_call_admits, carried_claim, plane_admits, refused, said, said_on,
+    stamp_bytes, taught,
 };
 use crate::serve_tests::{land_descriptor_as, land_descriptor_in, land_descriptor_with};
 
@@ -129,9 +131,11 @@ fn a_carried_call_reaches_reads_only() {
     assert_eq!(carried_admits(Role::Carried, FUNCTIONAL, &reads), Ok(()), "a read");
     assert_eq!(carried_admits(Role::Carried, WRITE, &reads), Err(CARRIED_WRITE_UNBOUND), "a write");
     assert_eq!(carried_admits(Role::Carried, DESCRIBE, &reads), Ok(()), "the contract's faces");
-    for events in ["Events", "Call", "Watch"] {
-        let path = format!("/anemnez.extension.v1.Events/{events}");
-        assert_eq!(carried_admits(Role::Carried, &path, &reads), Err(CARRIED_WRITE_UNBOUND), "the log: {path}");
+    // The log's Watch is a read, bounded by progress; its Call is admitted by its request's kind alone, past this
+    // rule (carried_call_admits, E m/38974); the Journal's Events stream is no read here.
+    assert_eq!(carried_admits(Role::Carried, WATCH_METHOD, &reads), Ok(()), "the log's Watch");
+    for path in [CALL_METHOD, EVENTS_METHOD] {
+        assert_eq!(carried_admits(Role::Carried, path, &reads), Err(CARRIED_WRITE_UNBOUND), "the log: {path}");
     }
     // Health is no read any carried call reaches: only a house-signed one, by plane_admits (D m/33851).
     assert_eq!(
@@ -753,4 +757,138 @@ fn a_carried_health_ask_is_admitted_only_from_a_house_signed_caller() {
     assert_eq!(stamped, Err(PRODUCT_CALLER_UNPROVEN), "a stamp proves nothing");
     assert_eq!(admits(&carried(None), DESCRIBE), Ok(None), "Describe is any carried call's read");
     assert_eq!(admits(&judged(Role::Other), HEALTH), Ok(None), "a direct caller, as before");
+}
+
+// ── A carried Events/Call, admitted by its request's kind (E m/38974) ──────────────────────────────────────────
+
+/// `message` as one uncompressed gRPC frame, as a client sends it.
+fn framed(message: &[u8]) -> Vec<u8> {
+    let mut body = vec![0];
+    body.extend_from_slice(&u32::try_from(message.len()).expect("small").to_be_bytes());
+    body.extend_from_slice(message);
+    body
+}
+
+/// An Events/Call body carrying `request`, framed.
+fn call_body(request: Vec<u8>) -> Vec<u8> {
+    use prost::Message as _;
+    framed(&pb::CallRequest { request }.encode_to_vec())
+}
+
+/// A hydramq-message request of `kind`, as a newer or hostile build might send: the one hydramq-events can't name.
+fn request_of_kind(kind: &'static str) -> Vec<u8> {
+    use hydramq_message::{Message, Symbol, Value};
+    let body = vec![(Symbol::from("log"), Value::String("horaid@studio".to_owned().into()))];
+    let m = Message { kind: Some(kind.into()), body: Some(Value::Struct(body)), ..Message::default() };
+    hydramq_message::encode_message_canonical(&m).expect("encodes")
+}
+
+/// The kinds hydramq-events' own reader names a read reach; every other kind, and anything it can't read, is
+/// carried-write-unbound, fail closed: a watch through Call, a commit or ack a later build may add, an empty request,
+/// bytes that aren't a request, a compressed frame, two frames, a short body, a message that isn't a CallRequest.
+#[test]
+fn a_carried_call_is_admitted_by_its_requests_kind_and_nothing_else() {
+    use hydramq_events::Position;
+    use hydramq_events::wire::{latest_request, latest_request_in, read_request, watch_request};
+    let at = Position { log: "horaid@studio".into(), offset: 0 };
+    let read = call_body(read_request(&at, 10, std::time::Duration::ZERO).expect("asks"));
+    assert_eq!(carried_call_admits(&read), Ok(()), "a read");
+    assert_eq!(carried_call_admits(&call_body(latest_request("train/").expect("asks"))), Ok(()), "a latest");
+    let latest_in = call_body(latest_request_in(Some("horaid@studio"), "train/").expect("asks"));
+    assert_eq!(carried_call_admits(&latest_in), Ok(()), "a latest in a named log");
+
+    let watch = call_body(watch_request(&at, 10, std::time::Duration::from_secs(5)).expect("asks"));
+    assert_eq!(carried_call_admits(&watch), Err(CARRIED_WRITE_UNBOUND), "a watch belongs on Watch, not Call");
+    for kind in ["hydramq.events.commit", "hydramq.events.ack", "hydramq.events.read2", ""] {
+        assert_eq!(carried_call_admits(&call_body(request_of_kind(kind))), Err(CARRIED_WRITE_UNBOUND), "{kind:?}");
+    }
+    let mut compressed = read.clone();
+    compressed[0] = 1;
+    let two_frames = [read.clone(), read.clone()].concat();
+    let malformed: [(&str, Vec<u8>); 7] = [
+        ("an empty request", call_body(Vec::new())),
+        ("bytes that aren't a request", call_body(b"not a request".to_vec())),
+        ("an empty body", Vec::new()),
+        ("a compressed frame", compressed),
+        ("two frames", two_frames),
+        ("a short body", read[..read.len() - 1].to_vec()),
+        ("not a CallRequest", framed(&[0xff, 0xff, 0xff])),
+    ];
+    for (what, body) in malformed {
+        assert_eq!(carried_call_admits(&body), Err(CARRIED_WRITE_UNBOUND), "{what}");
+    }
+}
+
+/// What the service behind the plane received of a call: its body's bytes, or None when the plane refused first.
+#[derive(Clone, Default)]
+struct Body(std::sync::Arc<std::sync::Mutex<Option<Vec<u8>>>>);
+
+impl tower_service::Service<http::Request<tonic::body::BoxBody>> for Body {
+    type Response = http::Response<tonic::body::BoxBody>;
+    type Error = std::convert::Infallible;
+    type Future = std::pin::Pin<Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+    fn poll_ready(&mut self, _: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), Self::Error>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+    fn call(&mut self, request: http::Request<tonic::body::BoxBody>) -> Self::Future {
+        let seen = std::sync::Arc::clone(&self.0);
+        Box::pin(async move {
+            use http_body_util::BodyExt as _;
+            let bytes = request.into_body().collect().await.map(|c| c.to_bytes().to_vec()).unwrap_or_default();
+            *seen.lock().expect("seen") = Some(bytes);
+            Ok(http::Response::new(tonic::body::empty_body()))
+        })
+    }
+}
+
+/// One call to `path` with `body` on a connection judged `role`, through the plane: the status and what the service
+/// behind it received.
+async fn through_the_plane(role: Role, path: &str, body: Vec<u8>) -> (http::StatusCode, Option<Vec<u8>>, String) {
+    use tower_layer::Layer as _;
+    use tower_service::Service as _;
+    let seen = Body::default();
+    let mut service = ApiPlaneLayer::new(Reads::default()).layer(seen.clone());
+    let body = crate::digest::replay(bytes::Bytes::from(body));
+    let mut request = http::Request::builder().uri(path).body(body).expect("a request");
+    request.headers_mut().insert(http::header::CONTENT_TYPE, http::HeaderValue::from_static("application/grpc"));
+    request.extensions_mut().insert(if role == Role::Carried { carried(Some("node-b")) } else { judged(role) });
+    let response = service.call(request).await.expect("answered");
+    let message =
+        tonic::Status::from_header_map(response.headers()).map(|s| s.message().to_owned()).unwrap_or_default();
+    let got = seen.0.lock().expect("seen").clone();
+    (response.status(), got, message)
+}
+
+/// End to end through the layer: a carried read or latest reaches the service with its body as sent, byte for byte;
+/// a carried commit, an unknown kind or a malformed body is refused carried-write-unbound before any service; a
+/// carried Watch is a read; a call on any other role is untouched by the rule.
+#[tokio::test]
+async fn the_layer_reads_a_carried_calls_kind_and_hands_the_service_its_bytes() {
+    use hydramq_events::Position;
+    use hydramq_events::wire::{latest_request, read_request};
+    let at = Position { log: "horaid@studio".into(), offset: 0 };
+    let read = call_body(read_request(&at, 10, std::time::Duration::ZERO).expect("asks"));
+    let (status, got, _) = through_the_plane(Role::Carried, CALL_METHOD, read.clone()).await;
+    assert_eq!((status, got), (http::StatusCode::OK, Some(read)), "a read reaches, its bytes intact");
+    let latest = call_body(latest_request("train/").expect("asks"));
+    let (status, got, _) = through_the_plane(Role::Carried, CALL_METHOD, latest.clone()).await;
+    assert_eq!((status, got), (http::StatusCode::OK, Some(latest)), "a latest reaches");
+
+    let refused_bodies = [
+        call_body(request_of_kind("hydramq.events.commit")),
+        call_body(request_of_kind("hydramq.events.ack")),
+        call_body(b"not a request".to_vec()),
+        Vec::new(),
+    ];
+    for body in refused_bodies {
+        let (status, got, message) = through_the_plane(Role::Carried, CALL_METHOD, body.clone()).await;
+        assert_eq!((status, got), (http::StatusCode::OK, None), "refused before any service: {body:?}");
+        assert!(message.starts_with("carried-write-unbound: "), "said by name: {message}");
+    }
+
+    let (status, got, _) = through_the_plane(Role::Carried, WATCH_METHOD, b"w".to_vec()).await;
+    assert_eq!((status, got), (http::StatusCode::OK, Some(b"w".to_vec())), "a carried Watch is a read");
+    let commit = call_body(request_of_kind("hydramq.events.commit"));
+    let (status, got, _) = through_the_plane(Role::Other, CALL_METHOD, commit.clone()).await;
+    assert_eq!((status, got), (http::StatusCode::OK, Some(commit)), "a direct caller is judged as before");
 }
