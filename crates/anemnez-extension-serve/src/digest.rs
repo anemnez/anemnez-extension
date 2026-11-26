@@ -13,6 +13,9 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
+use std::time::Duration;
+
+use anemnez_clock::Clock;
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full, Limited};
 use sha2::{Digest, Sha256};
@@ -20,6 +23,58 @@ use tonic::body::BoxBody;
 
 /// The largest request a token-checked method is buffered for: tonic's default decode limit.
 pub const MAX_REQUEST: usize = 4 * 1024 * 1024;
+
+/// The longest a buffered request's body may take to arrive, once its headers have (D m/40788, rule 4): a caller that
+/// sends headers and then trickles or withholds the body holds a task and a stream, so past this it is refused
+/// [`REQUEST_UNREAD`], never waited on for good.
+pub const BODY_WITHIN: Duration = Duration::from_secs(10);
+
+/// The refusal of a request whose body didn't arrive within [`BODY_WITHIN`]: the same call, later.
+pub const REQUEST_UNREAD: &str = "request-unread";
+
+/// The clock a layer waits on for a body, when it has one. A layer built without one waits as it always did (the
+/// digest) or refuses what it would buffer (the API plane's carried Events/Call), so the bound is the server's.
+#[derive(Clone, Default)]
+pub(crate) struct BodyClock(pub(crate) Option<Clock>);
+
+impl std::fmt::Debug for BodyClock {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(if self.0.is_some() { "BodyClock(bound)" } else { "BodyClock(none)" })
+    }
+}
+
+/// Why a body couldn't be buffered.
+#[derive(Debug)]
+pub(crate) enum Unbuffered {
+    /// Past [`MAX_REQUEST`], or the body failed as it was read.
+    Unreadable,
+    /// Not whole within [`BODY_WITHIN`] on the layer's clock.
+    Unread,
+}
+
+/// The whole of `body`, at most [`MAX_REQUEST`] and, on `clock`, within [`BODY_WITHIN`]: the one buffer the digest and
+/// the API plane read a request through (rule 2), so its bounds are kept once.
+pub(crate) async fn buffered(body: BoxBody, clock: &BodyClock) -> Result<Bytes, Unbuffered> {
+    let collect = Limited::new(body, MAX_REQUEST).collect();
+    let collected = match &clock.0 {
+        Some(clock) => clock.timeout(BODY_WITHIN, collect).await.map_err(|_| Unbuffered::Unread)?,
+        None => collect.await,
+    };
+    collected.map(http_body_util::Collected::to_bytes).map_err(|_| Unbuffered::Unreadable)
+}
+
+/// [`Unbuffered::Unread`] as gRPC answers it: UNAVAILABLE, the house-form message, and its teaching (the same call,
+/// later; the caller's to resend).
+#[must_use]
+pub fn unread() -> tonic::Status {
+    use anemnez_extension::teaching::{Recovery, Teaching, Whose, status_details};
+    let said = format!("{REQUEST_UNREAD}: the request's body didn't arrive within {BODY_WITHIN:?}; send it again");
+    let expected = format!("a request's whole body within {BODY_WITHIN:?} of its headers");
+    let after_ms = u64::try_from(BODY_WITHIN.as_millis()).unwrap_or(u64::MAX);
+    let teaching = Teaching::failed(REQUEST_UNREAD, expected, Recovery::Later { after_ms }, Whose::Caller);
+    let details = status_details(tonic::Code::Unavailable as i32, &said, &teaching);
+    tonic::Status::with_details(tonic::Code::Unavailable, said, Bytes::from(details))
+}
 
 /// SHA-256 of a request message's bytes as received, in the request's extensions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,6 +105,7 @@ pub(crate) fn one_frame(body: &[u8]) -> Option<&[u8]> {
 #[derive(Clone)]
 pub struct DigestLayer {
     paths: Arc<HashSet<String>>,
+    clock: BodyClock,
 }
 
 impl DigestLayer {
@@ -59,7 +115,13 @@ impl DigestLayer {
         I: IntoIterator<Item = P>,
         P: Into<String>,
     {
-        DigestLayer { paths: Arc::new(paths.into_iter().map(Into::into).collect()) }
+        DigestLayer { paths: Arc::new(paths.into_iter().map(Into::into).collect()), clock: BodyClock::default() }
+    }
+
+    /// The same, each body read within [`BODY_WITHIN`] on `clock`, past it refused [`REQUEST_UNREAD`] (D m/40788).
+    #[must_use]
+    pub fn reading_on(self, clock: Clock) -> DigestLayer {
+        DigestLayer { clock: BodyClock(Some(clock)), ..self }
     }
 }
 
@@ -67,7 +129,7 @@ impl<S> tower_layer::Layer<S> for DigestLayer {
     type Service = DigestService<S>;
 
     fn layer(&self, inner: S) -> DigestService<S> {
-        DigestService { inner, paths: Arc::clone(&self.paths) }
+        DigestService { inner, paths: Arc::clone(&self.paths), clock: self.clock.clone() }
     }
 }
 
@@ -76,6 +138,7 @@ impl<S> tower_layer::Layer<S> for DigestLayer {
 pub struct DigestService<S> {
     inner: S,
     paths: Arc<HashSet<String>>,
+    clock: BodyClock,
 }
 
 type BoxFuture<T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send + 'static>>;
@@ -101,14 +164,16 @@ where
         if !self.paths.contains(request.uri().path()) {
             return Box::pin(inner.call(request));
         }
+        let clock = self.clock.clone();
         Box::pin(async move {
             let (mut parts, body) = request.into_parts();
-            let bytes = match Limited::new(body, MAX_REQUEST).collect().await {
-                Ok(collected) => collected.to_bytes(),
-                Err(_) => {
+            let bytes = match buffered(body, &clock).await {
+                Ok(bytes) => bytes,
+                Err(Unbuffered::Unreadable) => {
                     let refused = tonic::Status::resource_exhausted("request too large to verify");
                     return Ok(refused.into_http());
                 }
+                Err(Unbuffered::Unread) => return Ok(unread().into_http()),
             };
             if let Some(digest) = digest_frame(&bytes) {
                 parts.extensions.insert(digest);
