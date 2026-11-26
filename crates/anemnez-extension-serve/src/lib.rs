@@ -35,7 +35,7 @@ pub mod watch;
 
 pub use accepted::{Accepted, Judged, PeerToken, judged, peer_token};
 pub use describe::Describe;
-pub use digest::{BODY_WITHIN, DigestLayer, REQUEST_UNREAD, RequestDigest};
+pub use digest::{BODY_WITHIN, DigestLayer, REQUEST_TOO_LARGE, REQUEST_UNREAD, RequestDigest};
 pub use edge::FileNonces;
 pub use health::Board;
 pub use journal::{

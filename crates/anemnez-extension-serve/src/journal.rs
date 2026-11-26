@@ -457,6 +457,12 @@ impl pb::events_server::Events for EventsService {
         &self,
         request: tonic::Request<pb::EventsRequest>,
     ) -> Result<tonic::Response<Self::EventsStream>, tonic::Status> {
+        // A Journal's stream is no read a carried caller reaches (E m/40801): the plane admits a carried Events/Events
+        // as the log face's one bounded read, and the retiring Journal, a held stream, refuses it by name.
+        if crate::accepted::judged(&request).is_some_and(|j| j.role == anemnez_extension::peer::Role::Carried) {
+            let name = crate::plane::PlaneRefusal::CarriedWriteUnbound.name();
+            return Err(crate::plane::refused(name, EVENTS_METHOD));
+        }
         // A stream admitted without a token (the rollout rule) still ends within a token's life, so
         // it re-opens, and is checked again, at least that often.
         let checked = self.verifier.check_grpc(EVENTS_METHOD, &request).await;

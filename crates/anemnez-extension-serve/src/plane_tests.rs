@@ -131,12 +131,12 @@ fn a_carried_call_reaches_reads_only() {
     assert_eq!(carried_admits(Role::Carried, FUNCTIONAL, &reads), Ok(()), "a read");
     assert_eq!(carried_admits(Role::Carried, WRITE, &reads), Err(CARRIED_WRITE_UNBOUND), "a write");
     assert_eq!(carried_admits(Role::Carried, DESCRIBE, &reads), Ok(()), "the contract's faces");
-    // The log's Watch is a read, bounded by progress; its Call is admitted by its request's kind alone, past this
-    // rule (carried_call_admits, E m/38974); the Journal's Events stream is no read here.
+    // The log's Watch is a read, bounded by progress, and so is Events/Events, the log face's one bounded read (E
+    // m/40801; a Journal face refuses a carried caller itself); its Call is admitted by its request's kind alone, past
+    // this rule (carried_call_admits, E m/38974).
     assert_eq!(carried_admits(Role::Carried, WATCH_METHOD, &reads), Ok(()), "the log's Watch");
-    for path in [CALL_METHOD, EVENTS_METHOD] {
-        assert_eq!(carried_admits(Role::Carried, path, &reads), Err(CARRIED_WRITE_UNBOUND), "the log: {path}");
-    }
+    assert_eq!(carried_admits(Role::Carried, EVENTS_METHOD, &reads), Ok(()), "the log's Events");
+    assert_eq!(carried_admits(Role::Carried, CALL_METHOD, &reads), Err(CARRIED_WRITE_UNBOUND), "Call: by kind");
     // Health is no read any carried call reaches: only a house-signed one, by plane_admits (D m/33851).
     assert_eq!(
         carried_admits(Role::Carried, "/anemnez.extension.v1.Health/Get", &reads),
@@ -964,4 +964,14 @@ async fn a_token_checked_calls_withheld_body_is_refused_at_its_bound() {
     assert_eq!(status.code(), tonic::Code::Unavailable);
     assert!(status.message().starts_with("request-unread: "), "{}", status.message());
     assert_eq!(seen.0.lock().expect("seen").clone(), None, "no service saw it");
+}
+
+/// E m/40801 (nit): a carried Events/Call whose body is past MAX_REQUEST is refused request-too-large by name, never
+/// read as a write the caller didn't ask for.
+#[tokio::test]
+async fn a_carried_calls_body_past_the_cap_is_too_large_by_name() {
+    let body = vec![0; crate::digest::MAX_REQUEST + 1];
+    let (status, got, message) = through_the_plane(Role::Carried, CALL_METHOD, body).await;
+    assert_eq!((status, got), (http::StatusCode::OK, None), "refused before any service");
+    assert!(message.starts_with("request-too-large: "), "{message}");
 }
