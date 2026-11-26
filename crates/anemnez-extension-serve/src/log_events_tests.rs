@@ -772,3 +772,87 @@ async fn an_empty_cursor_on_a_many_log_face_is_refused_naming_its_logs() {
     assert_eq!(moves.iter().map(|e| e.cursor.clone()).collect::<Vec<_>>(), ["moves:0"]);
     std::mem::forget(log_clock);
 }
+
+/// A log whose first read is served and every later one never answers until the row lets it go (its gate opens on
+/// drop, so a red row fails and never hangs): a scan the deadline cuts mid-page.
+struct StallsAfterOne {
+    log: Arc<Events>,
+    reads: std::sync::atomic::AtomicUsize,
+    entered: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+    gate: Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>,
+}
+
+/// Opens the gate when the row ends, whatever it asserted.
+struct Opens(Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>);
+
+impl Drop for Opens {
+    fn drop(&mut self) {
+        *self.0.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = true;
+        self.0.1.notify_all();
+    }
+}
+
+impl crate::log_events::Log for StallsAfterOne {
+    fn name(&self) -> &str {
+        LOG
+    }
+
+    fn with(&self, _within: Duration, read: &mut dyn FnMut(&Events)) -> Result<(), crate::log_events::Busy> {
+        if self.reads.fetch_add(1, Ordering::SeqCst) == 0 {
+            read(&self.log);
+            return Ok(());
+        }
+        if let Some(tx) = self.entered.lock().unwrap().take() {
+            let _ = tx.send(());
+        }
+        let (open, rung) = &*self.gate;
+        let mut opened = open.lock().unwrap();
+        while !*opened {
+            opened = rung.wait(opened).unwrap();
+        }
+        Err(crate::log_events::Busy("let go at the row's end".into()))
+    }
+}
+
+/// D m/40669: a kind-filtered scan whose next page's read the deadline cuts short still names where to read on (the
+/// last scanned cursor), never read_once's bare unanswered, so a caller never re-scans the same run for ever.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_scan_the_deadline_cuts_mid_read_names_where_to_read_on() {
+    use crate::log_events::FACE_WITHIN;
+    const HANG: Duration = Duration::from_secs(60);
+    let f = fixture();
+    let body = hydramq_events::body("minion.decided", &[]).expect("encodes");
+    for n in 0..hydramq_events::wire::WATCH_MAX + 5 {
+        f.log.publish_next(&format!("noise/{n}"), "noise", &body, 1).expect("published");
+    }
+    let gate = Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
+    let _opens = Opens(Arc::clone(&gate));
+    let (entered_tx, entered) = tokio::sync::oneshot::channel();
+    let stalls = StallsAfterOne {
+        log: Arc::clone(&f.log),
+        reads: std::sync::atomic::AtomicUsize::new(0),
+        entered: std::sync::Mutex::new(Some(entered_tx)),
+        gate: Arc::clone(&gate),
+    };
+    let verifier = crate::principal_tests::verifier(&f.manual, true);
+    let face = Arc::new(LogEvents::over(Arc::new(stalls), verifier, Authorize::allow_all(), f.manual.clock()));
+    let admitted = f.manual.now();
+    let asking = Arc::clone(&face);
+    let mut call = tokio::spawn(async move {
+        let request = pb::EventsRequest { after: String::new(), kinds: vec!["decided".to_owned()] };
+        asking.events(tonic::Request::new(request)).await.map(|_| ())
+    });
+    let system = anemnez_clock::Clock::system();
+    assert!(system.timeout(HANG, entered).await.is_ok(), "the second page's read began");
+    f.manual.advance_to(admitted + FACE_WITHIN).await;
+    let ended = system.timeout(HANG, &mut call).await.expect("ended by the deadline").expect("joined");
+    let told = ended.expect_err("cut short");
+    let last = hydramq_events::wire::WATCH_MAX - 1;
+    assert_eq!(told.code(), tonic::Code::Unavailable);
+    assert!(
+        told.message().starts_with("events-call-unanswered: ")
+            && told.message().ends_with(&format!("read on from after = \"{LOG}:{last}\"")),
+        "names the last scanned cursor: {}",
+        told.message()
+    );
+}

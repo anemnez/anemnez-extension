@@ -670,18 +670,28 @@ impl pb::events_server::Events for LogEvents {
         // Page by page inside the one deadline until a page holds an asked kind or the head is reached (D m/40656): a
         // page of only other kinds is never answered empty, which a caller would read as caught up at the head.
         let mut scanned: Option<Position> = None;
+        let read_on = |scanned: &Option<Position>| {
+            let on = scanned.as_ref().map_or_else(|| asked.after.clone(), log_cursor);
+            tonic::Status::unavailable(format!(
+                "{}: no event of the kinds asked within the call's {FACE_WITHIN:?}; read on from after = {on:?}",
+                refusal::EVENTS_CALL_UNANSWERED
+            ))
+        };
         let matched = loop {
             if self.left(deadline).is_zero() {
-                let on = scanned.as_ref().map_or_else(|| asked.after.clone(), log_cursor);
-                return Err(tonic::Status::unavailable(format!(
-                    "{}: no event of the kinds asked within the call's {FACE_WITHIN:?}; read on from after = {on:?}",
-                    refusal::EVENTS_CALL_UNANSWERED
-                )));
+                return Err(read_on(&scanned));
             }
             let ask = wire::read_request(&from, wire::WATCH_MAX, Duration::ZERO).map_err(|e| {
                 tonic::Status::invalid_argument(format!("the cursor {:?} can't be asked: {e}", asked.after))
             })?;
-            let reply = self.read_once(ask, deadline).await?;
+            // A page's read the deadline cuts short says where to read on too, once a page was scanned (D m/40669):
+            // else a caller retries from its first cursor and re-scans the same run every time.
+            let reply = match self.read_once(ask, deadline).await {
+                Err(cut) if scanned.is_some() && cut.message().starts_with(refusal::EVENTS_CALL_UNANSWERED) => {
+                    return Err(read_on(&scanned));
+                }
+                read => read?,
+            };
             match wire::read_reply(&reply) {
                 Ok(Read::Events { events, next }) => {
                     let page_ended = events.is_empty();
