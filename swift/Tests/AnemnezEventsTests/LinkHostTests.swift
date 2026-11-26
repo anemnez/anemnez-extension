@@ -149,4 +149,16 @@ private func ran(_ transport: Scripted) async -> (said: [LinkAction], from: [Str
         let down = EventsFace.failure("Events/Call", EventsFace.callUnserved, RPCError(code: .unavailable, message: "gone"))
         #expect(down == .unclear("Events/Call: unavailable: gone"))
     }
+
+    /// The four names are the crate's own, read from the shared vector a Rust row holds to its constants (D m/38356).
+    @Test func theFaceNamesAreTheCratesOwn() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let data = try Data(contentsOf: root.appendingPathComponent("testdata/events-envelope.json"))
+        let vector = try JSONSerialization.jsonObject(with: data) as! [String: String]
+        #expect(vector["face_end_key"] == EventsFace.endKey)
+        #expect(vector["face_watch_renew"] == EventsFace.renewValue)
+        #expect(vector["face_events_call_unserved"] == EventsFace.callUnserved)
+        #expect(vector["face_watch_unserved"] == EventsFace.watchUnserved)
+    }
 }

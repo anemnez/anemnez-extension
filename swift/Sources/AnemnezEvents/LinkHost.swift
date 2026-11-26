@@ -62,8 +62,9 @@ public actor LinkHost<C: Clock<Duration>> {
     /// What the link says: `up`, `down(why)` and `events`, in order, for the consumer.
     public nonisolated let said: AsyncStream<LinkAction>
     private let saying: AsyncStream<LinkAction>.Continuation
-    /// The one stream out, by its number: a close cancels it.
-    private var streams: [UInt64: Task<Void, Never>] = [:]
+    /// The read or stream out, by its number: a close cancels it, a newer one cancels any older (only the one out is
+    /// in flight), and run()'s end cancels all (M m/38357).
+    private var inFlight: [UInt64: Task<Void, Never>] = [:]
 
     public init(link: WatchLink, codec: any EventsCodec, transport: any EventsTransport, clock: C) {
         self.link = link
@@ -80,18 +81,22 @@ public actor LinkHost<C: Clock<Duration>> {
     public func run() async {
         var deadline: Task<Void, Never>?
         for await input in inbox {
-            let event: LinkEvent =
-                switch input {
-                case let .event(event): event
-                case let .renewed(seq): .frame(seq: seq, .renew(next: link.at ?? Position(log: "", offset: 0)))
-                }
+            let event: LinkEvent
+            switch input {
+            case let .event(given): event = given
+            case let .renewed(seq):
+                // A renewal steps with the link's own cursor. Only the stream out counts, and one out always has a
+                // cursor; without one, there is nothing to resume, so nothing is made up (D m/38356).
+                guard let at = link.at else { continue }
+                event = .frame(seq: seq, .renew(next: at))
+            }
             for action in link.step(event, now: now()) { start(action) }
             deadline?.cancel()
             deadline = link.deadline().map(arm)
             if Task.isCancelled { break }
         }
         deadline?.cancel()
-        for stream in streams.values { stream.cancel() }
+        for task in inFlight.values { task.cancel() }
         saying.finish()
     }
 
@@ -111,9 +116,10 @@ public actor LinkHost<C: Clock<Duration>> {
         case .up, .down, .events:
             saying.yield(action)
         case let .close(seq):
-            streams.removeValue(forKey: seq)?.cancel()
+            inFlight.removeValue(forKey: seq)?.cancel()
         case let .latest(prefix, seq):
-            Task {
+            supersede(below: seq)
+            inFlight[seq] = Task {
                 do throws(EventsFailure) {
                     let reply = try await transport.call(try codec.latestRequest(prefix: prefix))
                     let (events, asOf) = try codec.latestReply(reply)
@@ -123,7 +129,8 @@ public actor LinkHost<C: Clock<Duration>> {
                 }
             }
         case let .open(from, beat, seq):
-            streams[seq] = Task {
+            supersede(below: seq)
+            inFlight[seq] = Task {
                 do throws(EventsFailure) {
                     let end = try await transport.watch(
                         try codec.watchRequest(from: from, beat: beat),
@@ -143,6 +150,14 @@ public actor LinkHost<C: Clock<Duration>> {
                     inputs.yield(.event(Self.failed(seq, error)))
                 }
             }
+        }
+    }
+
+    /// Cancel every read or stream numbered below `seq`: the link awaits only the one it just asked.
+    private func supersede(below seq: UInt64) {
+        for (older, task) in inFlight where older < seq {
+            task.cancel()
+            inFlight[older] = nil
         }
     }
 

@@ -38,3 +38,21 @@ fn the_envelope_vector_is_what_prost_encodes() {
     let empty = pb::CallRequest { request: Vec::new() }.encode_to_vec();
     assert_eq!(said("empty_payload_hex"), hex(&empty), "an empty payload is proto3's empty message");
 }
+
+/// The face's four names, as the Swift transport spells them (GRPCEventsTransport's EventsFace), are the crate's own
+/// constants (D m/38356, M m/38357): a drifted name would read an unserved face as a plain failure, quietly.
+#[test]
+fn the_face_names_are_the_crates_own() {
+    use anemnez_extension::refusal::{END_METADATA_KEY, EVENTS_CALL_UNSERVED, WATCH_RENEW, WATCH_UNSERVED};
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../testdata/events-envelope.json");
+    let vector: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(path).expect("the shared vector")).expect("json");
+    for (key, name) in [
+        ("face_end_key", END_METADATA_KEY),
+        ("face_watch_renew", WATCH_RENEW),
+        ("face_events_call_unserved", EVENTS_CALL_UNSERVED),
+        ("face_watch_unserved", WATCH_UNSERVED),
+    ] {
+        assert_eq!(vector[key].as_str(), Some(name), "{key} is the crate's {name}");
+    }
+}
