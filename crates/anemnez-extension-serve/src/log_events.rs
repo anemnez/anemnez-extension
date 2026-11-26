@@ -690,6 +690,14 @@ impl pb::events_server::Events for LogEvents {
                 Err(cut) if scanned.is_some() && cut.message().starts_with(refusal::EVENTS_CALL_UNANSWERED) => {
                     return Err(read_on(&scanned));
                 }
+                // Busy keeps its own name, retryable, and says where to read on too (D m/40700).
+                Err(busy) if scanned.is_some() && busy.message().starts_with(refusal::EVENTS_CALL_BUSY) => {
+                    let on = scanned.as_ref().map(log_cursor).unwrap_or_default();
+                    return Err(tonic::Status::new(
+                        busy.code(),
+                        format!("{}; read on from after = {on:?}", busy.message()),
+                    ));
+                }
                 read => read?,
             };
             match wire::read_reply(&reply) {
