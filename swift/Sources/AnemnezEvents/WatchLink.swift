@@ -119,6 +119,9 @@ public struct WatchLink: Equatable, Sendable {
     public private(set) var state: LinkState = .idle
     /// The number of the last read or stream asked for.
     public private(set) var seq: UInt64 = 0
+    /// Whether `up` was said since the last `down`: a renewal reopens without saying either, so its consumer (which
+    /// may re-list everything on up) hears one `up` per return, never one per token life (M m/38173).
+    public private(set) var saidUp = false
 
     public init(prefix: String, beat: Duration = .seconds(10)) {
         self.prefix = prefix
@@ -168,7 +171,7 @@ public struct WatchLink: Equatable, Sendable {
         case let .opened(seq):
             guard case let .opening(from, _, out, _) = state, out == seq else { break }
             state = .up(at: from, silentBy: now + silence, seq: seq)
-            actions.append(.up)
+            sayUp(into: &actions)
         case let .frame(seq, frame):
             let at: Position
             switch state {
@@ -177,7 +180,7 @@ public struct WatchLink: Equatable, Sendable {
                 // A beat or events is the stream's answer as surely as its open: it's up. A renewal or a compaction
                 // ends it before it was ever up, so neither says up.
                 switch frame {
-                case .beat, .events: actions.append(.up)
+                case .beat, .events: sayUp(into: &actions)
                 case .renew, .compacted: break
                 }
             case let .up(cursor, _, out) where out == seq:
@@ -202,6 +205,11 @@ public struct WatchLink: Equatable, Sendable {
     /// The invariants a walk checks after every step.
     public func check() -> String? {
         if let out, out > seq { return "stream or read \(out) is numbered past the last asked, \(seq)" }
+        switch state {
+        case .up: if !saidUp { return "up without having said up" }
+        case .down, .refused, .latest, .idle: if saidUp { return "said up while not up nor reopening" }
+        case .opening: break
+        }
         return nil
     }
 
@@ -222,9 +230,19 @@ public struct WatchLink: Equatable, Sendable {
         case .compacted:
             // What lay below the floor is gone: say so, and read each subject's latest by value, never skip silently.
             actions.append(.close(seq: seq))
-            actions.append(.down("compacted past this watch"))
+            sayDown("compacted past this watch", into: &actions)
             latest(misses: 0, now: now, into: &actions)
         }
+    }
+
+    private mutating func sayUp(into actions: inout [LinkAction]) {
+        if !saidUp { actions.append(.up) }
+        saidUp = true
+    }
+
+    private mutating func sayDown(_ why: String, into actions: inout [LinkAction]) {
+        actions.append(.down(why))
+        saidUp = false
     }
 
     /// The cursor moved to `next`, unless that's behind it: it never moves back.
@@ -253,7 +271,7 @@ public struct WatchLink: Equatable, Sendable {
             case .idle, .down, .refused: (0, nil)
             }
         if let stream { actions.append(.close(seq: stream)) }
-        actions.append(.down(why))
+        sayDown(why, into: &actions)
         state = refused
             ? .refused(why: why, retryAt: now + Backoff.atMost, at: at)
             : .down(why: why, retryAt: now + Backoff.after(misses: misses + 1), misses: misses + 1, at: at)
