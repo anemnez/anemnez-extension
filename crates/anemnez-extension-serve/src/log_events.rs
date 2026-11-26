@@ -34,7 +34,7 @@ use anemnez_clock::{Clock, Mono};
 use anemnez_extension::refusal;
 use futures_util::Stream;
 use hydramq_events::wire::{self, HOP_MARGIN, Stopper, WITHIN_MAX};
-use hydramq_events::{Events, Position, Read};
+use hydramq_events::{Events, Face, Position, Read};
 use tokio::sync::Notify;
 
 use crate::accepted::Judged;
@@ -236,11 +236,50 @@ pub trait Log: Send + Sync + 'static {
         None
     }
 
+    /// The log as a face of its own, when it is served as one (O, ERGON-HA step 5): a held log, or a face over a store
+    /// that is no hydramq-events `Events`, as a replicated partition's `PartitionEvents` is. A Call reads it and a Watch
+    /// streams from it as a held log; None is read through [`crate::reread::ReRead`]. Its default is [`Log::held`], so
+    /// a [`Log`] written before it is unchanged (readers first).
+    fn face(&self) -> Option<Arc<dyn Face>> {
+        self.held().map(|events| events as Arc<dyn Face>)
+    }
+
     /// What tells a wait the log changed, for a log opened per read: its owner bumps it on every write it learns of
     /// (horaid, from its kqueue on the stream's file, following the file through a replace: D m/31023). None waits on
     /// the bound alone (L m/31024).
     fn changes(&self) -> Option<Arc<crate::reread::Changes>> {
         None
+    }
+}
+
+/// A face served as one log of a [`LogEvents`] (O, ERGON-HA step 5): a store that is no hydramq-events `Events`, such as
+/// a replicated partition's `PartitionEvents` (hydramq-replication's `serve_events_judged`), beside a product's own
+/// logs on one face by [`LogEvents::over_many`]. It is read only as its face, so it is never opened per read.
+pub struct FaceLog(Arc<dyn Face>);
+
+impl FaceLog {
+    /// `face`, served under its own name.
+    #[must_use]
+    pub fn new(face: Arc<dyn Face>) -> FaceLog {
+        FaceLog(face)
+    }
+}
+
+impl Log for FaceLog {
+    fn name(&self) -> &str {
+        self.0.name()
+    }
+
+    fn with(&self, _within: Duration, _read: &mut dyn FnMut(&Events)) -> Result<(), Busy> {
+        Err(Busy(format!("{} is served as a face, never opened per read", self.0.name())))
+    }
+
+    fn open_with(&self, _within: Duration, _read: &mut dyn FnMut(&Events)) -> Result<(), Unopened> {
+        Err(Unopened::Unreadable(format!("{} is served as a face, never opened per read", self.0.name())))
+    }
+
+    fn face(&self) -> Option<Arc<dyn Face>> {
+        Some(Arc::clone(&self.0))
     }
 }
 

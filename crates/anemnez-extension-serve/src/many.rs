@@ -52,13 +52,13 @@ impl Faced {
 }
 
 impl Logs {
-    /// The face for one call or watch: a held log as it is, one opened per read through a [`ReRead`], several behind
-    /// a [`ManyLogs`].
+    /// The face for one call or watch: a held log or a [`crate::FaceLog`] as it is, one opened per read through a
+    /// [`ReRead`], several behind a [`ManyLogs`].
     pub fn faced(&self, open_within: Duration, clock: &Clock) -> Faced {
         let mut rereads = Vec::new();
         let mut face_of = |log: &Arc<dyn Log>| -> Arc<dyn Face> {
-            match log.held() {
-                Some(events) => events,
+            match log.face() {
+                Some(face) => face,
                 None => {
                     let reread = Arc::new(ReRead::new(Arc::clone(log), open_within, clock));
                     rereads.push(Arc::clone(&reread));
