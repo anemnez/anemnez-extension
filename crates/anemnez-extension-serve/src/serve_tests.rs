@@ -660,3 +660,25 @@ fn a_descriptors_write_is_never_a_carried_read() {
         Err(anemnez_extension::peer::CARRIED_WRITE_UNBOUND)
     );
 }
+
+/// E m/40801: a carried caller reaches Events/Events on a log face as its one bounded read; the retiring Journal's held
+/// stream refuses it by name (carried-write-unbound), and a caller of any other role opens it as before.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_journals_stream_refuses_a_carried_caller_by_name() {
+    use crate::pb::events_server::Events as _;
+    let (journal, manual) = journal(8);
+    let service = crate::journal::EventsService::new(journal, crate::principal_tests::verifier(&manual, true));
+    let code = Ok(anemnez_extension::peer::Code { identifier: "ai.anemnez.aegisd".into(), team: "TEAM1".into() });
+    let judged = |role| {
+        let peer = anemnez_extension::peer::Peer::from_token([501, 501, 20, 501, 20, 41, 100_001, 7], code.clone());
+        crate::accepted::Accepted::new((), peer, role).judged().clone()
+    };
+    let mut carried = tonic::Request::new(pb::EventsRequest::default());
+    carried.extensions_mut().insert(judged(anemnez_extension::peer::Role::Carried));
+    let refused = service.events(carried).await.err().expect("refused");
+    assert_eq!(refused.code(), tonic::Code::PermissionDenied);
+    assert!(refused.message().starts_with("carried-write-unbound: "), "{}", refused.message());
+    let mut direct = tonic::Request::new(pb::EventsRequest::default());
+    direct.extensions_mut().insert(judged(anemnez_extension::peer::Role::Other));
+    assert!(service.events(direct).await.is_ok(), "a direct caller opens it as before");
+}

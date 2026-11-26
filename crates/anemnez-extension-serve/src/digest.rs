@@ -43,10 +43,15 @@ impl std::fmt::Debug for BodyClock {
     }
 }
 
+/// The refusal of a request whose body is past [`MAX_REQUEST`]: a smaller one may be read.
+pub const REQUEST_TOO_LARGE: &str = "request-too-large";
+
 /// Why a body couldn't be buffered.
 #[derive(Debug)]
 pub(crate) enum Unbuffered {
-    /// Past [`MAX_REQUEST`], or the body failed as it was read.
+    /// Past [`MAX_REQUEST`].
+    TooLarge,
+    /// The body failed as it was read: said as [`Unbuffered::Unread`] is, the same call later.
     Unreadable,
     /// Not whole within [`BODY_WITHIN`] on the layer's clock.
     Unread,
@@ -60,7 +65,25 @@ pub(crate) async fn buffered(body: BoxBody, clock: &BodyClock) -> Result<Bytes, 
         Some(clock) => clock.timeout(BODY_WITHIN, collect).await.map_err(|_| Unbuffered::Unread)?,
         None => collect.await,
     };
-    collected.map(http_body_util::Collected::to_bytes).map_err(|_| Unbuffered::Unreadable)
+    collected.map(http_body_util::Collected::to_bytes).map_err(|e| {
+        if e.downcast_ref::<http_body_util::LengthLimitError>().is_some() {
+            Unbuffered::TooLarge
+        } else {
+            Unbuffered::Unreadable
+        }
+    })
+}
+
+/// [`Unbuffered::TooLarge`] as gRPC answers it: RESOURCE_EXHAUSTED, the house-form message, and its teaching (a smaller
+/// request may be read; the caller's), never read as a write the caller didn't ask for (E m/40801).
+#[must_use]
+pub fn too_large() -> tonic::Status {
+    use anemnez_extension::teaching::{RetryClass, Teaching, Whose, status_details};
+    let said = format!("{REQUEST_TOO_LARGE}: the request's body is past the {MAX_REQUEST} bytes read before a call");
+    let expected = format!("a request's body of at most {MAX_REQUEST} bytes");
+    let teaching = Teaching::refused(REQUEST_TOO_LARGE, expected, RetryClass::Scoped, Whose::Caller);
+    let details = status_details(tonic::Code::ResourceExhausted as i32, &said, &teaching);
+    tonic::Status::with_details(tonic::Code::ResourceExhausted, said, Bytes::from(details))
 }
 
 /// [`Unbuffered::Unread`] as gRPC answers it: UNAVAILABLE, the house-form message, and its teaching (the same call,
@@ -169,11 +192,8 @@ where
             let (mut parts, body) = request.into_parts();
             let bytes = match buffered(body, &clock).await {
                 Ok(bytes) => bytes,
-                Err(Unbuffered::Unreadable) => {
-                    let refused = tonic::Status::resource_exhausted("request too large to verify");
-                    return Ok(refused.into_http());
-                }
-                Err(Unbuffered::Unread) => return Ok(unread().into_http()),
+                Err(Unbuffered::TooLarge) => return Ok(too_large().into_http()),
+                Err(Unbuffered::Unreadable | Unbuffered::Unread) => return Ok(unread().into_http()),
             };
             if let Some(digest) = digest_frame(&bytes) {
                 parts.extensions.insert(digest);

@@ -53,7 +53,7 @@ use tonic::body::BoxBody;
 
 use crate::accepted::Judged;
 use crate::digest::{BodyClock, Unbuffered, buffered, replay};
-use crate::journal::{CALL_METHOD, WATCH_METHOD};
+use crate::journal::{CALL_METHOD, EVENTS_METHOD, WATCH_METHOD};
 use hydramq_events::wire::RequestKind;
 
 /// The path prefix of the contract's `Describe` service, the one thing fabricd reads on the API plane.
@@ -273,7 +273,10 @@ impl Reads {
     }
 
     pub(crate) fn reads(&self, path: &str) -> bool {
-        self.0.contains(path) || path == WATCH_METHOD || FACE_READS.iter().any(|face| path.starts_with(face))
+        self.0.contains(path)
+            || path == WATCH_METHOD
+            || path == EVENTS_METHOD
+            || FACE_READS.iter().any(|face| path.starts_with(face))
     }
 }
 
@@ -869,9 +872,16 @@ where
                     let (parts, body) = request.into_parts();
                     let bytes = match buffered(body, &clock).await {
                         Ok(bytes) => bytes,
-                        // Unreadable reads as no request, which no kind admits: carried-write-unbound, fail closed.
-                        Err(Unbuffered::Unreadable) => bytes::Bytes::new(),
-                        Err(Unbuffered::Unread) => {
+                        Err(Unbuffered::TooLarge) => {
+                            let large = crate::digest::too_large();
+                            return Ok(answer_refusal(
+                                &parts.headers,
+                                large,
+                                http::StatusCode::PAYLOAD_TOO_LARGE,
+                                None,
+                            ));
+                        }
+                        Err(Unbuffered::Unreadable | Unbuffered::Unread) => {
                             let unread = crate::digest::unread();
                             return Ok(answer_refusal(&parts.headers, unread, http::StatusCode::REQUEST_TIMEOUT, None));
                         }
