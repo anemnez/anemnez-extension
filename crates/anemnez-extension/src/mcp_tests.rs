@@ -201,6 +201,12 @@ fn a_flattened_name_is_one_tool() {
     );
     assert_eq!(refusals[0].name(), "name-collision");
     assert_eq!(refusals[2].name(), "reserved-name");
+    // Each says its own paths and name, so a face reads what to fix from the refusal's words (E m/41309).
+    assert_eq!(refusals[0].to_string(), "/pkg.S/GetURL and /pkg.S/GetUrl: name-collision: both flatten to get_url");
+    assert_eq!(
+        refusals[2].to_string(),
+        format!("/pkg.S/Events: reserved-name: flattens to {EVENTS_TOOL}, a reserved name")
+    );
 }
 
 /// CONTRACT.md events-flatten-to-one-bounded-read: every face has the events tool, reading the

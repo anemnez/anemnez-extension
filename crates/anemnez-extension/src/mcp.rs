@@ -105,6 +105,17 @@ impl FlattenRefusal {
     }
 }
 
+/// Each refusal says the paths it's about, its name, then why (the house's name-before-why form, M m/41343), as [`crate::descriptor::DescriptorRefusal`] does, so every face
+/// (Agora's log, a gate row) says the same words and none words them twice (E m/41309).
+impl std::fmt::Display for FlattenRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NameCollision(name, a, b) => write!(f, "{a} and {b}: {}: both flatten to {name}", self.name()),
+            Self::ReservedName(path, name) => write!(f, "{path}: {}: flattens to {name}, a reserved name", self.name()),
+        }
+    }
+}
+
 /// Why a call has no tool.
 pub const NO_SUCH_TOOL: &str = "no-such-tool";
 
