@@ -197,6 +197,7 @@ spoken_for("a-product-serves-its-own-log-through-the-face (Events, kinds read pa
 spoken_for("a-product-serves-its-own-log-through-the-face (Events, a compacted start)", "log_events_tests::a_compacted_logs_start_begins_past_its_floor_and_a_cursor_below_it_is_out_of_range")
 spoken_for("a-product-serves-its-own-log-through-the-face (Events, a many-log face)", "log_events_tests::an_empty_cursor_on_a_many_log_face_is_refused_naming_its_logs")
 spoken_for("a-product-serves-its-own-log-through-the-face (Events, a scan cut mid-read)", "log_events_tests::a_scan_the_deadline_cuts_mid_read_names_where_to_read_on")
+spoken_for("a-product-serves-its-own-log-through-the-face (Events, busy mid-scan)", "log_events_tests::a_scan_refused_busy_mid_read_names_where_to_read_on")
 spoken_for("a-call-is-bounded-by-one-deadline", "log_events_tests::a_late_authorization_leaves_the_read_only_what_remains")
 spoken_for("a-call-is-bounded-by-one-deadline (cap)", "log_events_tests::calls_past_the_cap_are_refused_at_once")
 spoken_for("a-log-watch-is-bounded-and-ends-stopped (kernel)", "watch_tests::every_exit_stops_the_wire_watch_first_and_once")

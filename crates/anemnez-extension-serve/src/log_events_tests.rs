@@ -35,7 +35,7 @@ fn fixture() -> Fixture {
             .expect("the log opens"),
     );
     // The log's clock lives as long as the log reads it; it is never advanced.
-    std::mem::forget(log_clock);
+    drop(log_clock);
     Fixture { _dir: dir, log, manual: ManualClock::new() }
 }
 
@@ -683,7 +683,7 @@ fn compacted() -> (tempfile::TempDir, Arc<Events>, ManualClock, hydramq_events::
     let log = Arc::new(
         Events::open(&dir.path().join("log"), "miniond", LOG, settings, &log_clock.clock()).expect("the log opens"),
     );
-    std::mem::forget(log_clock);
+    drop(log_clock);
     let body = hydramq_events::body("minion.decided", &[]).expect("encodes");
     let ev = |seq: u64| hydramq_events::Event {
         producer: "miniond".into(),
@@ -770,7 +770,7 @@ async fn an_empty_cursor_on_a_many_log_face_is_refused_naming_its_logs() {
     assert!(refused.message().contains("audit, moves"), "names the logs: {}", refused.message());
     let moves = events_after(&face, "moves:").await.expect("a log's own start");
     assert_eq!(moves.iter().map(|e| e.cursor.clone()).collect::<Vec<_>>(), ["moves:0"]);
-    std::mem::forget(log_clock);
+    drop(log_clock);
 }
 
 /// A log whose first read is served and every later one never answers until the row lets it go (its gate opens on
@@ -780,6 +780,8 @@ struct StallsAfterOne {
     reads: std::sync::atomic::AtomicUsize,
     entered: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
     gate: Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>,
+    /// Its later reads are busy at once, instead of never answering.
+    busy: bool,
 }
 
 /// Opens the gate when the row ends, whatever it asserted.
@@ -801,6 +803,9 @@ impl crate::log_events::Log for StallsAfterOne {
         if self.reads.fetch_add(1, Ordering::SeqCst) == 0 {
             read(&self.log);
             return Ok(());
+        }
+        if self.busy {
+            return Err(crate::log_events::Busy("its writer holds it".into()));
         }
         if let Some(tx) = self.entered.lock().unwrap().take() {
             let _ = tx.send(());
@@ -833,6 +838,7 @@ async fn a_scan_the_deadline_cuts_mid_read_names_where_to_read_on() {
         reads: std::sync::atomic::AtomicUsize::new(0),
         entered: std::sync::Mutex::new(Some(entered_tx)),
         gate: Arc::clone(&gate),
+        busy: false,
     };
     let verifier = crate::principal_tests::verifier(&f.manual, true);
     let face = Arc::new(LogEvents::over(Arc::new(stalls), verifier, Authorize::allow_all(), f.manual.clock()));
@@ -853,6 +859,35 @@ async fn a_scan_the_deadline_cuts_mid_read_names_where_to_read_on() {
         told.message().starts_with("events-call-unanswered: ")
             && told.message().ends_with(&format!("read on from after = \"{LOG}:{last}\"")),
         "names the last scanned cursor: {}",
+        told.message()
+    );
+}
+
+/// D m/40700: a page's read refused busy mid-scan keeps busy's own retryable name and says where to read on.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_scan_refused_busy_mid_read_names_where_to_read_on() {
+    let f = fixture();
+    let body = hydramq_events::body("minion.decided", &[]).expect("encodes");
+    for n in 0..hydramq_events::wire::WATCH_MAX + 5 {
+        f.log.publish_next(&format!("noise/{n}"), "noise", &body, 1).expect("published");
+    }
+    let busy = StallsAfterOne {
+        log: Arc::clone(&f.log),
+        reads: std::sync::atomic::AtomicUsize::new(0),
+        entered: std::sync::Mutex::new(None),
+        gate: Arc::new((std::sync::Mutex::new(true), std::sync::Condvar::new())),
+        busy: true,
+    };
+    let verifier = crate::principal_tests::verifier(&f.manual, true);
+    let face = LogEvents::over(Arc::new(busy), verifier, Authorize::allow_all(), f.manual.clock());
+    let request = pb::EventsRequest { after: String::new(), kinds: vec!["decided".to_owned()] };
+    let told = face.events(tonic::Request::new(request)).await.map(|_| ()).expect_err("busy");
+    let last = hydramq_events::wire::WATCH_MAX - 1;
+    assert_eq!(told.code(), tonic::Code::ResourceExhausted);
+    assert!(
+        told.message().starts_with("events-call-busy: ")
+            && told.message().ends_with(&format!("read on from after = \"{LOG}:{last}\"")),
+        "busy, and where to read on: {}",
         told.message()
     );
 }
