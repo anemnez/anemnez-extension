@@ -52,7 +52,7 @@ use anemnez_extension::teaching::{RetryClass, Teaching, Whose, status_details};
 use tonic::body::BoxBody;
 
 use crate::accepted::Judged;
-use crate::digest::{MAX_REQUEST, replay};
+use crate::digest::{BodyClock, Unbuffered, buffered, replay};
 use crate::journal::{CALL_METHOD, WATCH_METHOD};
 use hydramq_events::wire::RequestKind;
 
@@ -733,6 +733,7 @@ pub fn refused(name: &'static str, path: &str) -> tonic::Status {
 /// sees it.
 #[derive(Clone, Debug, Default)]
 pub struct ApiPlaneLayer {
+    clock: BodyClock,
     reads: Reads,
     claimed: ClaimedWrites,
     products: ProductCallers,
@@ -744,11 +745,20 @@ impl ApiPlaneLayer {
     #[must_use]
     pub fn new(reads: Reads) -> ApiPlaneLayer {
         ApiPlaneLayer {
+            clock: BodyClock::default(),
             reads,
             claimed: ClaimedWrites::default(),
             products: ProductCallers::default(),
             bound: BoundDecided::default(),
         }
+    }
+
+    /// The same, reading a carried `Events/Call`'s body within [`crate::digest::BODY_WITHIN`] on `clock`, past it refused
+    /// [`crate::digest::REQUEST_UNREAD`] (D m/40788). Without a clock, a carried `Events/Call` is refused
+    /// `carried-write-unbound` whole, as before its kind was read: the plane never waits on a body unbounded.
+    #[must_use]
+    pub fn reading_on(self, clock: anemnez_clock::Clock) -> ApiPlaneLayer {
+        ApiPlaneLayer { clock: BodyClock(Some(clock)), ..self }
     }
 
     /// The same, admitting carried calls with a claimed lane to `claimed` (D m/28960).
@@ -777,6 +787,7 @@ impl<S> tower_layer::Layer<S> for ApiPlaneLayer {
     fn layer(&self, inner: S) -> ApiPlaneService<S> {
         ApiPlaneService {
             inner,
+            clock: self.clock.clone(),
             reads: self.reads.clone(),
             claimed: self.claimed.clone(),
             products: self.products.clone(),
@@ -795,6 +806,7 @@ enum Admitted {
 #[derive(Clone, Debug)]
 pub struct ApiPlaneService<S> {
     inner: S,
+    clock: BodyClock,
     reads: Reads,
     claimed: ClaimedWrites,
     products: ProductCallers,
@@ -846,17 +858,24 @@ where
             }
         };
         let carried_call = request.extensions().get::<Judged>().is_some_and(|j| j.role == Role::Carried)
-            && request.uri().path() == CALL_METHOD;
+            && request.uri().path() == CALL_METHOD
+            && self.clock.0.is_some();
         match admitted {
             Err(name) if carried_call && name == PlaneRefusal::CarriedWriteUnbound.name() => {
                 let clone = self.inner.clone();
                 let mut inner = std::mem::replace(&mut self.inner, clone);
+                let clock = self.clock.clone();
                 Either::Right(Either::Right(Box::pin(async move {
                     let (parts, body) = request.into_parts();
-                    let bytes = http_body_util::BodyExt::collect(http_body_util::Limited::new(body, MAX_REQUEST))
-                        .await
-                        .map(http_body_util::Collected::to_bytes)
-                        .unwrap_or_default();
+                    let bytes = match buffered(body, &clock).await {
+                        Ok(bytes) => bytes,
+                        // Unreadable reads as no request, which no kind admits: carried-write-unbound, fail closed.
+                        Err(Unbuffered::Unreadable) => bytes::Bytes::new(),
+                        Err(Unbuffered::Unread) => {
+                            let unread = crate::digest::unread();
+                            return Ok(answer_refusal(&parts.headers, unread, http::StatusCode::REQUEST_TIMEOUT, None));
+                        }
+                    };
                     match carried_call_admits(&bytes) {
                         Ok(()) => inner.call(http::Request::from_parts(parts, replay(bytes))).await,
                         Err(name) => Ok(answer_refusal(

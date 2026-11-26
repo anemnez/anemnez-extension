@@ -225,6 +225,8 @@ spoken_for("a-carried-call-reaches-reads-only", "plane_tests::a_carried_call_rea
 spoken_for("a-carried-call-reaches-reads-only (Health, house-signed)", "plane_tests::a_carried_health_ask_is_admitted_only_from_a_house_signed_caller")
 spoken_for("a-carried-call-reaches-reads-only (the log, by its request's kind)", "plane_tests::a_carried_call_is_admitted_by_its_requests_kind_and_nothing_else")
 spoken_for("a-carried-call-reaches-reads-only (the log, through the layer)", "plane_tests::the_layer_reads_a_carried_calls_kind_and_hands_the_service_its_bytes")
+spoken_for("a-carried-call-reaches-reads-only (a withheld body, at its bound)", "plane_tests::a_carried_calls_withheld_body_is_refused_at_its_bound")
+spoken_for("a-carried-call-reaches-reads-only (the digest, at its bound)", "plane_tests::a_token_checked_calls_withheld_body_is_refused_at_its_bound")
 spoken_for("a-carried-write-may-be-admitted-for-a-claimed-lane", "plane_tests::a_listed_carried_write_with_a_lane_is_admitted_with_its_claim")
 spoken_for("a-carried-write-may-be-admitted-for-a-claimed-lane (writes only)", "plane_tests::only_a_descriptors_reads_and_writes_can_be_listed_for_claimed_lanes")
 spoken_for("a-carried-write-may-be-admitted-for-a-claimed-lane (unlisted)", "plane_tests::an_unlisted_carried_write_is_refused_as_before")

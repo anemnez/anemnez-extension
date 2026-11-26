@@ -355,7 +355,8 @@ where
     };
     let digested = DigestLayer::for_paths(
         [EVENTS_METHOD, CALL_METHOD, WATCH_METHOD].into_iter().chain(token_checked.iter().copied()),
-    );
+    )
+    .reading_on(stop.clock.clone());
     // A product's HTTP routes are the fallback past every gRPC route, the faces' included, so the layers below judge
     // them as they judge a call (D m/30486).
     let accept_http1 = product.http.is_some();
@@ -368,6 +369,7 @@ where
         .layer(admit)
         .layer(
             ApiPlaneLayer::new(crate::plane::Reads::of(faces.describe.descriptor()))
+                .reading_on(stop.clock.clone())
                 .claiming(faces.claimed)
                 .bound_decided(faces.bound)
                 .products({

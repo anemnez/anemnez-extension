@@ -745,7 +745,11 @@ opaquely, so the plane reads that request's kind with hydramq-events' own reader
 body buffered as the digest buffers it, and admits a read or a latest only (`plane::carried_call_admits`). Any other
 kind, one a later build adds included, and anything the reader can't read (a compressed, short or second frame, a
 message that isn't a `CallRequest`, bytes that aren't a request) is `carried-write-unbound`, fail closed, before any
-service sees it. The Journal's `Events/Events` is no read here. Anything else is refused
+service sees it. The body is read through the one buffer the digest reads through (`digest::buffered`): at most
+`MAX_REQUEST`, and whole within `BODY_WITHIN` (10 s) of its headers on the server's clock, past which the call is
+refused `request-unread` (UNAVAILABLE, the same call later) before any service, never waited on for good (D m/40788,
+rule 4); a plane built with no clock refuses a carried `Events/Call` whole. A token-checked method's digest is read
+through the same bound. The Journal's `Events/Events` is no read here. Anything else is refused
 `carried-write-unbound` by name, and a stamp a carried call carries is never believed
 (`stamp-not-from-agora`). A descriptor the check doesn't admit reads as no reads. The rule lifts for a caller whose
 principal is bound through Aegis, on the methods its product decides (`a-bound-carried-call-reaches-a-method-its-product-decides`,
