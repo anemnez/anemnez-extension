@@ -749,7 +749,9 @@ service sees it. The body is read through the one buffer the digest reads throug
 `MAX_REQUEST`, and whole within `BODY_WITHIN` (10 s) of its headers on the server's clock, past which the call is
 refused `request-unread` (UNAVAILABLE, the same call later) before any service, never waited on for good (D m/40788,
 rule 4); a plane built with no clock refuses a carried `Events/Call` whole. A token-checked method's digest is read
-through the same bound. The Journal's `Events/Events` is no read here. Anything else is refused
+through the same bound. `Events/Events` is a read here too: on a log face its one bounded read, authorized as a
+Call (E m/40801); the retiring Journal's held stream refuses a carried caller itself, `carried-write-unbound`. A body
+past `MAX_REQUEST` is `request-too-large` by name, never read as a write. Anything else is refused
 `carried-write-unbound` by name, and a stamp a carried call carries is never believed
 (`stamp-not-from-agora`). A descriptor the check doesn't admit reads as no reads. The rule lifts for a caller whose
 principal is bound through Aegis, on the methods its product decides (`a-bound-carried-call-reaches-a-method-its-product-decides`,
