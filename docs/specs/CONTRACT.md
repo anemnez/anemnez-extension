@@ -144,11 +144,13 @@ a `LogEvents` over the product's own `hydramq_events::Events`. `Call` answers wi
 inside `CALL_WITHIN` (past it, `events-call-unanswered`), `Watch` drives `wire::watch`, and `Events(after)` is served
 as one bounded `Call` (O m/38880), so every client of it, the flattened MCP `events` tool among them, reads a log-faced
 product unchanged: authorized as a Call, then one read from `after` (`<log>:<offset>`, the cursor each event carries;
-`<log>:` or, on a one-log face, empty, for the log's start), at most `wire::WATCH_MAX` events and no wait, each of an
-asked kind (any, when none is) streamed as `{ cursor, kind, payload }` with the payload the event's canonical bytes,
-and the stream ends; the last cursor as `after` reads on. A cursor of a log the face doesn't serve is
-`cursor-not-mine`, one below the floor `out-of-range`, and an empty one on a face of several logs
-`read-needs-its-log`, each by name. Each call's principal token is checked by the one `Verifier`, then the product's own
+`<log>:` or, on a one-log face, empty, for the log's start, which on a compacted log begins past its floor), pages of
+at most `wire::WATCH_MAX` events and no wait, read on inside the call's one deadline until a page holds an asked kind
+(any, when none is) or the head is reached, so an empty answer is only ever the head (D m/40656); past the deadline
+with none found it is `events-call-unanswered`, naming the cursor to read on from. The page's asked events stream as
+`{ cursor, kind, payload }` with the payload the event's canonical bytes, and the stream ends; the last cursor as
+`after` reads on. A cursor of a log the face doesn't serve is `cursor-not-mine`, one below the floor `out-of-range`,
+and an empty one on a face of several logs `read-needs-its-log`, each by name. Each call's principal token is checked by the one `Verifier`, then the product's own
 `Authorize` decides within `AUTHORIZE_WITHIN`: a refusal, or no answer, is `unauthorized` with its reason, and nothing
 of the log is served. There is no default: a product whose log is everyone's passes `Authorize::allow_all` by name.
 

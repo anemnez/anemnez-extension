@@ -645,3 +645,62 @@ async fn a_log_opened_per_read_serves_call_once_per_call_and_says_busy() {
     let first = anemnez_clock::Clock::system().timeout(PARK, frames.next()).await.expect("a frame in time");
     assert_eq!(events_in(&first.expect("a frame").expect("not an error")), 1, "the log's event, through the re-read");
 }
+
+/// D m/40656: a page holding none of the asked kinds is read past, inside the one deadline, so an empty answer is
+/// only the head. More than a page of another kind, then one `decided`: reading kinds=[decided] reaches it, from the
+/// start and from a cursor inside the other kind's run.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_kind_filtered_read_reads_past_pages_of_other_kinds() {
+    let f = fixture();
+    let body = hydramq_events::body("minion.decided", &[]).expect("encodes");
+    let other = hydramq_events::wire::WATCH_MAX + 5;
+    for n in 0..other {
+        f.log.publish_next(&format!("noise/{n}"), "noise", &body, 1).expect("published");
+    }
+    f.publish(0);
+    let face = f.face(Authorize::allow_all());
+    let read = |after: String| {
+        let request = pb::EventsRequest { after, kinds: vec!["decided".to_owned()] };
+        let face = &face;
+        async move {
+            let stream = face.events(tonic::Request::new(request)).await.expect("served").into_inner();
+            stream.map(|e| e.expect("an event")).collect::<Vec<_>>().await
+        }
+    };
+    let found = read(String::new()).await;
+    assert_eq!(found.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>(), ["decided"], "past a page of noise");
+    assert_eq!(found[0].cursor, format!("{LOG}:{other}"));
+    assert_eq!(read(format!("{LOG}:3")).await.len(), 1, "from inside the noise");
+    assert!(read(found[0].cursor.clone()).await.is_empty(), "and past it, the head");
+}
+
+/// D m/40656 (should): a read of a compacted log's start begins past its floor, as the log itself reads from there,
+/// never out-of-range.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_compacted_logs_start_begins_at_its_floor() {
+    let f = fixture();
+    let body = hydramq_events::body("minion.decided", &[]).expect("encodes");
+    for _ in 0..4 {
+        f.log.publish_next("call/x", "decided", &body, 1).expect("published");
+    }
+    f.log.compact().expect("compacts");
+    f.log.publish_next("call/x", "decided", &body, 1).expect("after the floor");
+    let Read::Compacted { floor } = f.log.read(&from_start(), 10).expect("reads") else { panic!("not compacted") };
+    let face = f.face(Authorize::allow_all());
+    let read = |after: &str| {
+        let request = pb::EventsRequest { after: after.to_owned(), kinds: Vec::new() };
+        let face = &face;
+        async move {
+            let stream = face.events(tonic::Request::new(request)).await?.into_inner();
+            stream.collect::<Vec<_>>().await.into_iter().collect::<Result<Vec<_>, _>>()
+        }
+    };
+    // What the log itself answers from the floor's next, by value: the start's answer.
+    let past = hydramq_events::Position { log: LOG.into(), offset: floor.offset + 1 };
+    let Read::Events { events, .. } = f.log.read(&past, 10).expect("reads") else { panic!("past the floor reads") };
+    let want: Vec<String> = events.iter().map(|(at, _)| format!("{LOG}:{}", at.offset)).collect();
+    for start in ["", "audit:"] {
+        let got = read(start).await.expect("the start of a compacted log is its floor's next, never out-of-range");
+        assert_eq!(got.iter().map(|e| e.cursor.clone()).collect::<Vec<_>>(), want, "{start:?}");
+    }
+}

@@ -648,10 +648,13 @@ impl pb::events_server::Events for LogEvents {
 
     /// The Journal's stream, served from the log as one bounded read (O m/38880): every client of `Events/Events`, the
     /// flattened MCP `events` tool among them, reads a log-faced product unchanged. Authorized as a Call is
-    /// ([`Method::Call`]), on this method's own path; then one read from `after` ([`log_cursor`]), at most
+    /// ([`Method::Call`]), on this method's own path; then reads from `after` ([`log_cursor`]), at most
     /// [`wire::WATCH_MAX`] events and no wait, inside the call's one deadline, each event whose kind is asked (every
     /// kind when none is) streamed as `{ cursor: "<log>:<offset>", kind, payload: its canonical bytes }`, and the
-    /// stream ends. Read on by passing the last cursor as `after`.
+    /// stream ends. Read on by passing the last cursor as `after`. A page holding none of the asked kinds is read past,
+    /// page by page inside the deadline, so an empty answer is only ever the head; past the deadline it is
+    /// `events-call-unanswered`, naming the cursor to read on from. A read of a compacted log's start begins at its
+    /// floor.
     #[allow(clippy::result_large_err)] // A tonic Status is the stream's own item error, returned as is.
     async fn events(
         &self,
@@ -660,28 +663,52 @@ impl pb::events_server::Events for LogEvents {
         let deadline = self.clock.now_mono() + FACE_WITHIN;
         self.admit(EVENTS_METHOD, Method::Call, &request, deadline).await?;
         let asked = request.into_inner();
-        let from = self.start_of(&asked.after)?;
-        let ask = wire::read_request(&from, wire::WATCH_MAX, Duration::ZERO).map_err(|e| {
-            tonic::Status::invalid_argument(format!("the cursor {:?} can't be asked: {e}", asked.after))
-        })?;
-        let reply = self.read_once(ask, deadline).await?;
-        let events = match wire::read_reply(&reply) {
-            Ok(Read::Events { events, .. }) => events,
-            Ok(Read::Compacted { floor }) => {
-                return Err(tonic::Status::out_of_range(format!(
-                    "{}: {} is at or below the log's floor; read the latest for the gap, then on from {}",
-                    refusal::OUT_OF_RANGE,
-                    asked.after,
-                    log_cursor(&floor)
+        let mut from = self.start_of(&asked.after)?;
+        // Asked for its start ("<log>:" or empty), not past a cursor: a compacted start begins at the floor.
+        let from_start = asked.after.is_empty() || asked.after.ends_with(':');
+        let wanted = |kind: &str| asked.kinds.is_empty() || asked.kinds.iter().any(|k| k == kind);
+        // Page by page inside the one deadline until a page holds an asked kind or the head is reached (D m/40656): a
+        // page of only other kinds is never answered empty, which a caller would read as caught up at the head.
+        let mut scanned: Option<Position> = None;
+        let matched = loop {
+            if self.left(deadline).is_zero() {
+                let on = scanned.as_ref().map_or_else(|| asked.after.clone(), log_cursor);
+                return Err(tonic::Status::unavailable(format!(
+                    "{}: no event of the kinds asked within the call's {FACE_WITHIN:?}; read on from after = {on:?}",
+                    refusal::EVENTS_CALL_UNANSWERED
                 )));
             }
-            Ok(Read::Renew { .. }) => return Err(tonic::Status::internal("a read answered a watch's renewal")),
-            Err(e) => return Err(tonic::Status::unavailable(format!("the log's read was refused: {e}"))),
+            let ask = wire::read_request(&from, wire::WATCH_MAX, Duration::ZERO).map_err(|e| {
+                tonic::Status::invalid_argument(format!("the cursor {:?} can't be asked: {e}", asked.after))
+            })?;
+            let reply = self.read_once(ask, deadline).await?;
+            match wire::read_reply(&reply) {
+                Ok(Read::Events { events, next }) => {
+                    let page_ended = events.is_empty();
+                    scanned = events.last().map(|(at, _)| at.clone()).or(scanned);
+                    let matched: Vec<_> = events.into_iter().filter(|(_, event)| wanted(&event.kind)).collect();
+                    if !matched.is_empty() || page_ended {
+                        break matched;
+                    }
+                    from = next;
+                }
+                Ok(Read::Compacted { floor }) if from_start && scanned.is_none() => {
+                    from = Position { log: floor.log, offset: floor.offset.saturating_add(1) };
+                }
+                Ok(Read::Compacted { floor }) => {
+                    return Err(tonic::Status::out_of_range(format!(
+                        "{}: {} is at or below the log's floor; read the latest for the gap, then on from {}",
+                        refusal::OUT_OF_RANGE,
+                        asked.after,
+                        log_cursor(&floor)
+                    )));
+                }
+                Ok(Read::Renew { .. }) => return Err(tonic::Status::internal("a read answered a watch's renewal")),
+                Err(e) => return Err(tonic::Status::unavailable(format!("the log's read was refused: {e}"))),
+            }
         };
-        let wanted = |kind: &str| asked.kinds.is_empty() || asked.kinds.iter().any(|k| k == kind);
-        let items: Vec<Result<pb::Event, tonic::Status>> = events
+        let items: Vec<Result<pb::Event, tonic::Status>> = matched
             .into_iter()
-            .filter(|(_, event)| wanted(&event.kind))
             .map(|(at, event)| {
                 hydramq_events::to_bytes(&event)
                     .map(|payload| pb::Event { cursor: log_cursor(&at), kind: event.kind.clone(), payload })
