@@ -27,6 +27,10 @@ pub const STAMP_NOT_FROM_AGORA: &str = "stamp-not-from-agora";
 /// A carried call (from Aegis's peer: another host's caller, D m/22425 §5) to a method that isn't a read, refused by
 /// name until the caller's principal is bound through Aegis: the far end admits carried reads only (K m/23155).
 pub const CARRIED_WRITE_UNBOUND: &str = "carried-write-unbound";
+/// A call from a house reader ([`Role::HouseReader`]: admitted by its code identity's team alone, D m/39080, m/40623) to
+/// anything but the contract's faces (Describe, Health, the log's Watch and Events, and its Call by a read's kind):
+/// refused by name, so the grant never reaches a product's own method, whatever its effect.
+pub const HOUSE_READS_FACES_ONLY: &str = "house-reads-faces-only";
 /// A carried call to a method whose descriptor says `callers = PRODUCT`, with no code identity in aegisd's preface: an
 /// older aegisd's line, or a caller its judge refused (D m/32662). One meaning, unproven, never admitted on silence.
 pub const PRODUCT_CALLER_UNPROVEN: &str = "product-caller-unproven";
@@ -134,6 +138,11 @@ pub enum Role {
     /// identity, in the one constructor that admits it. Its calls reach a method only when that method is a read
     /// ([`CARRIED_WRITE_UNBOUND`]), and a stamp it carries is never believed: the caller it carries is unbound.
     Carried,
+    /// A local peer signed by the house's team that the product's own policy refused (D m/39080, m/40623): admitted by
+    /// the SDK's API policy alone, any identifier, never by name, and never when the product's policy admits it (that
+    /// keeps its own role). It reaches the contract's faces only ([`HOUSE_READS_FACES_ONLY`]), and the log face sees it
+    /// as a house principal by its code identity, with no principal token.
+    HouseReader,
 }
 
 /// A plane's policy's judgment of one connection at accept.

@@ -758,6 +758,19 @@ principal is bound through Aegis, on the methods its product decides (`a-bound-c
 below), and never before, but for
 the writes a product lists for claimed lanes (`a-carried-write-may-be-admitted-for-a-claimed-lane`, below).
 
+**A house reader reads the faces, by its code identity** (D m/39080, m/40623; ergon:M/house-read-grant).
+`Role::HouseReader` is a local peer signed by the house's team that the product's own policy refused: the SDK's API
+policy admits it when, and only when, `rest` refuses it, by team (anemnez-trust), any identifier, never by name, so a
+peer `rest` admits keeps `rest`'s role. It reaches the contract's faces alone: Describe, Health, the log's
+`Events/Watch` and `Events/Events`, and its `Events/Call` by a read's kind (the carried reader, `plane::house_reads`).
+Anything else, a product's own read included, is refused `house-reads-faces-only` by name, and the retiring Journal's
+`Events/Events` refuses it by that name too. On the log face, a call with no principal token from a house reader, or
+from a carried caller whose preface proves the house's team, is never the rollout's absent caller: the token check is
+not asked, and `Authorize` sees `Asked::house`, a distinct principal (`House`: its identifier, and the node a carried
+one came from), never "anyone" and never a lane. A product whose facts are fit for any house reader admits it; one that
+keeps a private subject refuses it by name. Each authorized house read is said once at INFO under
+`anemnez_extension_serve::house_reads`, naming the method, the identifier and where it came from.
+
 <!-- claim: a-bound-carried-call-reaches-a-method-its-product-decides -->
 **A carried call whose principal is bound reaches the methods its product decides bound callers on** (K m/29120; E
 m/36065; M m/36068). The SDK's carried verify (anemnez-service `product::carried::verify`) binds a carried caller when

@@ -16,6 +16,9 @@
 //!   a method its product says it decides bound callers on itself ([`BoundDecided`], E m/36065), read, write or act,
 //!   before the claimed path and with no claim made of its stamp ([`bound_admits`]); any other method as an unbound
 //!   one, and never on another role;
+//! - a house reader ([`Role::HouseReader`]: house-signed, admitted by the SDK only when the product's policy refused it,
+//!   D m/40623) reaches the contract's faces alone, Describe, Health, the log's Watch and Events, and its Call by a
+//!   read's kind ([`house_reads`], [`carried_call_admits`]); anything else is `house-reads-faces-only`;
 //! - a carried call to a write its product lists for claimed lanes ([`ClaimedWrites`], D m/28960) is admitted with
 //!   its stamp's lane as a claim, [`Claimed`] `{ lane, via }` on the request, when aegisd said the node it came from
 //!   and the stamp names one of the product's lanes, by its own predicate ([`carried_claim`]); else `carried-no-preface` or
@@ -45,7 +48,7 @@ use anemnez_extension::options::Effect;
 use anemnez_extension::peer::{
     BOUND_DECIDED_NOT_A_METHOD, CARRIED_CLAIM_NOT_A_LANE, CARRIED_NO_PREFACE, CARRIED_WRITE_UNBOUND,
     CLAIMED_METHOD_NOT_A_READ_OR_WRITE, CLAIMED_WRITE_NOT_A_WRITE, DESCRIPTOR_UNCHECKED, FABRICD_READS_DESCRIBE_ONLY,
-    NOT_JUDGED, PRODUCT_CALLER_NOT_ALLOWED, PRODUCT_CALLER_UNPROVEN, PRODUCT_CALLER_UNTRUSTED,
+    HOUSE_READS_FACES_ONLY, NOT_JUDGED, PRODUCT_CALLER_NOT_ALLOWED, PRODUCT_CALLER_UNPROVEN, PRODUCT_CALLER_UNTRUSTED,
     PRODUCT_CALLERS_NOT_A_PRODUCT_METHOD, PRODUCT_CALLERS_TWICE, PRODUCT_CALLERS_UNNAMED, Role, STAMP_NOT_FROM_AGORA,
 };
 use anemnez_extension::teaching::{RetryClass, Teaching, Whose, status_details};
@@ -80,11 +83,12 @@ pub enum PlaneRefusal {
     ProductCallersTwice,
     DescriptorUnchecked,
     BoundDecidedNotAMethod,
+    HouseReadsFacesOnly,
 }
 
 impl PlaneRefusal {
     /// Every refusal, in the one order [`PLANE_REFUSALS`] lists their names.
-    pub const ALL: [PlaneRefusal; 16] = [
+    pub const ALL: [PlaneRefusal; 17] = [
         PlaneRefusal::NotJudged,
         PlaneRefusal::FabricdReadsDescribeOnly,
         PlaneRefusal::StampNotFromAgora,
@@ -101,6 +105,7 @@ impl PlaneRefusal {
         PlaneRefusal::ProductCallersTwice,
         PlaneRefusal::DescriptorUnchecked,
         PlaneRefusal::BoundDecidedNotAMethod,
+        PlaneRefusal::HouseReadsFacesOnly,
     ];
 
     /// Its name on the wire, as every reader matches it.
@@ -123,6 +128,7 @@ impl PlaneRefusal {
             PlaneRefusal::ProductCallersTwice => PRODUCT_CALLERS_TWICE,
             PlaneRefusal::DescriptorUnchecked => DESCRIPTOR_UNCHECKED,
             PlaneRefusal::BoundDecidedNotAMethod => BOUND_DECIDED_NOT_A_METHOD,
+            PlaneRefusal::HouseReadsFacesOnly => HOUSE_READS_FACES_ONLY,
         }
     }
 
@@ -174,6 +180,10 @@ impl PlaneRefusal {
             PlaneRefusal::BoundDecidedNotAMethod => Some(
                 "only a method of the product's own descriptor that products don't call may be decided for bound callers",
             ),
+            PlaneRefusal::HouseReadsFacesOnly => Some(
+                "a house reader, admitted by its team alone, reads the contract's faces: Describe, Health and the log's \
+                 events, its Call by a read's kind",
+            ),
         }
     }
 
@@ -196,7 +206,8 @@ impl PlaneRefusal {
             | PlaneRefusal::ProductCallersNotAProductMethod
             | PlaneRefusal::ProductCallersTwice
             | PlaneRefusal::DescriptorUnchecked
-            | PlaneRefusal::BoundDecidedNotAMethod => Whose::Caller,
+            | PlaneRefusal::BoundDecidedNotAMethod
+            | PlaneRefusal::HouseReadsFacesOnly => Whose::Caller,
         }
     }
 
@@ -219,7 +230,8 @@ impl PlaneRefusal {
             | PlaneRefusal::ProductCallersNotAProductMethod
             | PlaneRefusal::ProductCallersTwice
             | PlaneRefusal::DescriptorUnchecked
-            | PlaneRefusal::BoundDecidedNotAMethod => self.name(),
+            | PlaneRefusal::BoundDecidedNotAMethod
+            | PlaneRefusal::HouseReadsFacesOnly => self.name(),
         }
     }
 
@@ -500,8 +512,17 @@ pub fn house_signed(judged: &Judged) -> Result<ProductCaller, &'static str> {
 pub fn carried_admits(role: Role, path: &str, reads: &Reads) -> Result<(), &'static str> {
     match role {
         Role::Carried if !reads.reads(path) => Err(PlaneRefusal::CarriedWriteUnbound.name()),
+        Role::HouseReader if !house_reads(path) => Err(PlaneRefusal::HouseReadsFacesOnly.name()),
         _ => Ok(()),
     }
+}
+
+/// Whether a house reader ([`Role::HouseReader`]) reaches `path` with no body read: the contract's faces, Describe,
+/// Health, and the log's Watch and Events (D m/39080, m/40623). Its `Events/Call` is admitted by its request's kind
+/// alone ([`carried_call_admits`], the one reader), and nothing else: no product method, whatever its effect. Pure.
+#[must_use]
+pub fn house_reads(path: &str) -> bool {
+    path.starts_with(DESCRIBE_PREFIX) || path.starts_with(HEALTH_FACE) || path == WATCH_METHOD || path == EVENTS_METHOD
 }
 
 /// Whether a carried `Events/Call` whose buffered gRPC body is `body` may go on: only when it is one uncompressed
@@ -662,6 +683,14 @@ pub fn plane_admits(
         // write here, which is what the lane must hear, never stamp-not-from-agora, which tells it its caller is wrong
         // (D m/30197, rule 15).
         Some(j) if j.role == Role::Carried => Err(PlaneRefusal::CarriedWriteUnbound.name()),
+        // A house reader reaches the faces alone, its stamp unused: it is judged by its code identity, never a lane.
+        Some(j) if j.role == Role::HouseReader => {
+            if house_reads(path) {
+                Ok(None)
+            } else {
+                Err(PlaneRefusal::HouseReadsFacesOnly.name())
+            }
+        }
         _ => api_admits(judged, path, stamp.is_some())
             .and_then(|()| judged.map_or(Ok(()), |j| carried_admits(j.role, path, reads)))
             .map(|()| None),
@@ -698,8 +727,8 @@ pub fn said_on(name: &'static str, path: &str) -> String {
 
 /// Every name the API plane refuses with, at a call or when the plane is built: the one list [`said`] and [`taught`]
 /// answer for, held by a row that reads this file's own refusals, so a new name can't go untaught (D m/30986).
-pub const PLANE_REFUSALS: [&str; 16] = {
-    let mut names = [""; 16];
+pub const PLANE_REFUSALS: [&str; 17] = {
+    let mut names = [""; 17];
     let mut i = 0;
     while i < PlaneRefusal::ALL.len() {
         names[i] = PlaneRefusal::ALL[i].name();
@@ -860,11 +889,16 @@ where
                     .map(|claimed| claimed.map(Admitted::Claimed)),
             }
         };
-        let carried_call = request.extensions().get::<Judged>().is_some_and(|j| j.role == Role::Carried)
-            && request.uri().path() == CALL_METHOD
-            && self.clock.0.is_some();
+        // A carried caller's or a house reader's Events/Call, refused only for its path, is admitted by its request's
+        // kind: the refusal it would hear otherwise is its role's own.
+        let by_kind = match request.extensions().get::<Judged>().map(|j| j.role) {
+            Some(Role::Carried) => Some(PlaneRefusal::CarriedWriteUnbound.name()),
+            Some(Role::HouseReader) => Some(PlaneRefusal::HouseReadsFacesOnly.name()),
+            _ => None,
+        }
+        .filter(|_| request.uri().path() == CALL_METHOD && self.clock.0.is_some());
         match admitted {
-            Err(name) if carried_call && name == PlaneRefusal::CarriedWriteUnbound.name() => {
+            Err(name) if by_kind == Some(name) => {
                 let clone = self.inner.clone();
                 let mut inner = std::mem::replace(&mut self.inner, clone);
                 let clock = self.clock.clone();
@@ -886,7 +920,7 @@ where
                             return Ok(answer_refusal(&parts.headers, unread, http::StatusCode::REQUEST_TIMEOUT, None));
                         }
                     };
-                    match carried_call_admits(&bytes) {
+                    match carried_call_admits(&bytes).map_err(|_| name) {
                         Ok(()) => inner.call(http::Request::from_parts(parts, replay(bytes))).await,
                         Err(name) => Ok(answer_refusal(
                             &parts.headers,

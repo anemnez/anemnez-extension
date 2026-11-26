@@ -41,7 +41,10 @@ pub use health::Board;
 pub use journal::{
     EventsService, Journal, Refusal, STREAM_METHODS, StreamEnd, Subscription, origin_for, until_drained,
 };
-pub use log_events::{Admit, Asked, Authorize, Busy, EventsFace, FaceLog, Log, LogEvents, Method, Revoke, Unopened};
+pub use log_events::{
+    Admit, Asked, Authorize, Busy, EventsFace, FaceLog, HOUSE_READS_TARGET, House, Log, LogEvents, Method, Revoke,
+    Unopened, house_of,
+};
 pub use plane::{
     ApiPlaneLayer, BoundDecided, CarriedBound, Claimed, ClaimedMethods, ClaimedWrites, ProductCaller, ProductCallers,
     Reads, answer_refusal, api_admits, bound_admits, carried_admits, carried_claim, is_grpc, plane_admits,

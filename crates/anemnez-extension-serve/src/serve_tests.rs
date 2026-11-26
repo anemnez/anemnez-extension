@@ -662,7 +662,8 @@ fn a_descriptors_write_is_never_a_carried_read() {
 }
 
 /// E m/40801: a carried caller reaches Events/Events on a log face as its one bounded read; the retiring Journal's held
-/// stream refuses it by name (carried-write-unbound), and a caller of any other role opens it as before.
+/// stream refuses it by name (carried-write-unbound), a house reader by its own (house-reads-faces-only), and a caller
+/// of any other role opens it as before.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_journals_stream_refuses_a_carried_caller_by_name() {
     use crate::pb::events_server::Events as _;
@@ -678,6 +679,12 @@ async fn a_journals_stream_refuses_a_carried_caller_by_name() {
     let refused = service.events(carried).await.err().expect("refused");
     assert_eq!(refused.code(), tonic::Code::PermissionDenied);
     assert!(refused.message().starts_with("carried-write-unbound: "), "{}", refused.message());
+    // A house reader reads the log face, never the Journal (D m/40623): refused by its own name.
+    let mut house = tonic::Request::new(pb::EventsRequest::default());
+    house.extensions_mut().insert(judged(anemnez_extension::peer::Role::HouseReader));
+    let refused = service.events(house).await.err().expect("refused");
+    assert_eq!(refused.code(), tonic::Code::PermissionDenied);
+    assert!(refused.message().starts_with("house-reads-faces-only: "), "{}", refused.message());
     let mut direct = tonic::Request::new(pb::EventsRequest::default());
     direct.extensions_mut().insert(judged(anemnez_extension::peer::Role::Other));
     assert!(service.events(direct).await.is_ok(), "a direct caller opens it as before");

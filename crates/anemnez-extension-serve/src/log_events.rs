@@ -42,6 +42,7 @@ use crate::journal::{CALL_METHOD, EVENTS_METHOD, Ended, EventStream, StreamEnd, 
 use crate::pb;
 use crate::principal::{Admitted, Verifier};
 use crate::watch::{Driver, End, Input, Output};
+use anemnez_extension::peer::Role;
 
 /// The most watches one face holds at once, unless the product says otherwise ([`LogEvents::with_watches_max`]).
 pub const WATCHES_MAX: usize = 16;
@@ -82,10 +83,51 @@ pub struct Asked {
     pub judged: Option<Judged>,
     /// The verified principal token's claims.
     pub admitted: Option<Admitted>,
+    /// A house reader, when the call carried no token and came from one (D m/39080, m/40623): a distinct principal,
+    /// its code identity, never "anyone" and never a lane. A product whose facts are fit for any house reader admits
+    /// it; one that keeps a private subject refuses it by name. `None` for every other call.
+    pub house: Option<House>,
     /// The request's metadata, as the call carried it: what a product attributes the call to beside its principal
     /// (Agora's stamp naming the lane, `mcp::Stamp`). It attributes, never authorizes: a decision reads `judged` and
     /// `admitted`.
     pub metadata: tonic::metadata::MetadataMap,
+}
+
+/// A house principal (D m/39080, m/40623): a caller signed by the house's team, read by its code identity with no
+/// principal token. Either a local peer the SDK's API policy admitted as [`Role::HouseReader`] (the product's own
+/// policy refused it), or a carried caller whose preface proves the house's team ([`crate::plane::house_signed`]).
+/// Its team is always the house's.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct House {
+    /// The signing identifier, `ai.anemnez.themisd`.
+    pub identifier: String,
+    /// The node aegisd said a carried house caller came from; `None` for a local one.
+    pub via: Option<String>,
+}
+
+/// The target a house reader's admitted reads are said under, one INFO line each, naming the identifier (D m/40623
+/// (4): who reads facts stays visible).
+pub const HOUSE_READS_TARGET: &str = "anemnez_extension_serve::house_reads";
+
+/// The house principal of a call that carried no token, from the connection its accept judged: a house reader by its
+/// code identity, or a carried caller whose preface proves the house's team. `None` for any other. Pure.
+#[must_use]
+pub fn house_of(judged: Option<&Judged>) -> Option<House> {
+    let judged = judged?;
+    match judged.role {
+        Role::HouseReader => judged
+            .peer
+            .code
+            .as_ref()
+            .ok()
+            .filter(|code| code.team == anemnez_trust::ANEMNEZ_TEAM)
+            .map(|code| House { identifier: code.identifier.clone(), via: None }),
+        Role::Carried => crate::plane::house_signed(judged)
+            .ok()
+            .map(|caller| House { identifier: caller.identity.identifier, via: Some(caller.node) }),
+        _ => None,
+    }
 }
 
 /// The product's hold on an authorization it gave a watch: [`Revoke::revoke`] ends every stream admitted under it,
@@ -444,16 +486,37 @@ impl LogEvents {
         request: &tonic::Request<M>,
         deadline: Mono,
     ) -> Result<(Option<Admitted>, Admit), tonic::Status> {
-        let admitted = self.verifier.check_grpc(path, request).await.map_err(|r| crate::principal::status(&r))?;
+        let judged = crate::accepted::judged(request);
+        // A house caller with no token is its code identity, never the rollout's absent caller (D m/40623).
+        let house = matches!(crate::principal::carried(request), crate::principal::Carried::Absent)
+            .then(|| house_of(judged))
+            .flatten();
+        let admitted = match &house {
+            Some(_) => None,
+            None => self.verifier.check_grpc(path, request).await.map_err(|r| crate::principal::status(&r))?,
+        };
+        let reader = house.clone();
         let asked = Asked {
             method,
-            judged: crate::accepted::judged(request).cloned(),
+            judged: judged.cloned(),
             admitted: admitted.clone(),
+            house,
             metadata: request.metadata().clone(),
         };
         let within = self.authorize_within.min(self.left(deadline));
         match self.clock.timeout(within, (self.authorize.0)(asked)).await {
-            Ok(Ok(admit)) => Ok((admitted, admit)),
+            Ok(Ok(admit)) => {
+                if let Some(house) = reader {
+                    tracing::info!(
+                        target: HOUSE_READS_TARGET,
+                        method = path,
+                        identifier = %house.identifier,
+                        via = house.via.as_deref().unwrap_or("local"),
+                        "a house reader reads this product's log"
+                    );
+                }
+                Ok((admitted, admit))
+            }
             Ok(Err(why)) => Err(tonic::Status::permission_denied(format!("{}: {why}", refusal::UNAUTHORIZED))),
             Err(_) => Err(tonic::Status::unavailable(format!(
                 "{}: the product's authorization didn't answer within {within:?}",

@@ -891,3 +891,73 @@ async fn a_scan_refused_busy_mid_read_names_where_to_read_on() {
         told.message()
     );
 }
+
+// ── A house reader (D m/39080, m/40623) ────────────────────────────────────────────────────────────────────────
+
+/// A connection judged `role`, its peer signed by `team` as `identifier`.
+fn judged_as(role: anemnez_extension::peer::Role, team: &str, identifier: &str) -> crate::accepted::Judged {
+    let code = Ok(anemnez_extension::peer::Code { identifier: identifier.into(), team: team.into() });
+    let peer = anemnez_extension::peer::Peer::from_token([501, 501, 20, 501, 20, 41, 100_001, 7], code);
+    crate::accepted::Accepted::new((), peer, role).judged().clone()
+}
+
+/// D m/40623 (1, 2): the house principal is a house reader's code identity, or a carried caller's whose preface proves
+/// the house's team; never another team's, never an ordinary local caller's, and never a carried caller unproven.
+#[test]
+fn the_house_principal_is_a_house_team_code_identity_and_nothing_else() {
+    use anemnez_extension::peer::Role;
+    use anemnez_trust::ANEMNEZ_TEAM;
+    let house = crate::log_events::house_of(Some(&judged_as(Role::HouseReader, ANEMNEZ_TEAM, "ai.anemnez.themisd")));
+    let house = house.expect("a house reader is a house principal");
+    assert_eq!((house.identifier.as_str(), house.via), ("ai.anemnez.themisd", None));
+    assert_eq!(
+        crate::log_events::house_of(Some(&judged_as(Role::HouseReader, "OTHERTEAM", "x"))),
+        None,
+        "another team"
+    );
+    assert_eq!(crate::log_events::house_of(Some(&judged_as(Role::Other, ANEMNEZ_TEAM, "x"))), None, "rest's own role");
+    assert_eq!(crate::log_events::house_of(None), None, "unjudged");
+
+    let mut carried = judged_as(Role::Carried, "AEGISTEAM", "ai.anemnez.aegisd");
+    assert_eq!(crate::log_events::house_of(Some(&carried)), None, "a carried caller with no preface is unproven");
+    let holder = anemnez_extension::carried::Holder { unique_id: 9, boot: "boot".into() };
+    let code =
+        anemnez_extension::carried::CodeIdentity { team: ANEMNEZ_TEAM.into(), identifier: "ai.anemnez.ergond".into() };
+    carried.carried = Some(anemnez_extension::carried::Preface::new("node-b", Vec::new(), holder).with_code(code));
+    let far = crate::log_events::house_of(Some(&carried)).expect("a proven house carried caller");
+    assert_eq!((far.identifier.as_str(), far.via.as_deref()), ("ai.anemnez.ergond", Some("node-b")));
+}
+
+/// D m/40623 (1): a house reader with no token reads the log with the token check never asked (this verifier refuses
+/// every absent call), and Authorize sees it as itself: a House principal, no token's claims. An ordinary caller with
+/// no token is still refused by the verifier, as before.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_house_reader_reads_the_log_with_no_token_as_its_code_identity() {
+    use anemnez_extension::peer::Role;
+    let f = fixture();
+    f.publish(0);
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let saw = Arc::clone(&seen);
+    let verifier = crate::principal_tests::verifier(&f.manual, false);
+    let authorize = Authorize::new(move |a| {
+        saw.lock().unwrap().push((a.house.map(|h| h.identifier), a.admitted.is_some()));
+        async { Ok(()) }
+    });
+    let face = LogEvents::new(Arc::clone(&f.log), verifier, authorize, f.manual.clock());
+    let call = |judged: crate::accepted::Judged| {
+        let mut request =
+            tonic::Request::new(pb::CallRequest { request: read_request(&from_start(), 10, Duration::ZERO).unwrap() });
+        request.extensions_mut().insert(judged);
+        request
+    };
+    let house = judged_as(Role::HouseReader, anemnez_trust::ANEMNEZ_TEAM, "ai.anemnez.themisd");
+    let read = face.call(call(house)).await.expect("a house reader reads");
+    let reply = read_reply(&read.into_inner().reply);
+    assert!(matches!(reply, Ok(Read::Events { ref events, .. }) if events.len() == 1), "the log was read: {reply:?}");
+    assert_eq!(*seen.lock().unwrap(), vec![(Some("ai.anemnez.themisd".to_owned()), false)], "decided as House");
+
+    let other = judged_as(Role::Other, anemnez_trust::ANEMNEZ_TEAM, "ai.anemnez.themisd");
+    let refused = face.call(call(other)).await.expect_err("an ordinary caller with no token is refused as before");
+    assert_eq!((refused.code(), refused.message()), (tonic::Code::InvalidArgument, "malformed"), "the verifier's own");
+    assert_eq!(seen.lock().unwrap().len(), 1, "never decided");
+}

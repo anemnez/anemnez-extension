@@ -6,8 +6,8 @@ use anemnez_extension::mcp::STAMP_METADATA_KEY;
 use anemnez_extension::mcp::Stamp;
 use anemnez_extension::peer::{
     BOUND_DECIDED_NOT_A_METHOD, CARRIED_CLAIM_NOT_A_LANE, CARRIED_NO_PREFACE, CARRIED_WRITE_UNBOUND,
-    CLAIMED_METHOD_NOT_A_READ_OR_WRITE, CLAIMED_WRITE_NOT_A_WRITE, Code, FABRICD_READS_DESCRIBE_ONLY, NOT_JUDGED, Peer,
-    Role, STAMP_NOT_FROM_AGORA,
+    CLAIMED_METHOD_NOT_A_READ_OR_WRITE, CLAIMED_WRITE_NOT_A_WRITE, Code, FABRICD_READS_DESCRIBE_ONLY,
+    HOUSE_READS_FACES_ONLY, NOT_JUDGED, Peer, Role, STAMP_NOT_FROM_AGORA,
 };
 
 use crate::accepted::{Accepted, Judged};
@@ -979,4 +979,48 @@ async fn a_carried_calls_body_past_the_cap_is_too_large_by_name() {
     let (status, got, message) = through_the_plane(Role::Carried, CALL_METHOD, body).await;
     assert_eq!((status, got), (http::StatusCode::OK, None), "refused before any service");
     assert!(message.starts_with("request-too-large: "), "{message}");
+}
+
+// ── A house reader (D m/39080, m/40623) ────────────────────────────────────────────────────────────────────────
+
+/// D m/40623: a house reader, admitted by its team alone, reaches the contract's faces (Describe, Health, the log's
+/// Watch and Events), its stamp unused, and nothing else: a product's read, a write, and Call by its path alone are
+/// refused house-reads-faces-only by name. No other role is touched.
+#[test]
+fn a_house_reader_reaches_the_contracts_faces_only() {
+    let reads = Reads(std::sync::Arc::new(std::iter::once(FUNCTIONAL.to_owned()).collect()));
+    let none = ClaimedWrites::default();
+    let house = judged(Role::HouseReader);
+    let health = "/anemnez.extension.v1.Health/Check";
+    for face in [DESCRIBE, health, WATCH_METHOD, EVENTS_METHOD] {
+        assert_eq!(plane_admits(Some(&house), face, None, &reads, &none), Ok(None), "{face}");
+        let lane = stamp(Some("K"));
+        assert_eq!(plane_admits(Some(&house), face, Some(&lane), &reads, &none), Ok(None), "{face}: its stamp unused");
+        assert_eq!(carried_admits(Role::HouseReader, face, &reads), Ok(()), "{face}");
+    }
+    for method in [FUNCTIONAL, "/minion.v1.Minion/AppsLaunch", CALL_METHOD] {
+        assert_eq!(plane_admits(Some(&house), method, None, &reads, &none), Err(HOUSE_READS_FACES_ONLY), "{method}");
+        assert_eq!(carried_admits(Role::HouseReader, method, &reads), Err(HOUSE_READS_FACES_ONLY), "{method}");
+    }
+    let other = judged(Role::Other);
+    assert_eq!(plane_admits(Some(&other), FUNCTIONAL, None, &reads, &none), Ok(None), "another role is untouched");
+}
+
+/// D m/40623, through the layer: a house reader's Events/Call reaches the service by a read's kind, its bytes intact,
+/// and a commit is refused before any service by the house reader's own name, never carried-write-unbound.
+#[tokio::test]
+async fn the_layer_reads_a_house_readers_call_by_its_kind_and_refuses_by_its_own_name() {
+    use hydramq_events::Position;
+    use hydramq_events::wire::read_request;
+    let at = Position { log: "horaid@studio".into(), offset: 0 };
+    let read = call_body(read_request(&at, 10, std::time::Duration::ZERO).expect("asks"));
+    let (status, got, _) = through_the_plane(Role::HouseReader, CALL_METHOD, read.clone()).await;
+    assert_eq!((status, got), (http::StatusCode::OK, Some(read)), "a read reaches, its bytes intact");
+    let commit = call_body(request_of_kind("hydramq.events.commit"));
+    let (status, got, message) = through_the_plane(Role::HouseReader, CALL_METHOD, commit).await;
+    assert_eq!((status, got), (http::StatusCode::OK, None), "refused before any service");
+    assert!(message.starts_with("house-reads-faces-only: "), "said by its own name: {message}");
+    let (_, got, message) = through_the_plane(Role::HouseReader, FUNCTIONAL, b"x".to_vec()).await;
+    assert_eq!(got, None, "a product method is never reached");
+    assert!(message.starts_with("house-reads-faces-only: "), "{message}");
 }
