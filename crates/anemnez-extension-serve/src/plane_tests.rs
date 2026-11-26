@@ -900,19 +900,25 @@ fn withheld() -> tonic::body::BoxBody {
     tonic::body::boxed(http_body_util::StreamBody::new(never))
 }
 
-/// D m/40788 (rule 4): a carried Events/Call whose body never arrives is refused request-unread at BODY_WITHIN on the
-/// plane's clock, before any service, never waited on for good; a plane with no clock never waits on one at all, and
-/// refuses a carried Events/Call whole, carried-write-unbound.
-#[tokio::test]
-async fn a_carried_calls_withheld_body_is_refused_at_its_bound() {
-    use tower_layer::Layer as _;
-    use tower_service::Service as _;
-    let manual = anemnez_clock::ManualClock::new();
-    let seen = Body::default();
-    let mut service = ApiPlaneLayer::new(Reads::default()).reading_on(manual.clock()).layer(seen.clone());
+/// One request to `path` with a withheld body through `service`, the manual clock moved to BODY_WITHIN: the status it
+/// was answered with (a red row fails at its real-time guard, never hangs).
+async fn withheld_at_the_bound<S>(
+    mut service: S,
+    manual: &anemnez_clock::ManualClock,
+    judged: Option<Judged>,
+) -> tonic::Status
+where
+    S: tower_service::Service<http::Request<tonic::body::BoxBody>, Response = http::Response<tonic::body::BoxBody>>
+        + Send
+        + 'static,
+    S::Future: Send + 'static,
+    S::Error: std::fmt::Debug + Send + 'static,
+{
     let mut request = http::Request::builder().uri(CALL_METHOD).body(withheld()).expect("a request");
     request.headers_mut().insert(http::header::CONTENT_TYPE, http::HeaderValue::from_static("application/grpc"));
-    request.extensions_mut().insert(carried(Some("node-b")));
+    if let Some(judged) = judged {
+        request.extensions_mut().insert(judged);
+    }
     let began = manual.now();
     let call = tokio::spawn(service.call(request));
     manual.settle().await;
@@ -923,7 +929,20 @@ async fn a_carried_calls_withheld_body_is_refused_at_its_bound() {
         .expect("answered at the bound")
         .expect("joined")
         .expect("answered");
-    let status = tonic::Status::from_header_map(response.headers()).expect("a gRPC status");
+    tonic::Status::from_header_map(response.headers()).expect("a gRPC status")
+}
+
+/// D m/40788 (rule 4): a carried Events/Call whose body never arrives is refused request-unread at BODY_WITHIN on the
+/// plane's clock, before any service, never waited on for good; a plane with no clock never waits on one at all, and
+/// refuses a carried Events/Call whole, carried-write-unbound.
+#[tokio::test]
+async fn a_carried_calls_withheld_body_is_refused_at_its_bound() {
+    use tower_layer::Layer as _;
+    use tower_service::Service as _;
+    let manual = anemnez_clock::ManualClock::new();
+    let seen = Body::default();
+    let service = ApiPlaneLayer::new(Reads::default()).reading_on(manual.clock()).layer(seen.clone());
+    let status = withheld_at_the_bound(service, &manual, Some(carried(Some("node-b")))).await;
     assert_eq!(status.code(), tonic::Code::Unavailable);
     assert!(status.message().starts_with("request-unread: "), "{}", status.message());
     assert_eq!(seen.0.lock().expect("seen").clone(), None, "no service saw it");
@@ -943,24 +962,10 @@ async fn a_carried_calls_withheld_body_is_refused_at_its_bound() {
 #[tokio::test]
 async fn a_token_checked_calls_withheld_body_is_refused_at_its_bound() {
     use tower_layer::Layer as _;
-    use tower_service::Service as _;
     let manual = anemnez_clock::ManualClock::new();
     let seen = Body::default();
-    let layer = crate::DigestLayer::for_paths([CALL_METHOD]).reading_on(manual.clock());
-    let mut service = layer.layer(seen.clone());
-    let mut request = http::Request::builder().uri(CALL_METHOD).body(withheld()).expect("a request");
-    request.headers_mut().insert(http::header::CONTENT_TYPE, http::HeaderValue::from_static("application/grpc"));
-    let began = manual.now();
-    let call = tokio::spawn(service.call(request));
-    manual.settle().await;
-    manual.advance_to(began + crate::digest::BODY_WITHIN).await;
-    let response = anemnez_clock::Clock::system()
-        .timeout(std::time::Duration::from_secs(60), call)
-        .await
-        .expect("answered at the bound")
-        .expect("joined")
-        .expect("answered");
-    let status = tonic::Status::from_header_map(response.headers()).expect("a gRPC status");
+    let service = crate::DigestLayer::for_paths([CALL_METHOD]).reading_on(manual.clock()).layer(seen.clone());
+    let status = withheld_at_the_bound(service, &manual, None).await;
     assert_eq!(status.code(), tonic::Code::Unavailable);
     assert!(status.message().starts_with("request-unread: "), "{}", status.message());
     assert_eq!(seen.0.lock().expect("seen").clone(), None, "no service saw it");
