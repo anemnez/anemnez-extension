@@ -5,7 +5,7 @@
 
 [hydramq-family]
 repo = "anemnez/hydramq"
-rev = "d9c1a041f744"
+rev = "37016823ad0f"
 why = "hydramq-events and its leaves, the log face -serve serves (Events, Watch) and the SDK's replica plane resolves beside it: one copy across the extension, the SDK and hydramq"
 owner = "M"
 
