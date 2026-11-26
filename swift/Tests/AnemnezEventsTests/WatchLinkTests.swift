@@ -47,13 +47,24 @@ private func upAt(_ at: UInt64, now: Duration = s(0)) -> (WatchLink, UInt64) {
         #expect(link.at == p(7), "the cursor never moves back")
     }
 
-    /// A renewal reopens from its next at once, never said down; a frame of the old stream then moves nothing.
+    /// A renewal reopens from its next at once, saying neither down nor up again (M m/38173): a consumer that re-lists
+    /// on up does so once per return, never once per token life. A frame of the old stream then moves nothing.
     @Test func aRenewalReopensWithoutSayingDown() {
         var (link, seq) = upAt(4)
         let renewed = link.step(.frame(seq: seq, .renew(next: p(9))), now: s(3))
         #expect(renewed == [.close(seq: 2), .open(from: p(9), beat: .seconds(10), seq: 3)])
         #expect(link.step(.frame(seq: seq, .events([e(9)], next: p(10))), now: s(3)) == [], "the old stream's frame")
-        #expect(link.step(.frame(seq: 3, .events([e(9)], next: p(10))), now: s(4)) == [.up, .events([e(9)])])
+        #expect(link.step(.frame(seq: 3, .events([e(9)], next: p(10))), now: s(4)) == [.events([e(9)])])
+        _ = link.step(.frame(seq: 3, .renew(next: p(10))), now: s(5))
+        #expect(link.step(.opened(seq: 4), now: s(5)) == [], "renewed and opened: still no second up")
+    }
+
+    /// A down, then a reopen, says up once again.
+    @Test func aReturnAfterDownSaysUpOnce() {
+        var (link, seq) = upAt(4)
+        _ = link.step(.ended(seq: seq), now: s(1))
+        #expect(link.step(.tick, now: s(1) + Backoff.first) == [.open(from: p(4), beat: .seconds(10), seq: 3)])
+        #expect(link.step(.opened(seq: 3), now: s(3)) == [.up])
     }
 
     /// A compaction says down by name and reads Latest again: the gap is read by value, never skipped.
@@ -159,6 +170,7 @@ private func upAt(_ at: UInt64, now: Duration = s(0)) -> (WatchLink, UInt64) {
                     let wasUp = if case .up = link.state { true } else { false }
                     let isUp = if case .up = next.state { true } else { false }
                     if wasUp || !isUp { Issue.record("up said outside an open, after \(event)"); return }
+                    if link.saidUp { Issue.record("up said twice with no down between, after \(event)"); return }
                 }
                 if let error = next.check() { Issue.record("\(error), after \(event)"); return }
                 walk(next, depth: depth - 1, now: at)
