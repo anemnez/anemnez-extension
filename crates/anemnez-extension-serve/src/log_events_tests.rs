@@ -674,33 +674,101 @@ async fn a_kind_filtered_read_reads_past_pages_of_other_kinds() {
     assert!(read(found[0].cursor.clone()).await.is_empty(), "and past it, the head");
 }
 
-/// D m/40656 (should): a read of a compacted log's start begins past its floor, as the log itself reads from there,
-/// never out-of-range.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_compacted_logs_start_begins_at_its_floor() {
-    let f = fixture();
+/// A log on its own manual clock, written durably (as hydramq's own compaction rows write), with four events of one
+/// subject compacted and one published past the floor; and a face over it.
+fn compacted() -> (tempfile::TempDir, Arc<Events>, ManualClock, hydramq_events::Position) {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let log_clock = ManualClock::new();
+    let settings = hydramq_events::Settings { durability: hydramq_events::Durability::Sync, ..Default::default() };
+    let log = Arc::new(
+        Events::open(&dir.path().join("log"), "miniond", LOG, settings, &log_clock.clock()).expect("the log opens"),
+    );
+    std::mem::forget(log_clock);
     let body = hydramq_events::body("minion.decided", &[]).expect("encodes");
-    for _ in 0..4 {
-        f.log.publish_next("call/x", "decided", &body, 1).expect("published");
-    }
-    f.log.compact().expect("compacts");
-    f.log.publish_next("call/x", "decided", &body, 1).expect("after the floor");
-    let Read::Compacted { floor } = f.log.read(&from_start(), 10).expect("reads") else { panic!("not compacted") };
-    let face = f.face(Authorize::allow_all());
-    let read = |after: &str| {
-        let request = pb::EventsRequest { after: after.to_owned(), kinds: Vec::new() };
-        let face = &face;
-        async move {
-            let stream = face.events(tonic::Request::new(request)).await?.into_inner();
-            stream.collect::<Vec<_>>().await.into_iter().collect::<Result<Vec<_>, _>>()
-        }
+    let ev = |seq: u64| hydramq_events::Event {
+        producer: "miniond".into(),
+        subject: "call/x".into(),
+        kind: "decided".into(),
+        seq,
+        wall_ms: 1,
+        body: body.clone(),
+        ..Default::default()
     };
-    // What the log itself answers from the floor's next, by value: the start's answer.
+    for seq in 0..4 {
+        log.publish(&ev(seq)).expect("published");
+    }
+    log.compact().expect("compacts");
+    log.publish(&ev(4)).expect("after the floor");
+    let Read::Compacted { floor } = log.read(&from_start(), 10).expect("reads") else { panic!("not compacted") };
+    (dir, log, ManualClock::new(), floor)
+}
+
+#[allow(clippy::result_large_err)] // A tonic Status is the face's own error, returned as is.
+async fn events_after(face: &LogEvents, after: &str) -> Result<Vec<pb::Event>, tonic::Status> {
+    let request = pb::EventsRequest { after: after.to_owned(), kinds: Vec::new() };
+    let stream = face.events(tonic::Request::new(request)).await?.into_inner();
+    stream.collect::<Vec<_>>().await.into_iter().collect()
+}
+
+/// D m/40656 (should): a read of a compacted log's start begins past its floor and reads what was published after it,
+/// never out-of-range; a cursor below the floor is out-of-range, naming the floor to read on from (E m/40661).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_compacted_logs_start_begins_past_its_floor_and_a_cursor_below_it_is_out_of_range() {
+    let (_dir, log, manual, floor) = compacted();
+    let face = LogEvents::new(
+        Arc::clone(&log),
+        crate::principal_tests::verifier(&manual, true),
+        Authorize::allow_all(),
+        manual.clock(),
+    );
     let past = hydramq_events::Position { log: LOG.into(), offset: floor.offset + 1 };
-    let Read::Events { events, .. } = f.log.read(&past, 10).expect("reads") else { panic!("past the floor reads") };
+    let Read::Events { events, .. } = log.read(&past, 10).expect("reads") else { panic!("past the floor reads") };
     let want: Vec<String> = events.iter().map(|(at, _)| format!("{LOG}:{}", at.offset)).collect();
+    assert!(!want.is_empty(), "the event published past the floor is there to read");
     for start in ["", "audit:"] {
-        let got = read(start).await.expect("the start of a compacted log is its floor's next, never out-of-range");
+        let got = events_after(&face, start).await.expect("the start of a compacted log is past its floor");
         assert_eq!(got.iter().map(|e| e.cursor.clone()).collect::<Vec<_>>(), want, "{start:?}");
     }
+    assert!(floor.offset >= 1, "a floor above the first offset, so a cursor can be below it: {floor:?}");
+    let below = events_after(&face, &format!("{LOG}:{}", floor.offset - 1)).await.expect_err("below the floor");
+    assert_eq!(below.code(), tonic::Code::OutOfRange);
+    assert!(below.message().starts_with("out-of-range: "), "{}", below.message());
+    assert!(below.message().ends_with(&format!("{LOG}:{}", floor.offset)), "names the floor: {}", below.message());
+}
+
+/// E m/40661: on a face of several logs, an empty `after` names no log, so it is read-needs-its-log, naming them; a
+/// log's own start, `<log>:`, reads that log.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_empty_cursor_on_a_many_log_face_is_refused_naming_its_logs() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let log_clock = ManualClock::new();
+    let open = |name: &str| -> Arc<dyn crate::log_events::Log> {
+        let log = Events::open(
+            &dir.path().join(name),
+            "miniond",
+            name,
+            hydramq_events::Settings::default(),
+            &log_clock.clock(),
+        )
+        .expect("the log opens");
+        let body = hydramq_events::body("minion.decided", &[]).expect("encodes");
+        log.publish_next("call/x", "decided", &body, 1).expect("published");
+        Arc::new(Arc::new(log))
+    };
+    let manual = ManualClock::new();
+    let logs = vec![("audit".to_owned(), open("audit")), ("moves".to_owned(), open("moves"))];
+    let face = LogEvents::over_many(
+        logs,
+        crate::principal_tests::verifier(&manual, true),
+        Authorize::allow_all(),
+        manual.clock(),
+    )
+    .expect("two named logs");
+    let refused = events_after(&face, "").await.expect_err("no log named");
+    assert_eq!(refused.code(), tonic::Code::InvalidArgument);
+    assert!(refused.message().starts_with("read-needs-its-log: "), "{}", refused.message());
+    assert!(refused.message().contains("audit, moves"), "names the logs: {}", refused.message());
+    let moves = events_after(&face, "moves:").await.expect("a log's own start");
+    assert_eq!(moves.iter().map(|e| e.cursor.clone()).collect::<Vec<_>>(), ["moves:0"]);
+    std::mem::forget(log_clock);
 }
