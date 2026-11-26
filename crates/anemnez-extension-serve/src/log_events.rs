@@ -1,5 +1,5 @@
 //! The log face: a product's own hydramq-events log served through the contract's `Events/Call` and
-//! `Events/Watch` (CONTRACT.md `#a-products-events-are-read-through-one-call`,
+//! `Events/Watch`, and the Journal's `Events/Events` as one bounded Call (CONTRACT.md `#a-products-events-are-read-through-one-call`,
 //! `#a-products-events-are-pushed-through-one-watch`). It is the Journal's retiring step 2: the face exists here
 //! once (rule 2), and each product moves onto it on its owner's queue.
 //!
@@ -33,8 +33,8 @@ use std::time::Duration;
 use anemnez_clock::{Clock, Mono};
 use anemnez_extension::refusal;
 use futures_util::Stream;
-use hydramq_events::Events;
 use hydramq_events::wire::{self, HOP_MARGIN, Stopper, WITHIN_MAX};
+use hydramq_events::{Events, Position, Read};
 use tokio::sync::Notify;
 
 use crate::accepted::Judged;
@@ -418,6 +418,93 @@ impl LogEvents {
         }
     }
 
+    /// One read of the log for `bytes` (a wire request), under the reads cap, within what `deadline` has left and at
+    /// most [`CALL_WITHIN`]: the wire's reply, or the refusal by name. Call's, and Events' one bounded read.
+    #[allow(clippy::result_large_err)] // A tonic Status is the handler's own error, returned as is.
+    async fn read_once(&self, bytes: Vec<u8>, deadline: Mono) -> Result<Vec<u8>, tonic::Status> {
+        let slot = Slot::take(&self.reading, self.calls_max, &self.closed).ok_or_else(|| {
+            tonic::Status::resource_exhausted(format!(
+                "{}: this product holds {} reads, the most it may; retry",
+                refusal::EVENTS_CALL_BUSY,
+                self.calls_max
+            ))
+        })?;
+        let log = self.log.clone();
+        // The read's bound is an instant, never a span measured again at registration: what the call's one deadline
+        // has left, at most CALL_WITHIN, so a clock that moves between the two can't push it past the deadline.
+        let until = deadline.min(self.clock.now_mono() + CALL_WITHIN);
+        let within = self.left(until);
+        let clock = self.clock.clone();
+        let read = tokio::task::spawn_blocking(move || {
+            // Held while the thread reads, so a read past its bound still counts until it ends.
+            let _slot = slot;
+            // A held log is read as it is; one opened for each read waits outside its lock, so its writer never waits
+            // on a caller's within (L m/31024); several are routed by the request's log. A read that found a writer
+            // holding its log is busy, and one that couldn't be read at all is unreadable, each by name.
+            let faced = log.faced(within, &clock);
+            let reply = wire::serve(&*faced.face, &bytes);
+            match (faced.unreadable(), faced.busy()) {
+                (Some(why), _) => Err(Unopened::Unreadable(why)),
+                (None, Some(why)) => Err(Unopened::Busy(why)),
+                (None, None) => Ok(Some(reply)),
+            }
+        });
+        match self.clock.timeout_at(until, read).await {
+            Ok(Ok(Ok(Some(reply)))) => Ok(reply),
+            Ok(Ok(Ok(None))) => Err(tonic::Status::internal("the log was opened and its read never ran")),
+            Ok(Ok(Err(Unopened::Busy(why)))) => Err(tonic::Status::resource_exhausted(format!(
+                "{}: the log's writer holds it ({why}); retry",
+                refusal::EVENTS_CALL_BUSY
+            ))),
+            Ok(Ok(Err(Unopened::Unreadable(why)))) => Err(tonic::Status::failed_precondition(format!(
+                "{}: {why}; a retry won't read it",
+                refusal::EVENTS_LOG_UNREADABLE
+            ))),
+            Ok(Err(e)) => Err(tonic::Status::internal(format!("the log's read ended: {e}"))),
+            Err(_) => Err(tonic::Status::unavailable(format!(
+                "{}: the log's read didn't answer within {within:?}, what the call's {FACE_WITHIN:?} had left",
+                refusal::EVENTS_CALL_UNANSWERED
+            ))),
+        }
+    }
+    /// Where an `Events/Events` read starts: after the event at `after` ([`log_cursor`]'s `<log>:<offset>`), or the
+    /// log's start for `<log>:` or, on a one-log face, an empty `after`. A cursor naming a log this face doesn't serve
+    /// is `cursor-not-mine`, naming those it does; an empty one on a many-log face, `read-needs-its-log`.
+    #[allow(clippy::result_large_err)] // A tonic Status is the handler's own error, returned as is.
+    fn start_of(&self, after: &str) -> Result<Position, tonic::Status> {
+        let (log, offset) = match after.rsplit_once(':') {
+            None if after.is_empty() => match &self.log {
+                crate::many::Logs::One(log) => (log.name().to_owned(), None),
+                crate::many::Logs::Many(_) => {
+                    return Err(tonic::Status::invalid_argument(format!(
+                        "{READ_NEEDS_ITS_LOG}: this face serves the logs {}: pass after = \"<log>:\" to read one from \
+                         its start",
+                        self.log.names()
+                    )));
+                }
+            },
+            Some((log, "")) => (log.to_owned(), None),
+            Some((log, offset)) => match offset.parse::<u64>() {
+                Ok(offset) => (log.to_owned(), Some(offset)),
+                Err(_) => return Err(not_a_cursor(after)),
+            },
+            None => return Err(not_a_cursor(after)),
+        };
+        let served = match &self.log {
+            crate::many::Logs::One(one) => one.name() == log,
+            crate::many::Logs::Many(logs) => logs.iter().any(|(name, _)| *name == log),
+        };
+        if !served {
+            return Err(tonic::Status::failed_precondition(format!(
+                "{}: {after:?} names the log {log:?}, and this face serves {}",
+                refusal::CURSOR_NOT_MINE,
+                self.log.names()
+            )));
+        }
+        let offset = offset.map_or(Some(0), |at| at.checked_add(1)).ok_or_else(|| not_a_cursor(after))?;
+        Ok(Position { log, offset })
+    }
+
     fn take_slot(&self) -> Option<Slot> {
         Slot::take(&self.open, self.watches_max, &self.closed)
     }
@@ -539,10 +626,19 @@ fn status(end: End) -> Option<tonic::Status> {
     }
 }
 
-fn unserved() -> tonic::Status {
-    tonic::Status::unimplemented(format!(
-        "{}: this product's events are on its log, read through Events/Call or Events/Watch",
-        refusal::EVENTS_CALL_UNSERVED
+/// An `Events/Events` cursor on a log face: the event's log and offset, `<log>:<offset>`. A log's name may hold a
+/// `:`; the offset is what follows the last one.
+#[must_use]
+pub fn log_cursor(at: &Position) -> String {
+    format!("{}:{}", at.log, at.offset)
+}
+
+/// The refusal of an empty `after` on a face of several logs: a read names its log.
+pub const READ_NEEDS_ITS_LOG: &str = "read-needs-its-log";
+
+fn not_a_cursor(after: &str) -> tonic::Status {
+    tonic::Status::invalid_argument(format!(
+        "{after:?} isn't a cursor of this face: <log>:<offset>, or <log>: for its start"
     ))
 }
 
@@ -550,13 +646,51 @@ fn unserved() -> tonic::Status {
 impl pb::events_server::Events for LogEvents {
     type EventsStream = EventStream;
 
-    /// The Journal's stream: a log face doesn't serve it.
+    /// The Journal's stream, served from the log as one bounded read (O m/38880): every client of `Events/Events`, the
+    /// flattened MCP `events` tool among them, reads a log-faced product unchanged. Authorized as a Call is
+    /// ([`Method::Call`]), on this method's own path; then one read from `after` ([`log_cursor`]), at most
+    /// [`wire::WATCH_MAX`] events and no wait, inside the call's one deadline, each event whose kind is asked (every
+    /// kind when none is) streamed as `{ cursor: "<log>:<offset>", kind, payload: its canonical bytes }`, and the
+    /// stream ends. Read on by passing the last cursor as `after`.
+    #[allow(clippy::result_large_err)] // A tonic Status is the stream's own item error, returned as is.
     async fn events(
         &self,
-        _request: tonic::Request<pb::EventsRequest>,
+        request: tonic::Request<pb::EventsRequest>,
     ) -> Result<tonic::Response<Self::EventsStream>, tonic::Status> {
-        let _ = EVENTS_METHOD;
-        Err(unserved())
+        let deadline = self.clock.now_mono() + FACE_WITHIN;
+        self.admit(EVENTS_METHOD, Method::Call, &request, deadline).await?;
+        let asked = request.into_inner();
+        let from = self.start_of(&asked.after)?;
+        let ask = wire::read_request(&from, wire::WATCH_MAX, Duration::ZERO).map_err(|e| {
+            tonic::Status::invalid_argument(format!("the cursor {:?} can't be asked: {e}", asked.after))
+        })?;
+        let reply = self.read_once(ask, deadline).await?;
+        let events = match wire::read_reply(&reply) {
+            Ok(Read::Events { events, .. }) => events,
+            Ok(Read::Compacted { floor }) => {
+                return Err(tonic::Status::out_of_range(format!(
+                    "{}: {} is at or below the log's floor; read the latest for the gap, then on from {}",
+                    refusal::OUT_OF_RANGE,
+                    asked.after,
+                    log_cursor(&floor)
+                )));
+            }
+            Ok(Read::Renew { .. }) => return Err(tonic::Status::internal("a read answered a watch's renewal")),
+            Err(e) => return Err(tonic::Status::unavailable(format!("the log's read was refused: {e}"))),
+        };
+        let wanted = |kind: &str| asked.kinds.is_empty() || asked.kinds.iter().any(|k| k == kind);
+        let items: Vec<Result<pb::Event, tonic::Status>> = events
+            .into_iter()
+            .filter(|(_, event)| wanted(&event.kind))
+            .map(|(at, event)| {
+                hydramq_events::to_bytes(&event)
+                    .map(|payload| pb::Event { cursor: log_cursor(&at), kind: event.kind.clone(), payload })
+                    .map_err(|e| {
+                        tonic::Status::internal(format!("an event at {} doesn't encode: {e}", log_cursor(&at)))
+                    })
+            })
+            .collect();
+        Ok(tonic::Response::new(Box::pin(futures_util::stream::iter(items))))
     }
 
     type WatchStream = WatchStream;
@@ -646,50 +780,8 @@ impl pb::events_server::Events for LogEvents {
     ) -> Result<tonic::Response<pb::CallReply>, tonic::Status> {
         let deadline = self.clock.now_mono() + FACE_WITHIN;
         self.admit(CALL_METHOD, Method::Call, &request, deadline).await?;
-        let slot = Slot::take(&self.reading, self.calls_max, &self.closed).ok_or_else(|| {
-            tonic::Status::resource_exhausted(format!(
-                "{}: this product holds {} reads, the most it may; retry",
-                refusal::EVENTS_CALL_BUSY,
-                self.calls_max
-            ))
-        })?;
-        let (log, bytes) = (self.log.clone(), request.into_inner().request);
-        // The read's bound is an instant, never a span measured again at registration: what the call's one deadline
-        // has left, at most CALL_WITHIN, so a clock that moves between the two can't push it past the deadline.
-        let until = deadline.min(self.clock.now_mono() + CALL_WITHIN);
-        let within = self.left(until);
-        let clock = self.clock.clone();
-        let read = tokio::task::spawn_blocking(move || {
-            // Held while the thread reads, so a read past its bound still counts until it ends.
-            let _slot = slot;
-            // A held log is read as it is; one opened for each read waits outside its lock, so its writer never waits
-            // on a caller's within (L m/31024); several are routed by the request's log. A read that found a writer
-            // holding its log is busy, and one that couldn't be read at all is unreadable, each by name.
-            let faced = log.faced(within, &clock);
-            let reply = wire::serve(&*faced.face, &bytes);
-            match (faced.unreadable(), faced.busy()) {
-                (Some(why), _) => Err(Unopened::Unreadable(why)),
-                (None, Some(why)) => Err(Unopened::Busy(why)),
-                (None, None) => Ok(Some(reply)),
-            }
-        });
-        match self.clock.timeout_at(until, read).await {
-            Ok(Ok(Ok(Some(reply)))) => Ok(tonic::Response::new(pb::CallReply { reply })),
-            Ok(Ok(Ok(None))) => Err(tonic::Status::internal("the log was opened and its read never ran")),
-            Ok(Ok(Err(Unopened::Busy(why)))) => Err(tonic::Status::resource_exhausted(format!(
-                "{}: the log's writer holds it ({why}); retry",
-                refusal::EVENTS_CALL_BUSY
-            ))),
-            Ok(Ok(Err(Unopened::Unreadable(why)))) => Err(tonic::Status::failed_precondition(format!(
-                "{}: {why}; a retry won't read it",
-                refusal::EVENTS_LOG_UNREADABLE
-            ))),
-            Ok(Err(e)) => Err(tonic::Status::internal(format!("the log's read ended: {e}"))),
-            Err(_) => Err(tonic::Status::unavailable(format!(
-                "{}: the log's read didn't answer within {within:?}, what the call's {FACE_WITHIN:?} had left",
-                refusal::EVENTS_CALL_UNANSWERED
-            ))),
-        }
+        let reply = self.read_once(request.into_inner().request, deadline).await?;
+        Ok(tonic::Response::new(pb::CallReply { reply }))
     }
 }
 

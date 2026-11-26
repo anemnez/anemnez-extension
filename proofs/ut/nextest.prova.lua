@@ -193,6 +193,7 @@ spoken_for("a-products-events-are-read-through-one-call (round trip)", "events::
 spoken_for("a-products-events-are-read-through-one-call (parity)", "parity_tests::the_events_call_messages_are_the_protos")
 spoken_for("a-product-serves-its-own-log-through-the-face", "log_events_tests::a_call_reads_the_log_only_once_authorized")
 spoken_for("a-product-serves-its-own-log-through-the-face (bound)", "log_events_tests::an_unanswered_authorization_is_refused_at_its_bound")
+spoken_for("a-product-serves-its-own-log-through-the-face (Events, one bounded Call)", "log_events_tests::the_journals_stream_on_a_log_face_is_one_bounded_read_by_cursor")
 spoken_for("a-call-is-bounded-by-one-deadline", "log_events_tests::a_late_authorization_leaves_the_read_only_what_remains")
 spoken_for("a-call-is-bounded-by-one-deadline (cap)", "log_events_tests::calls_past_the_cap_are_refused_at_once")
 spoken_for("a-log-watch-is-bounded-and-ends-stopped (kernel)", "watch_tests::every_exit_stops_the_wire_watch_first_and_once")
