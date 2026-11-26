@@ -158,6 +158,7 @@ spoken_for("the-static-half-is-byte-stable", "fixture_tests::the_fixtures_static
 spoken_for("the-static-half-is-byte-stable (red)", "fixture_tests::a_static_half_that_changes_across_a_restart_is_red")
 spoken_for("the-static-half-is-byte-stable (tool list)", "stable::stable_tests::a_changed_tool_list_is_red_and_named")
 spoken_for("the-static-half-is-byte-stable (bounded)", "stable::stable_tests::a_step_that_never_answers_is_named_at_its_bound")
+spoken_for("the-static-half-is-byte-stable (a face)", "stable::stable_tests::a_face_refused_on_the_first_read_fails_the_row_by_name")
 spoken_for("a-nonce-is-durable-before-the-method-runs (group commit)", "edge_tests::a_batch_is_one_sync")
 spoken_for("a-nonce-is-durable-before-the-method-runs (schema)", "edge_tests::a_newer_schema_is_refused_by_name_and_schema_1_opens_said_or_not")
 spoken_for("a-nonce-is-durable-before-the-method-runs (damage)", "edge_tests::a_bad_line_before_the_last_is_refused_by_name")

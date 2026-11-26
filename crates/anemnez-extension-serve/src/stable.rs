@@ -48,6 +48,10 @@ pub const STEP_WITHIN: Duration = Duration::from_secs(30);
 pub struct StaticHalf {
     pub instructions: String,
     pub tools: String,
+    /// Why the descriptor has no face, when it has none: refused by `check_descriptor`, or by `mcp::flatten`. Then
+    /// `tools` says the same as text. A refusal is stable text, so the check refuses it by name on the first read,
+    /// never holds it as a stable face (N m/40210).
+    pub refused: Option<String>,
 }
 
 /// The product's static half as a consumer reads it: `Describe` over `channel`, bounded by [`READ_WITHIN`] on `clock`,
@@ -68,15 +72,21 @@ pub async fn static_half(channel: Channel, clock: &Clock) -> Result<StaticHalf, 
         .map_err(|refusal| format!("its descriptor declares no service: {refusal}"))?;
     let instructions = anemnez_extension::mcp::instructions(&service).unwrap_or_default().to_owned();
     // A descriptor with no face is said, as text, so it compares like any other: never silently an empty list.
-    let tools = match anemnez_extension::descriptor::check_descriptor(fds) {
-        Err(refused) => format!("its descriptor is refused: {refused:?}"),
+    let (tools, refused) = match anemnez_extension::descriptor::check_descriptor(fds) {
+        Err(refused) => {
+            let why = format!("its descriptor is refused: {refused:?}");
+            (why.clone(), Some(why))
+        }
         Ok(methods) => match anemnez_extension::mcp::flatten(&service, &methods) {
-            Err(refused) => format!("its descriptor has no face: {refused:?}"),
+            Err(refused) => {
+                let why = format!("its descriptor has no face: {refused:?}");
+                (why.clone(), Some(why))
+            }
             // One tool's listing per line, in the descriptor's order: what tools/list says.
-            Ok(tools) => tools.iter().map(|tool| tool.to_json().to_string()).collect::<Vec<_>>().join("\n"),
+            Ok(tools) => (tools.iter().map(|tool| tool.to_json().to_string()).collect::<Vec<_>>().join("\n"), None),
         },
     };
-    Ok(StaticHalf { instructions, tools })
+    Ok(StaticHalf { instructions, tools, refused })
 }
 
 /// `#the-static-half-is-byte-stable`, run over `product`: its static half read once up, again after its state
@@ -97,6 +107,7 @@ pub async fn the_static_half_is_byte_stable(product: &mut impl Restartable, cloc
 async fn check(product: &mut impl Restartable, clock: &Clock) -> Result<(), String> {
     let channel = step(clock, "come up", product.up()).await?;
     let first = static_half(channel.clone(), clock).await?;
+    has_a_face(&first)?;
     step(clock, "move its state", product.change()).await?;
     same("after its state moved", &first, &static_half(channel, clock).await?)?;
     down(product, clock).await?;
@@ -123,6 +134,18 @@ async fn down(product: &mut impl Restartable, clock: &Clock) -> Result<(), Strin
         Ok(())
     })
     .await
+}
+
+/// The first read's face, or why there's none to hold stable: a refused descriptor reads the same text every time,
+/// so it would pass byte for byte while Agora serves no tool of it (N m/40210, found by value in Ladon).
+fn has_a_face(first: &StaticHalf) -> Result<(), String> {
+    match &first.refused {
+        None => Ok(()),
+        Some(why) => Err(format!(
+            "the static half has no face to hold stable, so this row can't pass: {why}. Agora refuses this product's \
+             face; fix the descriptor (check_descriptor and mcp::flatten name what), then adopt the row"
+        )),
+    }
 }
 
 /// Byte for byte, or which read differed, in which part, and both texts.
