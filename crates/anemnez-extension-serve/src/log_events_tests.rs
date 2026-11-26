@@ -115,9 +115,64 @@ async fn a_call_reads_the_log_only_once_authorized() {
     assert_eq!(closed.watches_open(), 0, "a refused watch starts no thread");
     assert_eq!(*asked.lock().unwrap(), vec![Method::Call, Method::Watch], "the product decided each method");
 
-    // The Journal's stream isn't a log face's.
-    let unserved = open.events(tonic::Request::new(pb::EventsRequest::default())).await.err().expect("refused");
-    assert!(unserved.message().starts_with("events-call-unserved"), "{}", unserved.message());
+    // The Journal's stream, on a log face, is one Call: refused by the same decision.
+    let refused = closed.events(tonic::Request::new(pb::EventsRequest::default())).await.err().expect("refused");
+    assert_eq!(refused.message(), "unauthorized: no minion.audit grant");
+    assert_eq!(asked.lock().unwrap().last(), Some(&Method::Call), "decided as a Call");
+}
+
+/// `Events/Events` on a log face (O m/38880): what the flattened MCP `events` tool calls for every product. One
+/// bounded read from `after`, every event of an asked kind with its `<log>:<offset>` cursor and canonical bytes, then
+/// the stream ends; the last cursor as `after` reads on. A cursor of another log is cursor-not-mine, a misshapen one
+/// invalid, by name.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_journals_stream_on_a_log_face_is_one_bounded_read_by_cursor() {
+    let f = fixture();
+    for n in 0..3 {
+        f.publish(n);
+    }
+    let face = f.face(Authorize::allow_all());
+    let read = |after: &str, kinds: &[&str]| {
+        let request =
+            pb::EventsRequest { after: after.to_owned(), kinds: kinds.iter().map(|k| (*k).to_owned()).collect() };
+        let face = &face;
+        async move {
+            let stream = face.events(tonic::Request::new(request)).await?.into_inner();
+            let got: Vec<Result<pb::Event, tonic::Status>> = stream.collect().await;
+            got.into_iter().collect::<Result<Vec<_>, _>>()
+        }
+    };
+    let all = read("", &[]).await.expect("read");
+    let first = f.log.read(&from_start(), 10).expect("reads");
+    let Read::Events { events, .. } = first else { panic!("events") };
+    let want: Vec<(String, String, Vec<u8>)> = events
+        .iter()
+        .map(|(at, e)| (format!("{LOG}:{}", at.offset), e.kind.clone(), hydramq_events::to_bytes(e).expect("encodes")))
+        .collect();
+    let got: Vec<(String, String, Vec<u8>)> =
+        all.iter().map(|e| (e.cursor.clone(), e.kind.clone(), e.payload.clone())).collect();
+    assert_eq!(got, want, "every event, its cursor, kind and canonical bytes, by value");
+    assert_eq!(got.len(), 3);
+
+    let after_first = read(&all[0].cursor, &[]).await.expect("read on");
+    assert_eq!(
+        after_first.iter().map(|e| e.cursor.clone()).collect::<Vec<_>>(),
+        [all[1].cursor.clone(), all[2].cursor.clone()]
+    );
+    assert!(
+        read(&all[2].cursor, &[]).await.expect("at the head").is_empty(),
+        "nothing past the head, and the stream ends"
+    );
+    assert_eq!(read(&format!("{LOG}:"), &[]).await.expect("from its start").len(), 3, "<log>: is its start");
+    assert!(read("", &["other"]).await.expect("read").is_empty(), "only the kinds asked");
+    assert_eq!(read("", &["decided"]).await.expect("read").len(), 3);
+
+    let other = read("herald@studio:4", &[]).await.expect_err("another log's cursor");
+    assert!(other.message().starts_with("cursor-not-mine: "), "{}", other.message());
+    for bad in ["4", "audit:four", "audit:-1"] {
+        let refused = read(bad, &[]).await.expect_err("misshapen");
+        assert_eq!(refused.code(), tonic::Code::InvalidArgument, "{bad}: {}", refused.message());
+    }
 }
 
 /// A product's authorization that never answers is refused `unauthorized` at its bound, on the injected

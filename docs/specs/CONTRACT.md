@@ -141,8 +141,14 @@ queue, Minion's audit log first. `Events(after)` and the Journal are removed onc
 **A product serves its own log through the face, authorized before a byte is read** (K; D m/20645, E m/20648).
 anemnez-extension-serve's `EventsFace` is what `ApiFaces` takes: `Journal` (the retiring `EventsService`) or `Log`,
 a `LogEvents` over the product's own `hydramq_events::Events`. `Call` answers with `wire::serve` on the blocking pool
-inside `CALL_WITHIN` (past it, `events-call-unanswered`), `Watch` drives `wire::watch`, and `Events(after)` is refused
-`events-call-unserved`. Each call's principal token is checked by the one `Verifier`, then the product's own
+inside `CALL_WITHIN` (past it, `events-call-unanswered`), `Watch` drives `wire::watch`, and `Events(after)` is served
+as one bounded `Call` (O m/38880), so every client of it, the flattened MCP `events` tool among them, reads a log-faced
+product unchanged: authorized as a Call, then one read from `after` (`<log>:<offset>`, the cursor each event carries;
+`<log>:` or, on a one-log face, empty, for the log's start), at most `wire::WATCH_MAX` events and no wait, each of an
+asked kind (any, when none is) streamed as `{ cursor, kind, payload }` with the payload the event's canonical bytes,
+and the stream ends; the last cursor as `after` reads on. A cursor of a log the face doesn't serve is
+`cursor-not-mine`, one below the floor `out-of-range`, and an empty one on a face of several logs
+`read-needs-its-log`, each by name. Each call's principal token is checked by the one `Verifier`, then the product's own
 `Authorize` decides within `AUTHORIZE_WITHIN`: a refusal, or no answer, is `unauthorized` with its reason, and nothing
 of the log is served. There is no default: a product whose log is everyone's passes `Authorize::allow_all` by name.
 
