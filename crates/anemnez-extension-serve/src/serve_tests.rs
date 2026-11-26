@@ -368,14 +368,12 @@ pub(crate) fn land_descriptor_as(effect: pb::Effect, callers: pb::Callers) -> Ve
 
 /// The same, in `package`.
 pub(crate) fn land_descriptor_in(package: &str, effect: pb::Effect, callers: pb::Callers) -> Vec<u8> {
-    fn ld(field: u32, bytes: &[u8]) -> Vec<u8> {
-        let mut out = Vec::new();
-        prost::encoding::encode_key(field, prost::encoding::WireType::LengthDelimited, &mut out);
-        prost::encoding::encode_varint(bytes.len() as u64, &mut out);
-        out.extend_from_slice(bytes);
-        out
-    }
-    let options = pb::MethodOptions {
+    descriptor_of(package, &land_options(effect, callers))
+}
+
+/// Land's options, its effect `effect` and its callers `callers`.
+pub(crate) fn land_options(effect: pb::Effect, callers: pb::Callers) -> pb::MethodOptions {
+    pb::MethodOptions {
         description: "Land a train.".into(),
         result: Some(pb::Result { shape: Some(pb::result::Shape::Bound(50)) }),
         effect: effect as i32,
@@ -391,7 +389,27 @@ pub(crate) fn land_descriptor_in(package: &str, effect: pb::Effect, callers: pb:
         ask_within_secs: Some(90),
         // Every option, written out: a new one fails to compile here until its parity is said.
         orient: false,
-    };
+    }
+}
+
+/// One service H with one method Land in `package`, carrying `options`: a descriptor as a product's build writes it.
+pub(crate) fn descriptor_of(package: &str, options: &pb::MethodOptions) -> Vec<u8> {
+    descriptor_with(package, options, None)
+}
+
+/// [`descriptor_of`], its service carrying `product`'s service options (a whole product's, which `service_of` reads) when given.
+pub(crate) fn descriptor_with(
+    package: &str,
+    options: &pb::MethodOptions,
+    product: Option<&pb::ServiceOptions>,
+) -> Vec<u8> {
+    fn ld(field: u32, bytes: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        prost::encoding::encode_key(field, prost::encoding::WireType::LengthDelimited, &mut out);
+        prost::encoding::encode_varint(bytes.len() as u64, &mut out);
+        out.extend_from_slice(bytes);
+        out
+    }
     let mut method = prost_types::MethodDescriptorProto {
         name: Some("Land".into()),
         input_type: Some(format!(".{package}.Req")),
@@ -403,6 +421,9 @@ pub(crate) fn land_descriptor_in(package: &str, effect: pb::Effect, callers: pb:
     let mut service =
         prost_types::ServiceDescriptorProto { name: Some("H".into()), ..Default::default() }.encode_to_vec();
     service.extend(ld(2, &method));
+    if let Some(service_options) = product {
+        service.extend(ld(3, &ld(51702, &service_options.encode_to_vec())));
+    }
     let mut file = prost_types::FileDescriptorProto {
         package: Some(package.into()),
         message_type: vec![prost_types::DescriptorProto {

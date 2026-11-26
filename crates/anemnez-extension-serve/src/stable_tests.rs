@@ -61,3 +61,57 @@ fn a_face_refused_on_the_first_read_fails_the_row_by_name() {
     assert!(red.contains("UnboundedCollection"), "names why: {red}");
     assert_eq!(has_a_face(&half("guidance", r#"{"name":"recent"}"#)), Ok(()));
 }
+
+/// A product whose Describe serves `fds`, each `up` a fresh server on a fresh socket, as a restart is.
+struct Serves {
+    fds: Vec<u8>,
+    dirs: Vec<tempfile::TempDir>,
+}
+
+#[tonic::async_trait]
+impl Restartable for Serves {
+    async fn up(&mut self) -> Result<tonic::transport::Channel, String> {
+        use anemnez_extension::peer::{Code, Peer, Role};
+        let peer = Peer::from_token(
+            [501, 501, 20, 501, 20, 41, 100_001, 7],
+            Ok(Code { identifier: "ai.anemnez.x".into(), team: "TEAM1".into() }),
+        );
+        let (dir, socket, incoming) =
+            crate::serve_tests::listen_as(move |io| crate::Accepted::new(io, peer.clone(), Role::Agora));
+        let describe = crate::pb::describe_server::DescribeServer::new(crate::Describe::new(self.fds.clone()));
+        tokio::spawn(tonic::transport::Server::builder().add_service(describe).serve_with_incoming(incoming));
+        self.dirs.push(dir);
+        Ok(crate::serve_tests::channel_to(socket).await)
+    }
+    async fn change(&mut self) -> Result<(), String> {
+        Ok(())
+    }
+    async fn down(&mut self) {}
+}
+
+/// N m/40340: through the reader's own path. A product whose Describe serves a refused descriptor (Land with no result
+/// shape) fails the row on its first read by name, though every read says the same; the same product with Land's
+/// result said passes. A refactor of `check` that dropped the face check is red here.
+#[tokio::test]
+async fn a_product_serving_a_refused_descriptor_fails_the_row_through_the_check() {
+    use crate::serve_tests::{descriptor_with, land_options};
+    let service = crate::pb::ServiceOptions {
+        contract: "h".into(),
+        version: "1.0.0".into(),
+        cursor_scope: crate::pb::CursorScope::Instance as i32,
+        guidance: "H lands trains.".into(),
+        ..Default::default()
+    };
+    let clock = anemnez_clock::Clock::system();
+    let mut unsaid = land_options(crate::pb::Effect::Write, crate::pb::Callers::Product);
+    unsaid.result = None;
+    let refused = descriptor_with("h.v1", &unsaid, Some(&service));
+    assert!(anemnez_extension::descriptor::check_descriptor(&refused).is_err(), "the premise: it's refused");
+    let mut product = Serves { fds: refused, dirs: Vec::new() };
+    let red = the_static_half_is_byte_stable(&mut product, &clock).await.expect_err("red");
+    assert!(red.starts_with("the static half has no face to hold stable"), "{red}");
+    let admitted =
+        descriptor_with("h.v1", &land_options(crate::pb::Effect::Write, crate::pb::Callers::Product), Some(&service));
+    let mut product = Serves { fds: admitted, dirs: Vec::new() };
+    assert_eq!(the_static_half_is_byte_stable(&mut product, &clock).await, Ok(()));
+}
