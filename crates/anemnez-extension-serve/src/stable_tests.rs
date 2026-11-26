@@ -2,10 +2,10 @@
 
 use std::time::Duration;
 
-use super::{Restartable, STEP_WITHIN, StaticHalf, same, the_static_half_is_byte_stable};
+use super::{Restartable, STEP_WITHIN, StaticHalf, has_a_face, same, the_static_half_is_byte_stable};
 
 fn half(instructions: &str, tools: &str) -> StaticHalf {
-    StaticHalf { instructions: instructions.into(), tools: tools.into() }
+    StaticHalf { instructions: instructions.into(), tools: tools.into(), refused: None }
 }
 
 /// D m/33887: the tool list is cached too, so a tool description built from live state is red by the same check, and
@@ -47,4 +47,17 @@ async fn a_step_that_never_answers_is_named_at_its_bound() {
         manual.advance(STEP_WITHIN).await;
     });
     assert_eq!(checked, Err("the product didn't come up within 30s".to_owned()));
+}
+
+/// N m/40210: a refused descriptor is stable text, so it would pass byte for byte while Agora serves no tool of it.
+/// The first read with no face fails the row by name, and a face that lists passes it.
+#[test]
+fn a_face_refused_on_the_first_read_fails_the_row_by_name() {
+    let why = "its descriptor is refused: [UnboundedCollection(\"Check.result\")]".to_owned();
+    let refused = StaticHalf { instructions: "guidance".into(), tools: why.clone(), refused: Some(why) };
+    assert_eq!(same("after its state moved", &refused, &refused.clone()), Ok(()), "byte for byte it would pass");
+    let red = has_a_face(&refused).expect_err("red");
+    assert!(red.starts_with("the static half has no face to hold stable"), "{red}");
+    assert!(red.contains("UnboundedCollection"), "names why: {red}");
+    assert_eq!(has_a_face(&half("guidance", r#"{"name":"recent"}"#)), Ok(()));
 }
