@@ -524,49 +524,48 @@ fn every_plane_refusal_carries_its_teaching_beside_its_house_form_message() {
     assert_eq!(taught(NOT_JUDGED, path).code, "not-judged", "a sentence's name is given a code");
 }
 
-/// D m/30986: the one list is every name this file refuses with. Read from plane.rs's own production source, each
-/// SCREAMING_CASE name it answers `Err(NAME)` or `.ok_or(NAME)` with is in PLANE_REFUSALS, so a new refusal is taught
-/// and said, or this row is red.
+/// D m/30986, D m/31035: every refusal plane.rs answers goes through the one closed list, `PlaneRefusal`, whose name,
+/// why and whose the compiler holds. Read from plane.rs's own production source: no `Err(NAME)`, `.ok_or(NAME)` or
+/// `Err((NAME, …))` answers a raw name past it, so a new refusal is said and taught or this row is red.
 #[test]
 fn every_name_the_plane_refuses_with_is_on_its_one_list() {
     let source = include_str!("plane.rs");
     let production = source.split("#[cfg(test)]").next().unwrap_or(source);
-    let mut found = std::collections::BTreeSet::new();
-    for opener in ["Err(", "ok_or("] {
+    let mut raw = std::collections::BTreeSet::new();
+    for opener in ["Err(", "ok_or(", "Err(("] {
         for (at, _) in production.match_indices(opener) {
             let name: String =
                 production[at + opener.len()..].chars().take_while(|c| c.is_ascii_uppercase() || *c == '_').collect();
-            let closed = production[at + opener.len() + name.len()..].starts_with(')');
-            if name.len() > 2 && closed {
-                found.insert(name);
+            if name.len() > 2 {
+                raw.insert(name);
             }
         }
     }
-    let listed = [
-        ("NOT_JUDGED", NOT_JUDGED),
-        ("FABRICD_READS_DESCRIBE_ONLY", FABRICD_READS_DESCRIBE_ONLY),
-        ("STAMP_NOT_FROM_AGORA", STAMP_NOT_FROM_AGORA),
-        ("CARRIED_WRITE_UNBOUND", CARRIED_WRITE_UNBOUND),
-        ("CARRIED_NO_PREFACE", CARRIED_NO_PREFACE),
-        ("CARRIED_CLAIM_NOT_A_LANE", CARRIED_CLAIM_NOT_A_LANE),
-        ("CLAIMED_WRITE_NOT_A_WRITE", CLAIMED_WRITE_NOT_A_WRITE),
-        ("CLAIMED_METHOD_NOT_A_READ_OR_WRITE", CLAIMED_METHOD_NOT_A_READ_OR_WRITE),
-        ("PRODUCT_CALLER_UNPROVEN", anemnez_extension::peer::PRODUCT_CALLER_UNPROVEN),
-        ("PRODUCT_CALLER_UNTRUSTED", anemnez_extension::peer::PRODUCT_CALLER_UNTRUSTED),
-        ("PRODUCT_CALLERS_UNNAMED", anemnez_extension::peer::PRODUCT_CALLERS_UNNAMED),
-        ("PRODUCT_CALLER_NOT_ALLOWED", anemnez_extension::peer::PRODUCT_CALLER_NOT_ALLOWED),
-        ("PRODUCT_CALLERS_NOT_A_PRODUCT_METHOD", anemnez_extension::peer::PRODUCT_CALLERS_NOT_A_PRODUCT_METHOD),
-        ("PRODUCT_CALLERS_TWICE", anemnez_extension::peer::PRODUCT_CALLERS_TWICE),
-        ("DESCRIPTOR_UNCHECKED", anemnez_extension::peer::DESCRIPTOR_UNCHECKED),
-    ];
-    assert!(found.len() >= 6, "the census reads the plane's refusals: {found:?}");
-    for name in &found {
-        let value = listed.iter().find(|(n, _)| n == name).map(|(_, v)| *v);
-        assert!(
-            value.is_some_and(|v| PLANE_REFUSALS.contains(&v)),
-            "{name} is refused with in plane.rs but isn't on PLANE_REFUSALS, so it has no teaching row"
-        );
+    assert!(raw.is_empty(), "refused with by a raw name, past PlaneRefusal: {raw:?}");
+    assert!(
+        production.matches("PlaneRefusal::").count() >= 16,
+        "the census reads the plane's refusals through the enum"
+    );
+}
+
+/// ergon:H/plane-refusal-enum: each refusal's name reads back as itself, is said in the house form, and is taught with
+/// its own code and whose; PLANE_REFUSALS is the enum's names in its order.
+#[test]
+fn every_plane_refusal_round_trips_by_its_name() {
+    use crate::plane::PlaneRefusal;
+    assert_eq!(PLANE_REFUSALS.len(), PlaneRefusal::ALL.len());
+    for (refusal, name) in PlaneRefusal::ALL.into_iter().zip(PLANE_REFUSALS) {
+        assert_eq!(refusal.name(), name);
+        assert_eq!(PlaneRefusal::from_name(name), Some(refusal), "{name}");
+        let taught = taught(name, "/h.v1.H/Land");
+        assert_eq!((taught.code.as_str(), taught.whose), (refusal.code(), refusal.whose()), "{name}");
+        match refusal.why() {
+            Some(why) => assert_eq!(said(name), format!("{name}: {why}")),
+            None => assert_eq!(said(name), name),
+        }
     }
+    assert_eq!(PlaneRefusal::from_name("some-other-layer"), None);
+    assert_eq!(said("some-other-layer"), "some-other-layer: refused by the API plane");
 }
 
 // ── Carried product callers (D m/32662, m/32698; A's replica Open) ────────────────────────────────────────────────

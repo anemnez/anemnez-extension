@@ -53,17 +53,188 @@ use crate::accepted::Judged;
 /// The path prefix of the contract's `Describe` service, the one thing fabricd reads on the API plane.
 pub const DESCRIBE_PREFIX: &str = "/anemnez.extension.v1.Describe/";
 
+/// Every refusal the API plane answers, as one closed list the compiler holds (ergon:H/plane-refusal-enum; D m/31035):
+/// its wire name, its why, and whose it is to fix are exhaustive matches, so a new refusal is said and taught or the
+/// crate doesn't build. The pub fns keep answering `&'static str` names ([`PlaneRefusal::name`]), so no signature moves.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlaneRefusal {
+    NotJudged,
+    FabricdReadsDescribeOnly,
+    StampNotFromAgora,
+    CarriedWriteUnbound,
+    CarriedNoPreface,
+    CarriedClaimNotALane,
+    ClaimedWriteNotAWrite,
+    ClaimedMethodNotAReadOrWrite,
+    ProductCallerUnproven,
+    ProductCallerUntrusted,
+    ProductCallersUnnamed,
+    ProductCallerNotAllowed,
+    ProductCallersNotAProductMethod,
+    ProductCallersTwice,
+    DescriptorUnchecked,
+    BoundDecidedNotAMethod,
+}
+
+impl PlaneRefusal {
+    /// Every refusal, in the one order [`PLANE_REFUSALS`] lists their names.
+    pub const ALL: [PlaneRefusal; 16] = [
+        PlaneRefusal::NotJudged,
+        PlaneRefusal::FabricdReadsDescribeOnly,
+        PlaneRefusal::StampNotFromAgora,
+        PlaneRefusal::CarriedWriteUnbound,
+        PlaneRefusal::CarriedNoPreface,
+        PlaneRefusal::CarriedClaimNotALane,
+        PlaneRefusal::ClaimedWriteNotAWrite,
+        PlaneRefusal::ClaimedMethodNotAReadOrWrite,
+        PlaneRefusal::ProductCallerUnproven,
+        PlaneRefusal::ProductCallerUntrusted,
+        PlaneRefusal::ProductCallersUnnamed,
+        PlaneRefusal::ProductCallerNotAllowed,
+        PlaneRefusal::ProductCallersNotAProductMethod,
+        PlaneRefusal::ProductCallersTwice,
+        PlaneRefusal::DescriptorUnchecked,
+        PlaneRefusal::BoundDecidedNotAMethod,
+    ];
+
+    /// Its name on the wire, as every reader matches it.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            PlaneRefusal::NotJudged => NOT_JUDGED,
+            PlaneRefusal::FabricdReadsDescribeOnly => FABRICD_READS_DESCRIBE_ONLY,
+            PlaneRefusal::StampNotFromAgora => STAMP_NOT_FROM_AGORA,
+            PlaneRefusal::CarriedWriteUnbound => CARRIED_WRITE_UNBOUND,
+            PlaneRefusal::CarriedNoPreface => CARRIED_NO_PREFACE,
+            PlaneRefusal::CarriedClaimNotALane => CARRIED_CLAIM_NOT_A_LANE,
+            PlaneRefusal::ClaimedWriteNotAWrite => CLAIMED_WRITE_NOT_A_WRITE,
+            PlaneRefusal::ClaimedMethodNotAReadOrWrite => CLAIMED_METHOD_NOT_A_READ_OR_WRITE,
+            PlaneRefusal::ProductCallerUnproven => PRODUCT_CALLER_UNPROVEN,
+            PlaneRefusal::ProductCallerUntrusted => PRODUCT_CALLER_UNTRUSTED,
+            PlaneRefusal::ProductCallersUnnamed => PRODUCT_CALLERS_UNNAMED,
+            PlaneRefusal::ProductCallerNotAllowed => PRODUCT_CALLER_NOT_ALLOWED,
+            PlaneRefusal::ProductCallersNotAProductMethod => PRODUCT_CALLERS_NOT_A_PRODUCT_METHOD,
+            PlaneRefusal::ProductCallersTwice => PRODUCT_CALLERS_TWICE,
+            PlaneRefusal::DescriptorUnchecked => DESCRIPTOR_UNCHECKED,
+            PlaneRefusal::BoundDecidedNotAMethod => BOUND_DECIDED_NOT_A_METHOD,
+        }
+    }
+
+    /// Why, for a person reading more than the name; None for the one name that is already a sentence.
+    #[must_use]
+    pub const fn why(self) -> Option<&'static str> {
+        match self {
+            PlaneRefusal::NotJudged => None,
+            PlaneRefusal::FabricdReadsDescribeOnly => Some("fabricd reads Describe on the API plane and nothing else"),
+            PlaneRefusal::StampNotFromAgora => Some("a caller's stamp is believed only from Agora's judged peer"),
+            PlaneRefusal::CarriedWriteUnbound => Some(
+                "a call carried from another host reaches reads only, until its caller's principal is bound end to end",
+            ),
+            PlaneRefusal::CarriedNoPreface => {
+                Some("a carried write is admitted for a claimed lane only when aegisd says the node it came from")
+            }
+            PlaneRefusal::CarriedClaimNotALane => {
+                Some("a carried write's stamp must claim one of the product's lanes, by a plain name")
+            }
+            PlaneRefusal::ClaimedWriteNotAWrite => {
+                Some("only a method the descriptor says is a write may be listed for claimed lanes")
+            }
+            PlaneRefusal::ClaimedMethodNotAReadOrWrite => Some(
+                "only a method the descriptor says is a read or a write may be listed for claimed lanes, never an act",
+            ),
+            PlaneRefusal::ProductCallerUnproven => Some(
+                "a carried call to a method products call, or to Health, is admitted only when aegisd says who signed the \
+             far caller",
+            ),
+            PlaneRefusal::ProductCallerUntrusted => Some(
+                "a carried caller of a method products call, or of Health, must be signed by the \
+                                     house's team",
+            ),
+            PlaneRefusal::ProductCallersUnnamed => {
+                Some("a method products call admits a carried caller only once its product names who may")
+            }
+            PlaneRefusal::ProductCallerNotAllowed => {
+                Some("a carried product caller must be one the method's product names as its caller")
+            }
+            PlaneRefusal::ProductCallersNotAProductMethod => Some(
+                "only a method the descriptor says products call may list its callers, and it must name at least one",
+            ),
+            PlaneRefusal::ProductCallersTwice => {
+                Some("a method products call takes one list of its callers, from one place")
+            }
+            PlaneRefusal::DescriptorUnchecked => {
+                Some("methods are named only of a descriptor the contract's check admits: fix what it refused")
+            }
+            PlaneRefusal::BoundDecidedNotAMethod => Some(
+                "only a method of the product's own descriptor that products don't call may be decided for bound callers",
+            ),
+        }
+    }
+
+    /// Whose it is to fix: this host's wiring for a server that judged nothing or a carried call no aegisd vouched for,
+    /// else the call itself (through Agora, a read, a listed write, a plain lane name).
+    #[must_use]
+    pub const fn whose(self) -> Whose {
+        match self {
+            PlaneRefusal::NotJudged | PlaneRefusal::CarriedNoPreface => Whose::Operator,
+            PlaneRefusal::FabricdReadsDescribeOnly
+            | PlaneRefusal::StampNotFromAgora
+            | PlaneRefusal::CarriedWriteUnbound
+            | PlaneRefusal::CarriedClaimNotALane
+            | PlaneRefusal::ClaimedWriteNotAWrite
+            | PlaneRefusal::ClaimedMethodNotAReadOrWrite
+            | PlaneRefusal::ProductCallerUnproven
+            | PlaneRefusal::ProductCallerUntrusted
+            | PlaneRefusal::ProductCallersUnnamed
+            | PlaneRefusal::ProductCallerNotAllowed
+            | PlaneRefusal::ProductCallersNotAProductMethod
+            | PlaneRefusal::ProductCallersTwice
+            | PlaneRefusal::DescriptorUnchecked
+            | PlaneRefusal::BoundDecidedNotAMethod => Whose::Caller,
+        }
+    }
+
+    /// Its teaching's code: its name, except the one name that is a sentence.
+    #[must_use]
+    pub const fn code(self) -> &'static str {
+        match self {
+            PlaneRefusal::NotJudged => "not-judged",
+            PlaneRefusal::FabricdReadsDescribeOnly
+            | PlaneRefusal::StampNotFromAgora
+            | PlaneRefusal::CarriedWriteUnbound
+            | PlaneRefusal::CarriedNoPreface
+            | PlaneRefusal::CarriedClaimNotALane
+            | PlaneRefusal::ClaimedWriteNotAWrite
+            | PlaneRefusal::ClaimedMethodNotAReadOrWrite
+            | PlaneRefusal::ProductCallerUnproven
+            | PlaneRefusal::ProductCallerUntrusted
+            | PlaneRefusal::ProductCallersUnnamed
+            | PlaneRefusal::ProductCallerNotAllowed
+            | PlaneRefusal::ProductCallersNotAProductMethod
+            | PlaneRefusal::ProductCallersTwice
+            | PlaneRefusal::DescriptorUnchecked
+            | PlaneRefusal::BoundDecidedNotAMethod => self.name(),
+        }
+    }
+
+    /// The refusal a wire name says, if the plane refuses with it.
+    #[must_use]
+    pub fn from_name(name: &str) -> Option<PlaneRefusal> {
+        PlaneRefusal::ALL.into_iter().find(|r| r.name() == name)
+    }
+}
+
 /// Whether the API plane serves a call to `path` from the connection `judged` (None: not judged at accept),
 /// carrying a caller's stamp or not. `Err` is the refusal's name. Pure, so every rule has a row of its own.
 pub fn api_admits(judged: Option<&Judged>, path: &str, carries_stamp: bool) -> Result<(), &'static str> {
     let Some(judged) = judged else {
-        return Err(NOT_JUDGED);
+        return Err(PlaneRefusal::NotJudged.name());
     };
     match judged.role {
-        Role::Fabricd if !path.starts_with(DESCRIBE_PREFIX) => Err(FABRICD_READS_DESCRIBE_ONLY),
+        Role::Fabricd if !path.starts_with(DESCRIBE_PREFIX) => Err(PlaneRefusal::FabricdReadsDescribeOnly.name()),
         Role::Agora => Ok(()),
         // Every other role, a future one included, is not Agora: its stamp is never believed.
-        _ if carries_stamp => Err(STAMP_NOT_FROM_AGORA),
+        _ if carries_stamp => Err(PlaneRefusal::StampNotFromAgora.name()),
         _ => Ok(()),
     }
 }
@@ -156,7 +327,7 @@ impl BoundDecided {
         let mut decided = HashSet::new();
         for method in methods {
             if !decidable.contains(*method) {
-                return Err((BOUND_DECIDED_NOT_A_METHOD, (*method).to_owned()));
+                return Err((PlaneRefusal::BoundDecidedNotAMethod.name(), (*method).to_owned()));
             }
             decided.insert((*method).to_owned());
         }
@@ -189,9 +360,10 @@ fn checked(
     match anemnez_extension::descriptor::check_descriptor(file_descriptor_set) {
         Ok(methods) => Ok(methods),
         Err(_) if !names => Ok(Vec::new()),
-        Err(refused) => {
-            Err((DESCRIPTOR_UNCHECKED, refused.iter().map(ToString::to_string).collect::<Vec<_>>().join("; ")))
-        }
+        Err(refused) => Err((
+            PlaneRefusal::DescriptorUnchecked.name(),
+            refused.iter().map(ToString::to_string).collect::<Vec<_>>().join("; "),
+        )),
     }
 }
 
@@ -222,7 +394,7 @@ impl ProductCallers {
         let mut allowed = std::collections::HashMap::new();
         for (method, identifiers) in allow {
             if !methods.contains(*method) || identifiers.is_empty() {
-                return Err((PRODUCT_CALLERS_NOT_A_PRODUCT_METHOD, (*method).to_owned()));
+                return Err((PlaneRefusal::ProductCallersNotAProductMethod.name(), (*method).to_owned()));
             }
             allowed.insert((*method).to_owned(), identifiers.iter().map(|i| (*i).to_owned()).collect());
         }
@@ -253,7 +425,7 @@ impl ProductCallers {
         let mut allowed = (*self.allowed).clone();
         for (method, list) in other.allowed.iter() {
             if allowed.insert(method.clone(), list.clone()).is_some() {
-                return Err((PRODUCT_CALLERS_TWICE, method.clone()));
+                return Err((PlaneRefusal::ProductCallersTwice.name(), method.clone()));
             }
         }
         Ok(ProductCallers { methods: Arc::new(methods), allowed: Arc::new(allowed) })
@@ -287,10 +459,10 @@ pub struct ProductCaller {
 /// identity in it, one meaning whatever the cause; [`PRODUCT_CALLER_UNTRUSTED`] for another team;
 /// [`PRODUCT_CALLER_NOT_ALLOWED`] for an identifier not on the list.
 pub fn product_admits(judged: &Judged, allowed: Option<&[String]>) -> Result<ProductCaller, &'static str> {
-    let Some(allowed) = allowed else { return Err(PRODUCT_CALLERS_UNNAMED) };
+    let Some(allowed) = allowed else { return Err(PlaneRefusal::ProductCallersUnnamed.name()) };
     let caller = house_signed(judged)?;
     if !allowed.contains(&caller.identity.identifier) {
-        return Err(PRODUCT_CALLER_NOT_ALLOWED);
+        return Err(PlaneRefusal::ProductCallerNotAllowed.name());
     }
     Ok(caller)
 }
@@ -303,10 +475,10 @@ pub fn product_admits(judged: &Judged, allowed: Option<&[String]>) -> Result<Pro
 /// [`PRODUCT_CALLER_UNPROVEN`] with no preface or no code identity in it, one meaning whatever the cause;
 /// [`PRODUCT_CALLER_UNTRUSTED`] for another team.
 pub fn house_signed(judged: &Judged) -> Result<ProductCaller, &'static str> {
-    let Some(preface) = &judged.carried else { return Err(PRODUCT_CALLER_UNPROVEN) };
-    let Some(identity) = &preface.code else { return Err(PRODUCT_CALLER_UNPROVEN) };
+    let Some(preface) = &judged.carried else { return Err(PlaneRefusal::ProductCallerUnproven.name()) };
+    let Some(identity) = &preface.code else { return Err(PlaneRefusal::ProductCallerUnproven.name()) };
     if identity.team != anemnez_trust::ANEMNEZ_TEAM {
-        return Err(PRODUCT_CALLER_UNTRUSTED);
+        return Err(PlaneRefusal::ProductCallerUntrusted.name());
     }
     Ok(ProductCaller { node: preface.node.clone(), identity: identity.clone() })
 }
@@ -318,7 +490,7 @@ pub fn house_signed(judged: &Judged) -> Result<ProductCaller, &'static str> {
 /// [`CARRIED_WRITE_UNBOUND`] for a carried call to anything but a read.
 pub fn carried_admits(role: Role, path: &str, reads: &Reads) -> Result<(), &'static str> {
     match role {
-        Role::Carried if !reads.reads(path) => Err(CARRIED_WRITE_UNBOUND),
+        Role::Carried if !reads.reads(path) => Err(PlaneRefusal::CarriedWriteUnbound.name()),
         _ => Ok(()),
     }
 }
@@ -383,7 +555,7 @@ impl ClaimedMethods {
             match effects.get(*method) {
                 Some(Effect::Write) => writes.insert((*method).to_owned()),
                 Some(Effect::Read) => reads.insert((*method).to_owned()),
-                _ => return Err((CLAIMED_METHOD_NOT_A_READ_OR_WRITE, (*method).to_owned())),
+                _ => return Err((PlaneRefusal::ClaimedMethodNotAReadOrWrite.name(), (*method).to_owned())),
             };
         }
         Ok(ClaimedMethods { writes: Arc::new(writes), reads: Arc::new(reads), is_lane: Arc::new(is_lane) })
@@ -425,11 +597,12 @@ fn lane_shaped(lane: &str) -> bool {
 /// [`CARRIED_NO_PREFACE`] when aegisd said no node; [`CARRIED_CLAIM_NOT_A_LANE`] for no stamp, a stamp with no lane, a
 /// lane not shaped as a plain name, or one the product says isn't its lane.
 pub fn carried_claim(judged: &Judged, stamp: Option<&[u8]>, claimed: &ClaimedMethods) -> Result<Claimed, &'static str> {
-    let via = judged.carried.as_ref().map(|preface| preface.node.clone()).ok_or(CARRIED_NO_PREFACE)?;
-    let stamp = Stamp::from_metadata(stamp.ok_or(CARRIED_CLAIM_NOT_A_LANE)?);
-    let lane = stamp.claimed_lane().ok_or(CARRIED_CLAIM_NOT_A_LANE)?;
+    let via =
+        judged.carried.as_ref().map(|preface| preface.node.clone()).ok_or(PlaneRefusal::CarriedNoPreface.name())?;
+    let stamp = Stamp::from_metadata(stamp.ok_or(PlaneRefusal::CarriedClaimNotALane.name())?);
+    let lane = stamp.claimed_lane().ok_or(PlaneRefusal::CarriedClaimNotALane.name())?;
     if !lane_shaped(lane) || !(claimed.is_lane)(lane) {
-        return Err(CARRIED_CLAIM_NOT_A_LANE);
+        return Err(PlaneRefusal::CarriedClaimNotALane.name());
     }
     Ok(Claimed { lane: lane.to_owned(), via })
 }
@@ -460,7 +633,7 @@ pub fn plane_admits(
         // A carried write its product didn't list is carried-write-unbound, stamp or none: the method isn't a claimed
         // write here, which is what the lane must hear, never stamp-not-from-agora, which tells it its caller is wrong
         // (D m/30197, rule 15).
-        Some(j) if j.role == Role::Carried => Err(CARRIED_WRITE_UNBOUND),
+        Some(j) if j.role == Role::Carried => Err(PlaneRefusal::CarriedWriteUnbound.name()),
         _ => api_admits(judged, path, stamp.is_some())
             .and_then(|()| judged.map_or(Ok(()), |j| carried_admits(j.role, path, reads)))
             .map(|()| None),
@@ -471,45 +644,15 @@ pub fn plane_admits(
 /// so a reader matches it by its name (anemnez-service `reach::named`), and why, so a person reads more than the name.
 #[must_use]
 pub fn said(name: &'static str) -> String {
-    let why = match name {
-        // Already a sentence a person reads, and unchanged on the wire.
-        NOT_JUDGED => return name.to_owned(),
-        FABRICD_READS_DESCRIBE_ONLY => "fabricd reads Describe on the API plane and nothing else",
-        STAMP_NOT_FROM_AGORA => "a caller's stamp is believed only from Agora's judged peer",
-        CARRIED_WRITE_UNBOUND => {
-            "a call carried from another host reaches reads only, until its caller's principal is bound end to end"
-        }
-        CARRIED_NO_PREFACE => {
-            "a carried write is admitted for a claimed lane only when aegisd says the node it came from"
-        }
-        CARRIED_CLAIM_NOT_A_LANE => "a carried write's stamp must claim one of the product's lanes, by a plain name",
-        CLAIMED_WRITE_NOT_A_WRITE => "only a method the descriptor says is a write may be listed for claimed lanes",
-        CLAIMED_METHOD_NOT_A_READ_OR_WRITE => {
-            "only a method the descriptor says is a read or a write may be listed for claimed lanes, never an act"
-        }
-        PRODUCT_CALLER_UNPROVEN => {
-            "a carried call to a method products call, or to Health, is admitted only when aegisd says who signed the \
-             far caller"
-        }
-        PRODUCT_CALLER_UNTRUSTED => {
-            "a carried caller of a method products call, or of Health, must be signed by the \
-                                     house's team"
-        }
-        PRODUCT_CALLERS_UNNAMED => "a method products call admits a carried caller only once its product names who may",
-        PRODUCT_CALLER_NOT_ALLOWED => "a carried product caller must be one the method's product names as its caller",
-        PRODUCT_CALLERS_TWICE => "a method products call takes one list of its callers, from one place",
-        DESCRIPTOR_UNCHECKED => {
-            "methods are named only of a descriptor the contract's check admits: fix what it refused"
-        }
-        BOUND_DECIDED_NOT_A_METHOD => {
-            "only a method of the product's own descriptor that products don't call may be decided for bound callers"
-        }
-        PRODUCT_CALLERS_NOT_A_PRODUCT_METHOD => {
-            "only a method the descriptor says products call may list its callers, and it must name at least one"
-        }
-        _ => "refused by the API plane",
-    };
-    format!("{name}: {why}")
+    match PlaneRefusal::from_name(name) {
+        Some(refusal) => match refusal.why() {
+            Some(why) => format!("{name}: {why}"),
+            // Already a sentence a person reads, and unchanged on the wire.
+            None => name.to_owned(),
+        },
+        // A name the plane never refuses with: a caller handing in another layer's.
+        None => format!("{name}: refused by the API plane"),
+    }
 }
 
 /// A plane refusal of a call to `path`, as [`said`] says it, and for `carried-write-unbound` naming the method, so the
@@ -527,24 +670,15 @@ pub fn said_on(name: &'static str, path: &str) -> String {
 
 /// Every name the API plane refuses with, at a call or when the plane is built: the one list [`said`] and [`taught`]
 /// answer for, held by a row that reads this file's own refusals, so a new name can't go untaught (D m/30986).
-pub const PLANE_REFUSALS: [&str; 16] = [
-    NOT_JUDGED,
-    FABRICD_READS_DESCRIBE_ONLY,
-    STAMP_NOT_FROM_AGORA,
-    CARRIED_WRITE_UNBOUND,
-    CARRIED_NO_PREFACE,
-    CARRIED_CLAIM_NOT_A_LANE,
-    CLAIMED_WRITE_NOT_A_WRITE,
-    CLAIMED_METHOD_NOT_A_READ_OR_WRITE,
-    PRODUCT_CALLER_UNPROVEN,
-    PRODUCT_CALLER_UNTRUSTED,
-    PRODUCT_CALLERS_UNNAMED,
-    PRODUCT_CALLER_NOT_ALLOWED,
-    PRODUCT_CALLERS_NOT_A_PRODUCT_METHOD,
-    PRODUCT_CALLERS_TWICE,
-    DESCRIPTOR_UNCHECKED,
-    BOUND_DECIDED_NOT_A_METHOD,
-];
+pub const PLANE_REFUSALS: [&str; 16] = {
+    let mut names = [""; 16];
+    let mut i = 0;
+    while i < PlaneRefusal::ALL.len() {
+        names[i] = PlaneRefusal::ALL[i].name();
+        i += 1;
+    }
+    names
+};
 
 /// A plane refusal of a call to `path` as a teaching (house rule 15, AX3): its name as the code, what `said_on` says
 /// as what was expected, a retry class, and whose it is to fix. Every plane refusal is refused before any work, and the
@@ -552,13 +686,8 @@ pub const PLANE_REFUSALS: [&str; 16] = [
 /// operator's wiring of this host.
 #[must_use]
 pub fn taught(name: &'static str, path: &str) -> Teaching {
-    let (code, whose) = match name {
-        // A server whose accept judged nothing, or a carried call no aegisd vouched for: this host's wiring.
-        NOT_JUDGED => ("not-judged", Whose::Operator),
-        CARRIED_NO_PREFACE => (name, Whose::Operator),
-        // Every other is the call itself: through Agora, a read, a listed write, a plain lane name.
-        _ => (name, Whose::Caller),
-    };
+    let (code, whose) =
+        PlaneRefusal::from_name(name).map_or((name, Whose::Caller), |refusal| (refusal.code(), refusal.whose()));
     let said = said_on(name, path);
     let expected = said.split_once(": ").map_or(said.as_str(), |(_, why)| why).to_owned();
     Teaching::refused(code, expected, RetryClass::Blanket, whose)
