@@ -138,6 +138,9 @@ async fn down(product: &mut impl Restartable, clock: &Clock) -> Result<(), Strin
 
 /// The first read's face, or why there's none to hold stable: a refused descriptor reads the same text every time,
 /// so it would pass byte for byte while Agora serves no tool of it (N m/40210, found by value in Ladon).
+/// A face that lists no tools is a face, deliberately (N m/40340): a product whose every method is a product's or
+/// unoffered has no MCP tool by design, and its instructions are still the static half a client caches, so it is held
+/// stable like any other.
 fn has_a_face(first: &StaticHalf) -> Result<(), String> {
     match &first.refused {
         None => Ok(()),
