@@ -85,8 +85,8 @@ fn latest_on_a_many_log_face_reads_the_log_it_names_and_never_routes_by_spelling
     assert!(foreign.contains("ship") && foreign.contains("forecast, owed"), "{foreign}");
 }
 
-/// over_many takes one or more logs, each by a name, never two of one name; and a Call through the face reads the log
-/// its request names.
+/// over_many takes one or more logs, each by its own name (M's nit, O m/40956: never a name the log doesn't call
+/// itself), never two of one name; and a Call through the face reads the log its request names.
 #[tokio::test]
 async fn over_many_names_each_log_once_and_a_call_reads_the_named_one() {
     let dir = tempfile::tempdir().unwrap();
@@ -94,7 +94,11 @@ async fn over_many_names_each_log_once_and_a_call_reads_the_named_one() {
     let verifier = || crate::principal_tests::verifier(&manual, true);
     let owed: Arc<dyn Log> = Arc::new(log(dir.path(), "owed", 2));
     let forecast: Arc<dyn Log> = Arc::new(log(dir.path(), "forecast", 1));
-    let twice = vec![("owed".to_owned(), Arc::clone(&owed)), ("owed".to_owned(), Arc::clone(&forecast))];
+    let misnamed = vec![("owed".to_owned(), Arc::clone(&owed)), ("owed-too".to_owned(), Arc::clone(&forecast))];
+    let refused =
+        LogEvents::over_many(misnamed, verifier(), Authorize::allow_all(), manual.clock()).err().expect("misnamed");
+    assert!(refused.starts_with("log-misnamed") && refused.contains("\"forecast\""), "{refused}");
+    let twice = vec![("owed".to_owned(), Arc::clone(&owed)), ("owed".to_owned(), Arc::clone(&owed))];
     let refused = LogEvents::over_many(twice, verifier(), Authorize::allow_all(), manual.clock()).err().expect("twice");
     assert!(refused.starts_with("log-names-twice"), "{refused}");
     let unnamed = vec![(String::new(), Arc::clone(&owed))];

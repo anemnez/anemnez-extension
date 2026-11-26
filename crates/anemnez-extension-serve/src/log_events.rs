@@ -353,7 +353,9 @@ impl LogEvents {
     /// name until a request can name its log ([`crate::many::LATEST_NEEDS_ITS_LOG`]).
     ///
     /// # Errors
-    /// `log-names-twice` for two logs of one name, and `log-unnamed` for an empty name or none at all.
+    /// `log-names-twice` for two logs of one name, `log-unnamed` for an empty name or none at all, and
+    /// `log-misnamed` for a name that isn't its log's own ([`Log::name`]; M's nit, O m/40956): a request's position
+    /// names a log by what the log calls itself, so a face keyed by any other name would serve it under two.
     pub fn over_many(
         logs: Vec<(String, Arc<dyn Log>)>,
         verifier: Verifier,
@@ -362,6 +364,9 @@ impl LogEvents {
     ) -> Result<LogEvents, String> {
         if logs.is_empty() || logs.iter().any(|(name, _)| name.is_empty()) {
             return Err("log-unnamed: a many-log face serves one or more logs, each by a name".into());
+        }
+        if let Some((name, log)) = logs.iter().find(|(name, log)| name != log.name()) {
+            return Err(format!("log-misnamed: {name:?} names a log that calls itself {:?}", log.name()));
         }
         let mut seen = std::collections::BTreeSet::new();
         if let Some((name, _)) = logs.iter().find(|(name, _)| !seen.insert(name.clone())) {
