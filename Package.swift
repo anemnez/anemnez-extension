@@ -19,6 +19,8 @@ let package = Package(
         .package(url: "https://github.com/grpc/grpc-swift-nio-transport.git", exact: "2.12.0"),
         .package(url: "https://github.com/grpc/grpc-swift-protobuf.git", exact: "2.5.0"),
         .package(url: "https://github.com/apple/swift-protobuf.git", exact: "1.39.0"),
+        // The house's one Swift test clock (rule 3; M m/33939), for the host's rows only, at ergon's pin.
+        .package(url: "ssh://git@github.com/anemnez/anemnez-clock.git", revision: "dd75fd1661ba"),
     ],
     targets: [
         .target(
@@ -36,7 +38,7 @@ let package = Package(
         ),
         .testTarget(
             name: "AnemnezEventsTests",
-            dependencies: ["AnemnezEvents"],
+            dependencies: ["AnemnezEvents", .product(name: "AnemnezClockTesting", package: "anemnez-clock")],
             path: "swift/Tests/AnemnezEventsTests"
         ),
     ]

@@ -1,6 +1,15 @@
 {
-  "originHash" : "2baa7651f1e6476457f9b50b69636787ba03a00715322945d8f3ea5272d82df9",
+  "originHash" : "3c3bc1ce4c54220c01a15000a1860c99cb29c22970c92b3ab7155774c4314aed",
   "pins" : [
+    {
+      "identity" : "anemnez-clock",
+      "kind" : "remoteSourceControl",
+      "location" : "ssh://git@github.com/anemnez/anemnez-clock.git",
+      "state" : {
+        "branch" : "dd75fd1661ba",
+        "revision" : "dd75fd1661bafde5a42b67df4bd47f4f96954ae5"
+      }
+    },
     {
       "identity" : "grpc-swift-2",
       "kind" : "remoteSourceControl",
