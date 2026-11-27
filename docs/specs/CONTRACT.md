@@ -497,11 +497,24 @@ refuses `cursor-face-unserved` by name, as `events-call-unserved` is refused tod
 
 - **`Cursor/Next { recipient, after, max }`**: the product's items for `recipient` past `after`, at most `max`, each
   with its position, source key, kind, urgency, subject, `re` and sender (hydramq-deliver's item), plus the
-  recipient's `acked` and `handed` marks. A position below the log's retained start answers
-  `Trimmed { from, to }` by name, never a silent jump.
+  recipient's `acked` and `handed` marks, how far it scanned (`scanned_to`), and when it read them (`read_at`). A
+  position below the log's retained start answers `Trimmed { from, to }` by name, never a silent jump: `from` is the
+  first position trimmed past the recipient's mark and `to` the last trimmed, inclusive, never the retained start, so
+  a client that acks through `to` is handed the first retained item next (D m/43584). `Whose`
+  filters, so a page can hold nothing of this recipient's: `Next` reads on page by page inside the call's own bound,
+  as Events/Events does (D m/40656), and a scan cut short by the bound answers what it found with `scanned_to`, where
+  to read on. So an empty answer with `scanned_to` at the head is caught up, and one short of the head is not, and is
+  never taken as caught up (M m/43563 3, D m/43564 1).
 - **`Cursor/Commit { recipient, mark: acked | handed, through, session }`**: moves that mark to `through`. The answer
   is the mark as it now stands. A commit at or below the mark is done (a repeat is harmless), and the client reads
-  "ours or further" from the answer (rule 5). `session` rides `handed` for diagnosis only (DELIVERY §1b's WARN).
+  "ours or further" from the answer (rule 5). Two refusals, by name (M 1, 2):
+  - `commit-past-end`, naming the log's end: `through` past the end is refused, since a client can't have been
+    handed it, and committing it would skip the items between for good.
+  - `acked` never passes `handed`: an `acked` commit past `handed` raises `handed` with it, in one decided write.
+    It is never refused, because `handed` is advisory and a client's batched `handed` may lag its ack.
+  `session` rides `handed` for diagnosis only. The re-hand decision (the same session hands after its own
+  position, a new one from `acked`) lives in the client's own memory, DELIVERY §1b's `Handed { pos, session }`, never
+  in the producer's mark (M 4).
 
 **One kernel, never a second.** The rise-only mark is hydramq-cursor's: `Change::Ack { through }` never moves the mark
 back (a lower one is a no-op), `Change::Hand { through }` records what is in flight, and the store fences each
@@ -520,9 +533,18 @@ mark logic of its own: it maps the two calls onto `Marks::decide` and the store 
   `cursor-not-yours` by name, for `Next` and `Commit` alike.
 
 **Bounds.** Every call is bounded by the caller (DELIVERY §1b: `SOURCE_WITHIN`, 1.5 s, inside the carrier point's
-own). An unanswered `Commit` is Unclear and read back by the next `Next`, whose marks say where it stands.
+own). An unanswered `Commit` is Unclear and read back by the next `Next`, whose marks say where it stands. That `Next`
+may come from a replica that hasn't seen the commit yet, so its marks can be the ones from before it (D m/43564 2). The
+client then commits again, which is harmless since a mark only rises, and may hand an item again, which is
+at-least-once's stated cost. `read_at` says how fresh the marks it read are.
 
-Rows, when built: a commit only rises and a repeat is done; a commit or `Next` from an unlisted caller is refused
+**Scan cost.** A recipient with few items in a busy log scans far per call. A product whose log is keyed by recipient
+(a subject prefix per recipient) plugs a `Whose` that also seeks by recipient, so `Next` reads only that recipient's
+items. A product with no such key is scanned page by page as above. Stoa keeps its own per-member index and plugs it
+in that way (D 1).
+
+Rows, when built: a commit only rises and a repeat is done; `commit-past-end` names the end; an `acked` past
+`handed` raises `handed`; an empty page short of the head says `scanned_to` and is not caught up; a commit or `Next` from an unlisted caller is refused
 `cursor-not-yours`; `Next` below the retained start is `Trimmed`; two recipients' marks never touch; a product that
 declares no face refuses `cursor-face-unserved`; and a commit read back through `Next` from a replica.
 
