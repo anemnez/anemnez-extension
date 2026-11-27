@@ -169,9 +169,13 @@ pub enum DescriptorRefusal {
     BoundZero(String),
     /// `bound_secs` past [`crate::options::BOUND_CAP_SECS`], with the value (`bound-over-cap`).
     BoundOverCap(String, u32),
-    /// `ask_within_secs` past `bound_secs`, both stated (`ask-past-bound`): an Ask is held inside the method's work,
-    /// so its bound is the inner one (rule 4). The ask's and the work's, said.
+    /// `ask_within_secs` not at least [`crate::options::ASK_MARGIN_SECS`] inside `bound_secs`, both stated
+    /// (`ask-past-bound`): an Ask is held inside the method's work, so its bound is the inner one, strictly (rule 4).
+    /// The ask's and the work's, said.
     AskPastBound(String, u32, u32),
+    /// `bound_secs` too short to hold any Ask inside it, with no `ask_within_secs` stated (`bound-holds-no-ask`): the
+    /// default would end at or past the work's bound. A method that never asks says 0.
+    BoundHoldsNoAsk(String, u32),
     /// No service in the descriptor carries `anemnez_service`: it says nothing of what it serves.
     ServiceOptionsMissing,
     /// Two services carry `anemnez_service` (both named): a descriptor serves one contract.
@@ -233,6 +237,7 @@ impl DescriptorRefusal {
             Self::BoundZero(_) => "bound-zero",
             Self::BoundOverCap(..) => "bound-over-cap",
             Self::AskPastBound(..) => "ask-past-bound",
+            Self::BoundHoldsNoAsk(..) => "bound-holds-no-ask",
             Self::ServiceOptionsMissing => "service-options-missing",
             Self::ServiceOptionsTwice(..) => "service-options-twice",
             Self::ServiceOptionsMalformed(_) => "service-options-malformed",
@@ -278,8 +283,15 @@ impl std::fmt::Display for DescriptorRefusal {
             ),
             Self::AskPastBound(path, ask, bound) => write!(
                 f,
-                "{path}: ask-past-bound: ask_within_secs {ask} is past bound_secs {bound}; an Ask is held inside the \
-                 method's work, so its bound must be the shorter"
+                "{path}: ask-past-bound: ask_within_secs {ask} doesn't end {}s inside bound_secs {bound}; an Ask is \
+                 held inside the method's work, so its bound must be the shorter",
+                crate::options::ASK_MARGIN_SECS
+            ),
+            Self::BoundHoldsNoAsk(path, bound) => write!(
+                f,
+                "{path}: bound-holds-no-ask: bound_secs {bound} leaves no Ask {}s inside it; state ask_within_secs 0 \
+                 if the method never asks, or a longer bound",
+                crate::options::ASK_MARGIN_SECS
             ),
             Self::ServiceOptionsMissing => f.write_str(self.name()),
             Self::MediaUnknown(path, media) => {
@@ -453,11 +465,20 @@ fn bounds_refused(path: &str, raw: &wire::MethodOptions) -> Vec<DescriptorRefusa
         }
         _ => {}
     }
-    // Both stated (D m/44391): an absent ask is the host's default, which the method never claimed.
-    if let (Some(ask), Some(bound)) = (raw.ask_within_secs, raw.bound_secs.filter(|&b| b > 0))
-        && ask > bound
-    {
-        refused.push(DescriptorRefusal::AskPastBound(path.to_owned(), ask, bound));
+    // An Ask ends ASK_MARGIN_SECS inside the work's bound (D m/44391, E m/44479). A stated 0 never asks; an absent ask
+    // reads its default inside the bound (MethodOptions::ask_within), so only a bound with no room for one is refused.
+    if let Some(bound) = raw.bound_secs.filter(|&b| b > 0) {
+        match raw.ask_within_secs {
+            Some(0) => {}
+            Some(ask) if ask.saturating_add(crate::options::ASK_MARGIN_SECS) > bound => {
+                refused.push(DescriptorRefusal::AskPastBound(path.to_owned(), ask, bound));
+            }
+            Some(_) => {}
+            None if bound <= crate::options::ASK_MARGIN_SECS => {
+                refused.push(DescriptorRefusal::BoundHoldsNoAsk(path.to_owned(), bound));
+            }
+            None => {}
+        }
     }
     refused
 }
