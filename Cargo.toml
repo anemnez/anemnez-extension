@@ -36,11 +36,11 @@ anemnez-sim = { git = "ssh://git@github.com/anemnez/anemnez-sim.git", rev = "1c5
 # The one face for every product's events (fabric EVENTS.md §6a): the client reads it over Events/Call.
 # hydramq's leaves in the same dual form, at hydramq's step-2 release f852078 (A m/36770), so their anemnez-clock,
 # layout and sim are the same git copies as ours.
-hydramq-events = { git = "ssh://git@github.com/anemnez/hydramq.git", rev = "d8dd5108f320", version = "0.5", registry-index = "sparse+http://127.0.0.1:7787/crates/index/" }
+hydramq-events = { git = "ssh://git@github.com/anemnez/hydramq.git", rev = "b60563477613", version = "0.5", registry-index = "sparse+http://127.0.0.1:7787/crates/index/" }
 # A recipient's rise-only marks (CONTRACT.md §2a, the cursor face): hydramq-cursor's kernel, never a second one.
-hydramq-cursor = { git = "ssh://git@github.com/anemnez/hydramq.git", rev = "d8dd5108f320", version = "0.5", registry-index = "sparse+http://127.0.0.1:7787/crates/index/" }
+hydramq-cursor = { git = "ssh://git@github.com/anemnez/hydramq.git", rev = "b60563477613", version = "0.5", registry-index = "sparse+http://127.0.0.1:7787/crates/index/" }
 # The message codec, dev-only: a row builds a request of a kind hydramq-events can't name (ergon:M/events-carried-read).
-hydramq-message = { git = "ssh://git@github.com/anemnez/hydramq.git", rev = "d8dd5108f320", version = "0.5", registry-index = "sparse+http://127.0.0.1:7787/crates/index/" }
+hydramq-message = { git = "ssh://git@github.com/anemnez/hydramq.git", rev = "b60563477613", version = "0.5", registry-index = "sparse+http://127.0.0.1:7787/crates/index/" }
 tonic = "0.12"
 # A product's own HTTP routes on the API plane (ProductRoutes::http): tonic 0.12's own axum, so a Router converts.
 axum = { version = "0.7", default-features = false }
