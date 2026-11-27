@@ -108,4 +108,11 @@ fn an_args_refusal_names_the_key_and_kinds_never_the_value() {
     assert!(kinds.contains("`kinds` takes an array, not a string"), "named by key and kinds: {kinds}");
     let nested = contract.encode(path, &format!(r#"{{"kinds": [{{"x": "{SECRET}"}}]}}"#)).expect_err("refused");
     assert!(!nested.to_string().contains(SECRET), "{nested}");
+
+    // D m/42079: a key is the caller's input too. One that reads as a field name is named; one that doesn't is said by
+    // its length alone.
+    let typo = contract.encode(path, r#"{"kindz": []}"#).expect_err("no such field").to_string();
+    assert!(typo.contains("has no field `kindz`"), "a field-shaped key is named: {typo}");
+    let keyed = contract.encode(path, &format!(r#"{{"{SECRET}-x": 1}}"#)).expect_err("no such field").to_string();
+    assert!(!keyed.contains(SECRET) && keyed.contains("a key of 23 chars isn't a field"), "{keyed}");
 }
