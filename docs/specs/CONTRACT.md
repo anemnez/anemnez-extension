@@ -724,7 +724,9 @@ identity unreadable`.
 `ApiPlaneLayer` reads the `Judged` peer on each request and answers PERMISSION_DENIED by name before
 any service runs: a call on a connection not judged at accept is refused `connection not judged at
 accept`, never served as an ordinary caller; fabricd's peer gets `Describe` only, and anything else is
-refused `fabricd-reads-describe-only`; and a call that carries a caller's stamp from any peer but
+refused `fabricd-reads-describe-only`. That holds for a peer the product's policy judged `Role::Fabricd`. A product
+whose policy refuses fabricd instead leaves it to the SDK's house fallback, and fabricd, house-signed, is then a house
+reader: it reaches the faces (Describe, Health, the log's reads), never a product method (D m/41720). And a call that carries a caller's stamp from any peer but
 Agora's is refused `stamp-not-from-agora`, not ignored. `api_admits` is that decision, pure, so each
 rule has its own row. A role this build doesn't know is not Agora, so its stamp is refused too. Which
 principal the call then runs as, and whether a grant covers it, stays the product's decision (below).
@@ -768,8 +770,12 @@ Anything else, a product's own read included, is refused `house-reads-faces-only
 from a carried caller whose preface proves the house's team, is never the rollout's absent caller: the token check is
 not asked, and `Authorize` sees `Asked::house`, a distinct principal (`House`: its identifier, and the node a carried
 one came from), never "anyone" and never a lane. A product whose facts are fit for any house reader admits it; one that
-keeps a private subject refuses it by name. Each authorized house read is said once at INFO under
-`anemnez_extension_serve::house_reads`, naming the method, the identifier and where it came from.
+keeps a private subject refuses it by name. Authorized house reads are said at INFO under
+`anemnez_extension_serve::house_reads`, naming the method, the identifier and where it came from: a pair's first read
+at once, then at most once a minute with the count since (`house_reads::Tally`, E m/41723), so a reader that reopens
+its Watch every token life stays visible without a line per read. A pair that stops reading leaves at most its last
+minute unsaid, until its next read says it. The line is visible, not durable: a product whose who-read-facts must be
+kept writes it to its own audit log (D m/41720).
 
 <!-- claim: a-bound-carried-call-reaches-a-method-its-product-decides -->
 **A carried call whose principal is bound reaches the methods its product decides bound callers on** (K m/29120; E
