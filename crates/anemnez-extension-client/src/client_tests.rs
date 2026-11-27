@@ -88,3 +88,24 @@ fn every_argument_the_events_tool_declares_encodes_against_the_contracts_request
         assert!(encoded.is_ok(), "{name} isn't a field of EventsRequest: {args}: {encoded:?}");
     }
 }
+
+/// E m/41989: a refusal names the key and the kinds of value, never the value, so a token or a person's text passed
+/// into the wrong field never reaches the caller's transcript. Serde's own message quotes it (`invalid value: string
+/// "…"`). A field that never takes the value's kind is named with both kinds; one that might (a 64-bit number as a
+/// string) is said by where serde stopped. Red with serde's message passed on.
+#[test]
+fn an_args_refusal_names_the_key_and_kinds_never_the_value() {
+    const SECRET: &str = "ghp_d0n0tl3akM3pl3as3";
+    let wait = calls().encode("/anemnez.fixture.v1.Fixture/Wait", &format!(r#"{{"timeout_ms": "{SECRET}"}}"#));
+    let wait = wait.expect_err("not a number").to_string();
+    assert!(wait.starts_with("args-mismatch: ") && !wait.contains(SECRET), "{wait}");
+    assert!(wait.contains("line 1, column"), "said by where it is: {wait}");
+
+    let contract = Calls::new(anemnez_extension_serve::pb::FILE_DESCRIPTOR_SET).expect("reads");
+    let path = anemnez_extension::mcp::EVENTS_PATH;
+    let kinds = contract.encode(path, &format!(r#"{{"kinds": "{SECRET}"}}"#)).expect_err("not an array").to_string();
+    assert!(!kinds.contains(SECRET), "{kinds}");
+    assert!(kinds.contains("`kinds` takes an array, not a string"), "named by key and kinds: {kinds}");
+    let nested = contract.encode(path, &format!(r#"{{"kinds": [{{"x": "{SECRET}"}}]}}"#)).expect_err("refused");
+    assert!(!nested.to_string().contains(SECRET), "{nested}");
+}

@@ -102,8 +102,8 @@ impl Calls {
         let method = self.method(path)?;
         let mut json = serde_json::Deserializer::from_str(args_json);
         let message = DynamicMessage::deserialize(method.input(), &mut json)
-            .map_err(|e| CallRefusal::ArgsMismatch(format!("{} for {path}", e)))?;
-        json.end().map_err(|e| CallRefusal::ArgsMismatch(e.to_string()))?;
+            .map_err(|e| CallRefusal::ArgsMismatch(args_mismatch(&method.input(), args_json, &e, path)))?;
+        json.end().map_err(|e| CallRefusal::ArgsMismatch(where_in(&e, path)))?;
         Ok(message.encode_to_vec())
     }
 
@@ -121,6 +121,76 @@ impl Calls {
             .serialize_with_options(serde_json::value::Serializer, &options)
             .map_err(|e| CallRefusal::ReplyMismatch(e.to_string()))
     }
+}
+
+/// Why `args_json` isn't `input`, naming a key and the kinds of value only, never a value (E m/41989): serde quotes a
+/// mistyped value (`invalid type: string "…"`), and a token or a person's text passed into the wrong field would reach
+/// the caller's transcript. A top-level key the message lacks, or whose JSON kind the field can never take, is named;
+/// anything deeper is said by where it is (serde's line and column), never by what it holds.
+fn args_mismatch(
+    input: &prost_reflect::MessageDescriptor,
+    args_json: &str,
+    e: &serde_json::Error,
+    path: &str,
+) -> String {
+    let message = input.full_name();
+    let Ok(serde_json::Value::Object(args)) = serde_json::from_str::<serde_json::Value>(args_json) else {
+        return format!("the arguments aren't a JSON object of {message}'s fields, for {path} ({})", place(e));
+    };
+    for (key, value) in &args {
+        let Some(field) = input.get_field_by_json_name(key).or_else(|| input.get_field_by_name(key)) else {
+            return format!("{message} has no field `{key}`, for {path}");
+        };
+        if let Some(expected) = never_takes(&field, value) {
+            return format!("`{key}` takes {expected}, not {}, for {path}", json_kind(value));
+        }
+    }
+    format!("an argument doesn't fit {message}, for {path} ({})", place(e))
+}
+
+/// The JSON kind of `value`, never the value.
+fn json_kind(value: &serde_json::Value) -> &'static str {
+    match value {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "a boolean",
+        serde_json::Value::Number(_) => "a number",
+        serde_json::Value::String(_) => "a string",
+        serde_json::Value::Array(_) => "an array",
+        serde_json::Value::Object(_) => "an object",
+    }
+}
+
+/// What `field` takes, when the JSON kind of `value` is one proto3's JSON mapping never accepts for it; `None` when it
+/// may (a 64-bit number as a string, an enum by name or number, a message whose JSON form is its own).
+fn never_takes(field: &prost_reflect::FieldDescriptor, value: &serde_json::Value) -> Option<&'static str> {
+    use prost_reflect::Kind;
+    use serde_json::Value;
+    if value.is_null() {
+        return None;
+    }
+    if field.is_map() {
+        return (!value.is_object()).then_some("an object");
+    }
+    if field.is_list() {
+        return (!value.is_array()).then_some("an array");
+    }
+    match field.kind() {
+        Kind::String | Kind::Bytes => (!value.is_string()).then_some("a string"),
+        Kind::Bool => (!value.is_boolean()).then_some("a boolean"),
+        Kind::Enum(_) => (!matches!(value, Value::String(_) | Value::Number(_))).then_some("an enum name or number"),
+        Kind::Message(_) => None,
+        _ => (!matches!(value, Value::String(_) | Value::Number(_))).then_some("a number"),
+    }
+}
+
+/// Where serde stopped, never what it read.
+fn place(e: &serde_json::Error) -> String {
+    format!("line {}, column {}", e.line(), e.column())
+}
+
+/// A trailing-input refusal, by where it is.
+fn where_in(e: &serde_json::Error, path: &str) -> String {
+    format!("more than one JSON value, for {path} ({})", place(e))
 }
 
 /// A unary call to `path` with `request`, exactly the bytes [`Calls::encode`] answered, and `metadata`
