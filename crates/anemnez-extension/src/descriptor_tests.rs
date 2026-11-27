@@ -399,7 +399,10 @@ fn an_ask_bound_past_the_work_bound_is_refused() {
         method("Equal", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&with(Some(60), 60))),
         method("Unsaid", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&with(None, 30))),
     ]);
-    assert_eq!(check_descriptor(&bytes).expect("admitted").len(), 2);
+    let admitted = check_descriptor(&bytes).expect("admitted");
+    // D m/44447: an unsaid ask reads its default, never past the stated bound, so it nests as a stated one must.
+    let asks: Vec<_> = admitted.iter().map(|m| m.options.ask_within()).collect();
+    assert_eq!(asks, [60, 30]);
     let bytes = set(vec![method("Over", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&with(Some(61), 60)))]);
     let refused = check_descriptor(&bytes).expect_err("past its bound");
     assert_eq!(refused.iter().map(DescriptorRefusal::name).collect::<Vec<_>>(), ["ask-past-bound"]);
