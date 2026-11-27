@@ -84,7 +84,7 @@ pub struct ApiFaces {
     events: EventsFace,
     claimed: crate::plane::ClaimedWrites,
     products: crate::plane::ProductCallers,
-    bound: crate::plane::BoundDecided,
+    pub(crate) bound: crate::plane::BoundDecided,
 }
 
 impl ApiFaces {
@@ -186,13 +186,15 @@ impl ApiFaces {
     /// [`BOUND_DECIDED_NOT_A_METHOD`](anemnez_extension::peer::BOUND_DECIDED_NOT_A_METHOD) and the method, for one that
     /// isn't the descriptor's own, or that products call; `descriptor-unchecked` for a descriptor the check refuses.
     pub fn bound_decided(self, methods: &[&str]) -> Result<ApiFaces, (&'static str, String)> {
-        let bound = crate::plane::BoundDecided::of(self.describe.descriptor(), methods)?;
+        // The faces' seal is kept, so a binder taken before this still binds (D m/45019).
+        let bound = crate::plane::BoundDecided::of(self.describe.descriptor(), methods)?.sealed_as(&self.bound);
         Ok(ApiFaces { bound, ..self })
     }
 
     /// The binder whose bounds this plane keeps (D m/44694, M m/44889): the SDK's carried verify mints each
-    /// `CarriedBound` through it, and the plane removes any bound it didn't seal before reading it. Take it after
-    /// [`ApiFaces::bound_decided`], which makes the plane's seal afresh.
+    /// `CarriedBound` through it, and the plane removes any bound it didn't seal before reading it. The seal is the
+    /// faces', made once with them and kept by [`ApiFaces::bound_decided`], so the binder is right whenever it is taken
+    /// (D m/45019).
     #[must_use]
     pub fn binder(&self) -> crate::plane::Binder {
         self.bound.binder()

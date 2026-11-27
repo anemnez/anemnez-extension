@@ -398,6 +398,13 @@ impl BoundDecided {
         self.methods.contains(path)
     }
 
+    /// These methods under `earlier`'s seal, never a fresh one (D m/45019): a binder taken from the faces before the
+    /// methods were named still mints bounds the plane keeps.
+    #[must_use]
+    pub(crate) fn sealed_as(self, earlier: &BoundDecided) -> BoundDecided {
+        BoundDecided { seal: Arc::clone(&earlier.seal), ..self }
+    }
+
     /// The binder that mints bounds this plane keeps.
     #[must_use]
     pub fn binder(&self) -> Binder {

@@ -413,3 +413,22 @@ async fn a_carried_connections_preface_rides_its_requests_and_http2_after_it_is_
         );
     }
 }
+
+/// D m/45019: the seal is the faces', kept by `bound_decided`, so a binder taken before the methods were named binds
+/// bounds the plane keeps, as one taken after does. Red with `bound_decided` making the seal afresh.
+#[test]
+fn a_binder_taken_before_bound_decided_still_binds() {
+    use crate::serve_tests::land_descriptor_as;
+    let manual = ManualClock::new();
+    let journal = Journal::new("a1b2c3d4.boot1", 8, manual.clock());
+    let board = Board::new(journal.clone());
+    let events = EventsService::new(journal, crate::principal_tests::verifier(&manual, false));
+    let faces = ApiFaces::new(Describe::new(land_descriptor_as(pb::Effect::Write, pb::Callers::Agent)), board, events);
+    let early = faces.binder();
+    let faces = faces.bound_decided(&["/h.v1.H/Land"]).expect("Land is the product's own");
+    let late = faces.binder();
+    for binder in [early, late] {
+        let bound = binder.bind("agent:K".into(), "node-b".into());
+        assert!(faces.bound.keeps(&bound, "/h.v1.H/Land"), "kept whenever the binder was taken");
+    }
+}

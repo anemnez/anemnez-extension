@@ -318,3 +318,4 @@ spoken_for("a-plane-keeps-only-the-bounds-its-own-binder-sealed", "plane_tests::
 spoken_for("a-plane-keeps-only-the-bounds-its-own-binder-sealed (never admitted)", "plane_tests::a_bound_from_another_plane_is_never_admitted_as_bound")
 spoken_for("a-plane-keeps-only-the-bounds-its-own-binder-sealed (one plane's)", "plane_tests::a_seal_is_one_planes_and_its_clones")
 spoken_for("a-plane-keeps-only-the-bounds-its-own-binder-sealed (unsealed on a decided method alone)", "plane_tests::the_unsealed_mint_is_kept_on_a_bound_decided_method_alone")
+spoken_for("a-plane-keeps-only-the-bounds-its-own-binder-sealed (a binder taken early)", "serve_fn_tests::a_binder_taken_before_bound_decided_still_binds")
