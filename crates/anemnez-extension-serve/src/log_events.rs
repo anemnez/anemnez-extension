@@ -545,10 +545,9 @@ impl LogEvents {
                 method = path,
                 identifier = %house.identifier,
                 via,
-                reads = reads + 1,
+                reads,
                 over_secs = over.as_secs(),
-                "a house reader read this product's log {} time(s) in {}s",
-                reads + 1,
+                "a house reader read this product's log {reads} time(s) in {}s, and reads it again",
                 over.as_secs()
             ),
             Said::Quiet => {}

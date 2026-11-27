@@ -773,8 +773,8 @@ one came from), never "anyone" and never a lane. A product whose facts are fit f
 keeps a private subject refuses it by name. Authorized house reads are said at INFO under
 `anemnez_extension_serve::house_reads`, naming the method, the identifier and where it came from: a pair's first read
 at once, then at most once a minute with the count since (`house_reads::Tally`, E m/41723), so a reader that reopens
-its Watch every token life stays visible without a line per read. A pair that stops reading leaves at most its last
-minute unsaid, until its next read says it. The line is visible, not durable: a product whose who-read-facts must be
+its Watch every token life stays visible without a line per read. A pair that stops reading leaves its last window's
+count unsaid until its next read. The line is visible, not durable: a product whose who-read-facts must be
 kept writes it to its own audit log (D m/41720).
 
 <!-- claim: a-bound-carried-call-reaches-a-method-its-product-decides -->
