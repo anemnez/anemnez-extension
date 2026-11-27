@@ -124,7 +124,13 @@ pub struct Running {
     /// Ends the server gracefully, every open connection with it (an abort alone ends only the accept loop, and each
     /// connection, served on a task of its own, goes on answering: N m/41684).
     stop: Option<tokio::sync::oneshot::Sender<()>>,
+    /// The clock [`Running::stop`] bounds its graceful end on.
+    clock: Clock,
 }
+
+/// How long [`Running::stop`] waits for a graceful end before it aborts (M m/41794, rule 4): a graceful shutdown waits
+/// on every in-flight request and stream, so a held one would wait for ever. Below the static-half check's step bound.
+pub const STOP_WITHIN: Duration = Duration::from_secs(10);
 
 /// `Orient`'s hold: while `held` is true it answers nothing; `holding` is told each time one waits.
 struct OrientHold {
@@ -179,20 +185,28 @@ impl Running {
 }
 
 impl Running {
-    /// Take the fixture down, as a product's own end does: every connection ended, awaited, so a dial or a read on an
-    /// old channel fails afterwards.
-    pub async fn stop(mut self) {
+    /// Take the fixture down, as a product's own end does: every connection ended and awaited, so a read on an old
+    /// channel fails afterwards. Bounded (M m/41794): past [`STOP_WITHIN`] on its clock, a stream still held open
+    /// (a Watch, a held Orient) is cut by aborting the server, and the abort is awaited. True when it ended
+    /// gracefully, false when it was cut at the bound.
+    pub async fn stop(mut self) -> bool {
         if let Some(stop) = self.stop.take() {
             let _ = stop.send(());
         }
-        let server = std::mem::replace(&mut self.server, tokio::spawn(async {}));
-        drop(server.await);
+        let mut server = std::mem::replace(&mut self.server, tokio::spawn(async {}));
+        if self.clock.timeout(STOP_WITHIN, &mut server).await.is_ok() {
+            return true;
+        }
+        server.abort();
+        let _ = server.await;
+        false
     }
 }
 
 impl Drop for Running {
     fn drop(&mut self) {
-        // Best effort when not stopped: the graceful end first, then the accept loop's abort.
+        // Dropped without stop(): the accept loop's abort, and its connections may outlive it (M m/41794's nit).
+        // Down a fixture with stop() to end them.
         if let Some(stop) = self.stop.take() {
             let _ = stop.send(());
         }
@@ -208,6 +222,7 @@ pub const INSTANCE_ID: &str = "01fixture";
 /// # Errors
 /// The socket cannot be bound.
 pub async fn serve(dir: &Path, clock: Clock, variant: Variant) -> std::io::Result<Running> {
+    let stop_clock = clock.clone();
     let socket = dir.join("fixture.sock");
     let listener = tokio::net::UnixListener::bind(&socket)?;
     let journal = Journal::new(format!("{INSTANCE_ID}.boot1"), 64, clock.clone());
@@ -243,6 +258,7 @@ pub async fn serve(dir: &Path, clock: Clock, variant: Variant) -> std::io::Resul
     });
     Ok(Running {
         stop: Some(stop),
+        clock: stop_clock,
         socket,
         instance_id: INSTANCE_ID.into(),
         contract: variant.contract(),
