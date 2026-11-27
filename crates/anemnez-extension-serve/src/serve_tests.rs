@@ -108,6 +108,30 @@ async fn a_cursor_resumes_after_itself_filtered_by_kind() {
     assert_eq!(next.payload, vec![2], "no kinds asked is every kind");
 }
 
+/// The journal's floor (ergon:J/contract-refusal-is-an-event c1, D direct m/47 (c)): the oldest cursor a subscriber
+/// may still resume after, so a board can say how far behind a follower may be before it falls out of range. A fresh
+/// journal's floor is its head (before everything); once it holds more than it keeps, the floor rises with each
+/// publish, a subscription after it is taken, and one after the cursor before it is out of range.
+#[test]
+fn the_floor_is_the_oldest_cursor_a_subscriber_may_still_resume_after() {
+    let (journal, manual) = journal(2);
+    assert_eq!(journal.floor(), format!("{ORIGIN}:0"), "a fresh journal resumes from before everything");
+    assert_eq!(journal.floor(), journal.head());
+    let first = journal.publish("tick", vec![1]);
+    let second = journal.publish("tick", vec![2]);
+    assert_eq!(journal.floor(), format!("{ORIGIN}:0"), "two kept of two: nothing dropped yet");
+    journal.publish("tick", vec![3]);
+    assert_eq!(journal.floor(), first, "the first dropped: resumable only after it");
+    journal.publish("tick", vec![4]);
+    assert_eq!(journal.floor(), second);
+    assert!(journal.subscribe(&journal.floor(), Vec::new(), far(&manual)).is_ok(), "the floor itself is resumable");
+    assert_eq!(
+        journal.subscribe(&first, Vec::new(), far(&manual)).err(),
+        Some(Refusal::OutOfRange),
+        "below the floor is out of range"
+    );
+}
+
 /// CONTRACT.md: an instance-scoped cursor from another instance, or from this one before a
 /// restart, is cursor-not-mine; one older than what is kept is out-of-range.
 #[tokio::test]
