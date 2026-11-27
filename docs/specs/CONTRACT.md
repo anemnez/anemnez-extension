@@ -203,7 +203,9 @@ wait is what the call's deadline has left less a hop, never the request's own co
 the call (nested bounds). A Watch past the end ends with that status after its beat, not with a frame. A replica's
 cursors resume at any instance, so `ApiFaces::try_new` refuses a descriptor declaring `cursor_scope: INSTANCE` over one
 `replica-needs-swarm-scope` by name, and `ApiFaces::new` serves such a face nothing, each read refused by that name.
-Compaction is each replica's own, by offset: `Compacted` names this replica's start, which another's may differ from.
+The end is the replica's committed end at the read, which a reply bounded by `max` may stop short of: a caller takes how
+far it got from the reply's `next`, and which replica is ahead from read-at (D m/43113). The name is
+`anemnez_extension::refusal::REPLICA_BEHIND`, hydramq-events' own words, held equal by a parity row. Compaction is each replica's own, by offset: `Compacted` names this replica's start, which another's may differ from.
 Latest has no cursor: it is as of this replica's end, which the header says.
 
 <!-- claim: a-log-is-read-through-one-seam -->

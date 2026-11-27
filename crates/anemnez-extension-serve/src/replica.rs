@@ -11,6 +11,8 @@
 //!   read named and whether the face refused it behind. The wire bytes stay opaque to this crate.
 //! - **Declared SWARM.** A face that says an end ([`Face::end`]) is a replica's, so its cursors resume at any instance:
 //!   a descriptor declaring `cursor_scope: INSTANCE` over one is refused [`REPLICA_NEEDS_SWARM_SCOPE`] by name.
+//! - **The end said is the replica's committed end at the read** (D m/43113), which a reply bounded by `max` may stop
+//!   short of: a caller takes how far it got from the reply's `next`, and which replica is ahead from read-at.
 //! - **Compaction is the replica's own** (D's condition 3): retention is by offset, so `Compacted` names this replica's
 //!   start, which another replica's may differ from. **Latest** has no cursor: it is as of this replica's end, which
 //!   the read-at header says.
@@ -23,8 +25,8 @@ use anemnez_clock::{Clock, Mono};
 use hydramq_events::wire::HOP_MARGIN;
 use hydramq_events::{Event, EventsError, Face, Position, Read, Refused};
 
+pub use anemnez_extension::refusal::REPLICA_BEHIND;
 pub use anemnez_extension::refusal::REPLICA_NEEDS_SWARM_SCOPE;
-pub use hydramq_events::REPLICA_BEHIND;
 
 /// What a [`Reading`] saw of its reads.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

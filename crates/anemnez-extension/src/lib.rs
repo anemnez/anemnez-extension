@@ -110,6 +110,11 @@ pub mod refusal {
     /// The product's own authorization of an `Events/Call` or `Events/Watch` refused it, or didn't answer within
     /// its bound: nothing of the log is served (CONTRACT.md, the log face). The reason follows the name.
     pub const UNAUTHORIZED: &str = "unauthorized";
+    /// A read whose cursor is past the replica's committed end, after its wait (ergon:M/log-face-any-replica; D m/42395,
+    /// m/43122): Unavailable, this name first, the node and the end in the `anemnez-read-at` header. A router reads it
+    /// by this name and tries the next replica. The same words as hydramq-events' `REPLICA_BEHIND`, held to it by a
+    /// parity row in -serve, so a reader of this crate never takes hydramq (rule 7: the leaves stay SDK-free).
+    pub const REPLICA_BEHIND: &str = "replica-behind";
     /// A descriptor declaring `cursor_scope: INSTANCE` over a log face read from a replica (one that says its committed
     /// end): a replica's cursor resumes at any instance, so its face declares SWARM (ergon:M/log-face-any-replica, D
     /// m/42395). Refused when the faces are built, and every read is refused by it too, so it is never served unsaid.

@@ -246,3 +246,10 @@ async fn a_replica_face_declares_swarm() {
     assert_eq!(refused.code(), tonic::Code::FailedPrecondition);
     assert!(refused.message().starts_with("replica-needs-swarm-scope: "), "{}", refused.message());
 }
+
+/// D m/43122 (4): the house's name for behind is hydramq-events' own words, one name for a router that never takes
+/// hydramq; this crate builds both, so it holds them equal.
+#[test]
+fn the_houses_behind_name_is_hydramqs() {
+    assert_eq!(anemnez_extension::refusal::REPLICA_BEHIND, hydramq_events::REPLICA_BEHIND);
+}
