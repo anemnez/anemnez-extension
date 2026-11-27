@@ -714,6 +714,43 @@ async fn a_local_caller_to_a_method_with_no_list_keeps_todays_path() {
     assert!(said.is_some_and(|m| m.starts_with("product-callers-unnamed")), "a carried one: refused, as before");
 }
 
+/// N m/43758: Agora relays agents' calls, so a stamped call from Agora to a `callers = PRODUCT` method is an agent's,
+/// never Agora's own, and is refused `product-caller-stamped` by name, even where the method's list names Agora's
+/// identifier: else any agent would reach it as Agora. Agora's own call, unstamped, is judged as a product caller.
+#[tokio::test]
+async fn a_stamped_agora_call_is_never_agoras_own() {
+    use crate::plane::{ProductCaller, ProductCallers};
+    use tower_layer::Layer as _;
+    use tower_service::Service as _;
+    let send = |lane: Option<&str>| {
+        let seen = Seen::<ProductCaller>::default();
+        let listed = ProductCallers::of(&land_descriptor_with(pb::Effect::Write), &[(LAND, &["ai.anemnez.agora"])])
+            .expect("Land is PRODUCT");
+        let mut service = ApiPlaneLayer::new(Reads::default()).products(listed).layer(seen.clone());
+        let mut request = http::Request::builder()
+            .uri(LAND)
+            .header("content-type", "application/grpc")
+            .body(tonic::body::empty_body())
+            .expect("a request");
+        if let Some(lane) = lane {
+            let mut metadata = tonic::metadata::MetadataMap::new();
+            metadata.insert_bin(STAMP_METADATA_KEY, tonic::metadata::MetadataValue::from_bytes(&stamp(Some(lane))));
+            request.headers_mut().extend(metadata.into_headers());
+        }
+        request.extensions_mut().insert(local_signed(Role::Agora, anemnez_trust::ANEMNEZ_TEAM, "ai.anemnez.agora"));
+        async move {
+            let response = service.call(request).await.expect("answered");
+            (tonic::Status::from_header_map(response.headers()).map(|s| s.message().to_owned()), seen.got())
+        }
+    };
+    let (said, seen) = send(None).await;
+    assert_eq!(said, None, "Agora's own delivery, unstamped: a product caller on the list");
+    assert_eq!(seen.flatten().map(|c| c.identity.identifier), Some("ai.anemnez.agora".to_owned()));
+    let (said, seen) = send(Some("K")).await;
+    assert!(said.is_some_and(|m| m.starts_with("product-caller-stamped")), "an agent's call through Agora, refused");
+    assert!(seen.is_none(), "never reaches the handler as Agora");
+}
+
 /// A peer on this host, judged at accept as `role`, signed by `team` as `identifier`.
 fn local_signed(role: Role, team: &str, identifier: &str) -> Judged {
     let code = Ok(Code { identifier: identifier.into(), team: team.into() });

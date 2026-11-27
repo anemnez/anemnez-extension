@@ -43,6 +43,10 @@ pub const PRODUCT_CALLERS_UNNAMED: &str = "product-callers-unnamed";
 /// A carried call to a `callers = PRODUCT` method from a proven, house-signed caller whose identifier isn't on the
 /// method's allow-list (a house CLI an agent runs, say): refused by name (D m/32983).
 pub const PRODUCT_CALLER_NOT_ALLOWED: &str = "product-caller-not-allowed";
+/// A call to a `callers = PRODUCT` method from this host's Agora carrying a caller's stamp (N m/43758): a stamp says
+/// Agora relays an agent's call, so admitting it by Agora's own signing identifier would admit any agent, as Agora.
+/// Only Agora's own call, unstamped, is judged as a product caller.
+pub const PRODUCT_CALLER_STAMPED: &str = "product-caller-stamped";
 /// An allow-list entry for a method whose descriptor doesn't say `callers = PRODUCT`, or that names no identifier.
 pub const PRODUCT_CALLERS_NOT_A_PRODUCT_METHOD: &str = "product-callers-not-a-product-method";
 /// A `callers = PRODUCT` method given two allow-lists, from two places (D m/33063): refused when the faces are built,

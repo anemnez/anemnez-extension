@@ -252,6 +252,7 @@ spoken_for("a-carried-product-caller-is-proven-by-its-code (another descriptor, 
 spoken_for("a-carried-product-caller-is-proven-by-its-code (unchecked)", "plane_tests::methods_named_of_an_unchecked_descriptor_are_refused_as_unchecked_with_the_checkers_refusals")
 spoken_for("a-local-product-caller-is-judged-as-a-carried-one", "plane_tests::a_local_product_caller_is_judged_as_a_carried_one")
 spoken_for("a-local-product-caller-is-judged-as-a-carried-one (layer)", "plane_tests::the_layer_admits_a_proven_product_and_hands_its_caller_to_the_service")
+spoken_for("a-local-product-caller-is-judged-as-a-carried-one (a stamped Agora call)", "plane_tests::a_stamped_agora_call_is_never_agoras_own")
 spoken_for("a-local-product-caller-is-judged-as-a-carried-one (two steps)", "plane_tests::a_local_caller_to_a_method_with_no_list_keeps_todays_path")
 spoken_for("a-carried-write-may-be-admitted-for-a-claimed-lane (reads)", "plane_tests::a_carried_read_with_a_stamp_is_admitted_as_a_read_and_its_stamp_unused")
 spoken_for("a-carried-write-may-be-admitted-for-a-claimed-lane (attribution)", "plane_tests::a_listed_carried_read_is_attributed_when_its_claim_holds_and_served_when_it_doesnt")

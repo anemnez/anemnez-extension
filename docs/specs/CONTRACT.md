@@ -870,7 +870,10 @@ and refused `product-caller-unproven` (its code unreadable at accept), `-untrust
 judges a caller itself. Two steps, so no local caller in service is cut off: a method whose product has named no list
 keeps today's local path, unjudged, and its gap is said at build (`ProductCallers::unnamed`); naming the list is the
 step that judges its local callers. A carried call to an unnamed method is still `product-callers-unnamed`. Fabricd and
-a house reader keep their own rules (Describe alone; the contract's faces).
+a house reader keep their own rules (Describe alone; the contract's faces). Agora relays agents' calls, so a call from
+Agora carrying a caller's stamp is an agent's, never Agora's own: to a listed method it is refused
+`product-caller-stamped` by name, even where the list names Agora's identifier, so no agent reaches a product method as
+Agora (N m/43758). Only Agora's own call, unstamped (its delivery as a client), is judged as a product caller.
 
 <!-- claim: a-carried-connection-says-its-preface-once -->
 **A carried connection says where it came from once, at accept** (K m/25625; M m/25661; D m/25623). aegisd writes

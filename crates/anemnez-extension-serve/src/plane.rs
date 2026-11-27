@@ -48,8 +48,9 @@ use anemnez_extension::options::Effect;
 use anemnez_extension::peer::{
     BOUND_DECIDED_NOT_A_METHOD, CARRIED_CLAIM_NOT_A_LANE, CARRIED_NO_PREFACE, CARRIED_WRITE_UNBOUND,
     CLAIMED_METHOD_NOT_A_READ_OR_WRITE, CLAIMED_WRITE_NOT_A_WRITE, DESCRIPTOR_UNCHECKED, FABRICD_READS_DESCRIBE_ONLY,
-    HOUSE_READS_FACES_ONLY, NOT_JUDGED, PRODUCT_CALLER_NOT_ALLOWED, PRODUCT_CALLER_UNPROVEN, PRODUCT_CALLER_UNTRUSTED,
-    PRODUCT_CALLERS_NOT_A_PRODUCT_METHOD, PRODUCT_CALLERS_TWICE, PRODUCT_CALLERS_UNNAMED, Role, STAMP_NOT_FROM_AGORA,
+    HOUSE_READS_FACES_ONLY, NOT_JUDGED, PRODUCT_CALLER_NOT_ALLOWED, PRODUCT_CALLER_STAMPED, PRODUCT_CALLER_UNPROVEN,
+    PRODUCT_CALLER_UNTRUSTED, PRODUCT_CALLERS_NOT_A_PRODUCT_METHOD, PRODUCT_CALLERS_TWICE, PRODUCT_CALLERS_UNNAMED,
+    Role, STAMP_NOT_FROM_AGORA,
 };
 use anemnez_extension::teaching::{RetryClass, Teaching, Whose, status_details};
 use tonic::body::BoxBody;
@@ -79,6 +80,7 @@ pub enum PlaneRefusal {
     ProductCallerUntrusted,
     ProductCallersUnnamed,
     ProductCallerNotAllowed,
+    ProductCallerStamped,
     ProductCallersNotAProductMethod,
     ProductCallersTwice,
     DescriptorUnchecked,
@@ -88,7 +90,7 @@ pub enum PlaneRefusal {
 
 impl PlaneRefusal {
     /// Every refusal, in the one order [`PLANE_REFUSALS`] lists their names.
-    pub const ALL: [PlaneRefusal; 17] = [
+    pub const ALL: [PlaneRefusal; 18] = [
         PlaneRefusal::NotJudged,
         PlaneRefusal::FabricdReadsDescribeOnly,
         PlaneRefusal::StampNotFromAgora,
@@ -101,6 +103,7 @@ impl PlaneRefusal {
         PlaneRefusal::ProductCallerUntrusted,
         PlaneRefusal::ProductCallersUnnamed,
         PlaneRefusal::ProductCallerNotAllowed,
+        PlaneRefusal::ProductCallerStamped,
         PlaneRefusal::ProductCallersNotAProductMethod,
         PlaneRefusal::ProductCallersTwice,
         PlaneRefusal::DescriptorUnchecked,
@@ -124,6 +127,7 @@ impl PlaneRefusal {
             PlaneRefusal::ProductCallerUntrusted => PRODUCT_CALLER_UNTRUSTED,
             PlaneRefusal::ProductCallersUnnamed => PRODUCT_CALLERS_UNNAMED,
             PlaneRefusal::ProductCallerNotAllowed => PRODUCT_CALLER_NOT_ALLOWED,
+            PlaneRefusal::ProductCallerStamped => PRODUCT_CALLER_STAMPED,
             PlaneRefusal::ProductCallersNotAProductMethod => PRODUCT_CALLERS_NOT_A_PRODUCT_METHOD,
             PlaneRefusal::ProductCallersTwice => PRODUCT_CALLERS_TWICE,
             PlaneRefusal::DescriptorUnchecked => DESCRIPTOR_UNCHECKED,
@@ -168,6 +172,9 @@ impl PlaneRefusal {
             PlaneRefusal::ProductCallerNotAllowed => {
                 Some("a carried product caller must be one the method's product names as its caller")
             }
+            PlaneRefusal::ProductCallerStamped => Some(
+                "a call Agora relays for an agent is never Agora's own: only Agora's unstamped call is a product's",
+            ),
             PlaneRefusal::ProductCallersNotAProductMethod => Some(
                 "only a method the descriptor says products call may list its callers, and it must name at least one",
             ),
@@ -203,6 +210,7 @@ impl PlaneRefusal {
             | PlaneRefusal::ProductCallerUntrusted
             | PlaneRefusal::ProductCallersUnnamed
             | PlaneRefusal::ProductCallerNotAllowed
+            | PlaneRefusal::ProductCallerStamped
             | PlaneRefusal::ProductCallersNotAProductMethod
             | PlaneRefusal::ProductCallersTwice
             | PlaneRefusal::DescriptorUnchecked
@@ -227,6 +235,7 @@ impl PlaneRefusal {
             | PlaneRefusal::ProductCallerUntrusted
             | PlaneRefusal::ProductCallersUnnamed
             | PlaneRefusal::ProductCallerNotAllowed
+            | PlaneRefusal::ProductCallerStamped
             | PlaneRefusal::ProductCallersNotAProductMethod
             | PlaneRefusal::ProductCallersTwice
             | PlaneRefusal::DescriptorUnchecked
@@ -749,8 +758,8 @@ pub fn said_on(name: &'static str, path: &str) -> String {
 
 /// Every name the API plane refuses with, at a call or when the plane is built: the one list [`said`] and [`taught`]
 /// answer for, held by a row that reads this file's own refusals, so a new name can't go untaught (D m/30986).
-pub const PLANE_REFUSALS: [&str; 17] = {
-    let mut names = [""; 17];
+pub const PLANE_REFUSALS: [&str; 18] = {
+    let mut names = [""; 18];
     let mut i = 0;
     while i < PlaneRefusal::ALL.len() {
         names[i] = PlaneRefusal::ALL[i].name();
@@ -908,9 +917,15 @@ where
                             || (matches!(j.role, Role::Other | Role::Agora)
                                 && self.products.allowed(path).is_some())) =>
                 {
-                    match product_admits(j, self.products.allowed(path)) {
-                        Ok(caller) => Ok(Some(Admitted::Product(caller))),
-                        Err(name) => Err(name),
+                    // A stamp says Agora relays an agent's call: never Agora's own, so never judged by Agora's
+                    // identifier, which would admit any agent as Agora (N m/43758).
+                    if j.role == Role::Agora && stamp.is_some() {
+                        Err(PlaneRefusal::ProductCallerStamped.name())
+                    } else {
+                        match product_admits(j, self.products.allowed(path)) {
+                            Ok(caller) => Ok(Some(Admitted::Product(caller))),
+                            Err(name) => Err(name),
+                        }
                     }
                 }
                 // A bound principal, carried, to a product method: admitted as itself, its CarriedBound already on
