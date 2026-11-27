@@ -44,6 +44,12 @@ message MethodOptions {
   // takes no argument, its result bound 1 (one reply; its text's cap is the product's, 1,500 characters); refused otherwise, each by name (orient-twice,
   // orient-not-a-read, orient-takes-input, orient-unbounded, orient-not-for-agents, orient-streams).
   bool orient = 15;
+  // How long this method's work may take, in seconds (agora LONG-JOBS.md §2, D m/35312; I's bound_secs): the
+  // method's own bound, which is primary. At or under a host's call bound it is a short call; past it, the host
+  // answers a job at once and ends it at this plus JOB_MARGIN_SECS (5). 0 is refused bound-zero; past
+  // BOUND_CAP_SECS (JOB_AT_MOST_SECS 900 less the margin, 895) the descriptor is refused bound-over-cap. Absent:
+  // the method states no bound, and a host refuses a long one by its own name (Agora's long-bound-undeclared).
+  optional uint32 bound_secs = 16;
 }
 
 // One worked call.

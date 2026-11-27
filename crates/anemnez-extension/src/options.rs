@@ -317,7 +317,21 @@ pub struct MethodOptions {
     /// `#orient-is-one-bounded-read`). At most one per descriptor, a unary agent read with no argument.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub orient: bool,
+    /// How long the method's work may take, in seconds, as stated: `None` when it states no bound. Never 0, and at
+    /// most [`BOUND_CAP_SECS`] (both refused by name at `check_descriptor`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bound_secs: Option<u32>,
 }
+
+/// The longest a job may run, its bound and margin together (agora LONG-JOBS.md §2, D m/35312): Agora's
+/// `JOB_AT_MOST`, held here beside the option it caps, so a host and the descriptor check read one number.
+pub const JOB_AT_MOST_SECS: u32 = 15 * 60;
+/// How far past a method's own bound a host holds its job, so the product's refusal at its inner bound arrives
+/// first and names the true cause (rule 4: the inner bound shorter): Agora's `JOB_MARGIN`.
+pub const JOB_MARGIN_SECS: u32 = 5;
+/// The most `bound_secs` may state: [`JOB_AT_MOST_SECS`] less [`JOB_MARGIN_SECS`], so the bound and its margin fit
+/// inside the cap. Past it a descriptor is refused `bound-over-cap`.
+pub const BOUND_CAP_SECS: u32 = JOB_AT_MOST_SECS - JOB_MARGIN_SECS;
 
 /// What an absent `ask_within_secs` reads as: Claude Code's hook hold, the longest a person-facing call
 /// waits today (I m/13420). Never 0, which means "never asks" and must be said.
@@ -351,6 +365,7 @@ impl MethodOptions {
             examples: Vec::new(),
             ask_within_secs: None,
             orient: false,
+            bound_secs: None,
         }
     }
 
@@ -359,6 +374,12 @@ impl MethodOptions {
     /// exceed this plus its margin (nested bounds, rule 4).
     pub fn ask_within(&self) -> u32 {
         self.ask_within_secs.unwrap_or(ASK_WITHIN_DEFAULT_SECS)
+    }
+
+    /// How long the method's work may take, as stated, or `None` when it states no bound.
+    #[must_use]
+    pub fn bound(&self) -> Option<std::time::Duration> {
+        self.bound_secs.map(|secs| std::time::Duration::from_secs(u64::from(secs)))
     }
 }
 

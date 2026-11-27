@@ -52,6 +52,8 @@ pub struct Tool {
     /// The product's orient (ORIENTATION.md `#orient-is-one-bounded-read`): the one tool a host calls to say
     /// what matters to this caller now (Agora's `agora__orient`).
     pub orient: bool,
+    /// How long the method's work may take (`bound_secs`), as stated: a host bounds a long tool's job by it.
+    pub bound_secs: Option<u32>,
 }
 
 impl Tool {
@@ -81,6 +83,10 @@ impl Tool {
         // Said only on the orient tool, so every other tool's listing stays byte for byte as it was.
         if self.orient {
             tool["_meta"]["anemnez"]["orient"] = json!(true);
+        }
+        // Likewise said only when stated.
+        if let Some(secs) = self.bound_secs {
+            tool["_meta"]["anemnez"]["bound_secs"] = json!(secs);
         }
         tool
     }
@@ -170,6 +176,7 @@ pub fn flatten(service: &ServiceOptions, methods: &[Method]) -> Result<Vec<Tool>
             result: method.options.result,
             session: method.options.session,
             orient: method.options.orient,
+            bound_secs: method.options.bound_secs,
         });
     }
     if !refusals.is_empty() {
@@ -216,6 +223,7 @@ fn events_tool() -> Tool {
         result: ResultShape::Cursor,
         session: None,
         orient: false,
+        bound_secs: None,
     }
 }
 
