@@ -17,7 +17,7 @@ owner = "M"
 
 [anemnez-layout-family]
 repo = "anemnez/anemnez-layout"
-rev = "0d7011960d7d"
+rev = "cee4bbce7601"
 why = "where data lives and the durable replace (rule 8), on the same clock as the rest of the family"
 owner = "M"
 
