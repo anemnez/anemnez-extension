@@ -430,14 +430,16 @@ async fn calls_past_the_cap_are_refused_at_once() {
             }
         })
         .await;
-    let second = anemnez_clock::Clock::system().timeout(Duration::from_secs(5), face.call(held_read())).await;
+    // A hang guard, never the bound under test (E m/33539: guards at nextest scale): "at once" is the busy refusal's
+    // own word, which never waits on any clock.
+    let second = anemnez_clock::Clock::system().timeout(PARK, face.call(held_read())).await;
     // The held read times out on the face, and still counts until its thread ends. Its thread is parked on the log's
     // wait before the face's bound passes (E m/43583): its wait is cut to what the call has left on the face's clock
     // (D m/42395 (1)), so a thread not yet at its wait when the bound passes would see nothing left and leave.
     let armed = f.manual.until_waiting(1, PARK).await;
     let parked = log_clock.until_waiting(1, PARK).await;
     f.manual.advance(crate::log_events::CALL_WITHIN).await;
-    let held_ended = anemnez_clock::Clock::system().timeout(Duration::from_secs(5), held).await.is_ok();
+    let held_ended = anemnez_clock::Clock::system().timeout(PARK, held).await.is_ok();
     let still_counted = face.calls_open();
     // Every held read's thread is let go before any assert, so a red row fails and never hangs the runtime.
     log_clock.advance(Duration::from_secs(30)).await;
