@@ -253,7 +253,7 @@ async fn a_call_held_across_stop_is_cut_at_its_bound() {
     let running = serve(dir.path(), manual.clock(), Variant::Good).await.expect("serves");
     let mut fixture = pb::fixture_client::FixtureClient::new(running.channel().await.expect("connects"));
     running.hold_orient(true);
-    let _held = tokio::spawn(async move { fixture.orient(pb::OrientRequest {}).await });
+    let held = tokio::spawn(async move { fixture.orient(pb::OrientRequest {}).await });
     running.orient_held().await;
     let stopping = tokio::spawn(running.stop());
     assert!(manual.until_waiting(1, Duration::from_secs(5)).await, "stop's bound is armed");
@@ -264,6 +264,14 @@ async fn a_call_held_across_stop_is_cut_at_its_bound() {
         .expect("stop returns at its bound, never hangs")
         .expect("ran");
     assert!(!graceful, "a held call is cut at the bound, not waited on");
+    // D m/41885: false means cut. The held call ends with an error, never left answering on a connection the abort
+    // didn't reach.
+    let ended = anemnez_clock::Clock::system()
+        .timeout(Duration::from_secs(20), held)
+        .await
+        .expect("the held call ends once stop cuts it")
+        .expect("ran");
+    assert!(ended.is_err(), "the held call was cut, not answered: {ended:?}");
 
     let dir = tempfile::tempdir().expect("a temp dir");
     let idle = serve(dir.path(), ManualClock::new().clock(), Variant::Good).await.expect("serves");

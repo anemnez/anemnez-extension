@@ -23,7 +23,7 @@
 //! path carried the token end to end; tokens are not verified yet.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anemnez_clock::Clock;
@@ -126,6 +126,30 @@ pub struct Running {
     stop: Option<tokio::sync::oneshot::Sender<()>>,
     /// The clock [`Running::stop`] bounds its graceful end on.
     clock: Clock,
+    /// Each open connection's own handle, so a cut reaches every one.
+    open: Open,
+}
+
+/// The fixture's open connections, each by a duplicate of its socket the fixture owns: shutting one down wakes every
+/// read on that connection with an end, so a held call fails rather than answers. It's a duplicate, never a borrowed
+/// descriptor, so it can't touch a socket reused by anything else.
+#[derive(Clone, Default)]
+struct Open(Arc<Mutex<Vec<std::os::unix::net::UnixStream>>>);
+
+impl Open {
+    fn keep(&self, stream: tokio::net::UnixStream) -> std::io::Result<tokio::net::UnixStream> {
+        let std = stream.into_std()?;
+        let own = std.try_clone()?;
+        self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(own);
+        tokio::net::UnixStream::from_std(std)
+    }
+
+    /// End every connection, both ways.
+    fn cut(&self) {
+        for stream in self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).drain(..) {
+            let _ = stream.shutdown(std::net::Shutdown::Both);
+        }
+    }
 }
 
 /// How long [`Running::stop`] waits for a graceful end before it aborts (M m/41794, rule 4): a graceful shutdown waits
@@ -187,8 +211,9 @@ impl Running {
 impl Running {
     /// Take the fixture down, as a product's own end does: every connection ended and awaited, so a read on an old
     /// channel fails afterwards. Bounded (M m/41794): past [`STOP_WITHIN`] on its clock, a stream still held open
-    /// (a Watch, a held Orient) is cut by aborting the server, and the abort is awaited. True when it ended
-    /// gracefully, false when it was cut at the bound.
+    /// (a Watch, a held Orient) is cut: every connection is shut down and the server aborted, awaited. True when it
+    /// ended gracefully, false when it was cut at the bound. The bound is on the fixture's own clock, so a row that
+    /// serves it on a ManualClock advances that clock past STOP_WITHIN, or guards stop() in real time (E m/41889).
     pub async fn stop(mut self) -> bool {
         if let Some(stop) = self.stop.take() {
             let _ = stop.send(());
@@ -197,6 +222,8 @@ impl Running {
         if self.clock.timeout(STOP_WITHIN, &mut server).await.is_ok() {
             return true;
         }
+        // Past the bound: every connection is cut, not only the accept loop, so false means cut (D m/41885).
+        self.open.cut();
         server.abort();
         let _ = server.await;
         false
@@ -205,11 +232,12 @@ impl Running {
 
 impl Drop for Running {
     fn drop(&mut self) {
-        // Dropped without stop(): the accept loop's abort, and its connections may outlive it (M m/41794's nit).
-        // Down a fixture with stop() to end them.
+        // Dropped without stop(): every connection is cut and the accept loop aborted at once, with no graceful end
+        // (M m/41794's nit). stop() ends it gracefully first.
         if let Some(stop) = self.stop.take() {
             let _ = stop.send(());
         }
+        self.open.cut();
         self.server.abort();
     }
 }
@@ -248,7 +276,14 @@ pub async fn serve(dir: &Path, clock: Clock, variant: Variant) -> std::io::Resul
             journal.clone(),
             verifier,
         )));
-    let incoming = tokio_stream::wrappers::UnixListenerStream::new(listener);
+    // Each accepted connection's own duplicate handle is kept, so a cut reaches it (D m/41885): aborting the server ends
+    // only its accept loop, and a connection served on a task of its own goes on answering.
+    let open = Open::default();
+    let kept = open.clone();
+    let incoming =
+        tokio_stream::StreamExt::map(tokio_stream::wrappers::UnixListenerStream::new(listener), move |accepted| {
+            accepted.and_then(|stream| kept.keep(stream))
+        });
     let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
     let server = tokio::spawn(async move {
         let shutdown = async move {
@@ -257,6 +292,7 @@ pub async fn serve(dir: &Path, clock: Clock, variant: Variant) -> std::io::Resul
         let _ = router.serve_with_incoming_shutdown(incoming, shutdown).await;
     });
     Ok(Running {
+        open,
         stop: Some(stop),
         clock: stop_clock,
         socket,
