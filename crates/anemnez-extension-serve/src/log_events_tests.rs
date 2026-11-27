@@ -391,16 +391,20 @@ async fn a_late_authorization_leaves_the_read_only_what_remains() {
     let admitting = system.timeout(HANG, asked).await.is_ok();
     f.manual.advance_to(admitted + late).await;
     let authorized = system.timeout(HANG, slept).await.is_ok();
-    // The read now waits on its bound, the call's one deadline: what it has left, never CALL_WITHIN whole.
+    // The read now waits on its bound, the call's one deadline: what it has left, never CALL_WITHIN whole. Its thread
+    // is parked on the log's wait before the face's clock moves on (as calls_past_the_cap_are_refused_at_once, E
+    // m/43583): its wait is cut to what the call has left on the face's clock (D m/42395 (1)), so a thread not yet at its
+    // wait when the clock nears the deadline would find nothing left and answer the head, never the bound being named.
+    let parked = log_clock.until_waiting(1, PARK).await;
     let left = FACE_WITHIN - late;
     f.manual.advance_to(admitted + (FACE_WITHIN - Duration::from_millis(1))).await;
     let early = call.is_finished();
     f.manual.advance_to(admitted + FACE_WITHIN).await;
     let ended = system.timeout(HANG, &mut call).await;
     // The held read's thread is let go before any assert, so a red row fails and never hangs the runtime.
-    let _ = log_clock.until_waiting(1, PARK).await;
     log_clock.advance(Duration::from_secs(30)).await;
     assert!(admitting && authorized, "asked once admitted, and answered at admit + late");
+    assert!(parked, "the read's thread waits on the log before the face's deadline nears");
     assert!(!early, "the read still had a millisecond");
     let refused = ended
         .expect("the row's hang guard: the manual clock never reached the read's deadline")
