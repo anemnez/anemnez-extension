@@ -370,10 +370,15 @@ impl MethodOptions {
     }
 
     /// How long a call of this method may hold an Ask open, in seconds: as stated, or
-    /// [`ASK_WITHIN_DEFAULT_SECS`] when absent. 0 means it never asks. A caller's own per-call bound must
-    /// exceed this plus its margin (nested bounds, rule 4).
+    /// [`ASK_WITHIN_DEFAULT_SECS`] when absent, never past a stated `bound_secs` (D m/44447): an Ask is held inside
+    /// the method's work, so the default nests as a stated ask must (`ask-past-bound`). 0 means it never asks. A
+    /// caller's own per-call bound must exceed this plus its margin (nested bounds, rule 4).
     pub fn ask_within(&self) -> u32 {
-        self.ask_within_secs.unwrap_or(ASK_WITHIN_DEFAULT_SECS)
+        match (self.ask_within_secs, self.bound_secs) {
+            (Some(stated), _) => stated,
+            (None, Some(bound)) if bound > 0 => ASK_WITHIN_DEFAULT_SECS.min(bound),
+            (None, _) => ASK_WITHIN_DEFAULT_SECS,
+        }
     }
 
     /// How long the method's work may take, as stated, or `None` when it states no bound.
