@@ -169,6 +169,9 @@ pub enum DescriptorRefusal {
     BoundZero(String),
     /// `bound_secs` past [`crate::options::BOUND_CAP_SECS`], with the value (`bound-over-cap`).
     BoundOverCap(String, u32),
+    /// `ask_within_secs` past `bound_secs`, both stated (`ask-past-bound`): an Ask is held inside the method's work,
+    /// so its bound is the inner one (rule 4). The ask's and the work's, said.
+    AskPastBound(String, u32, u32),
     /// No service in the descriptor carries `anemnez_service`: it says nothing of what it serves.
     ServiceOptionsMissing,
     /// Two services carry `anemnez_service` (both named): a descriptor serves one contract.
@@ -229,6 +232,7 @@ impl DescriptorRefusal {
             Self::AskBoundOverCap(..) => "ask-bound-over-cap",
             Self::BoundZero(_) => "bound-zero",
             Self::BoundOverCap(..) => "bound-over-cap",
+            Self::AskPastBound(..) => "ask-past-bound",
             Self::ServiceOptionsMissing => "service-options-missing",
             Self::ServiceOptionsTwice(..) => "service-options-twice",
             Self::ServiceOptionsMalformed(_) => "service-options-malformed",
@@ -271,6 +275,11 @@ impl std::fmt::Display for DescriptorRefusal {
                 crate::options::BOUND_CAP_SECS,
                 crate::options::JOB_AT_MOST_SECS,
                 crate::options::JOB_MARGIN_SECS
+            ),
+            Self::AskPastBound(path, ask, bound) => write!(
+                f,
+                "{path}: ask-past-bound: ask_within_secs {ask} is past bound_secs {bound}; an Ask is held inside the \
+                 method's work, so its bound must be the shorter"
             ),
             Self::ServiceOptionsMissing => f.write_str(self.name()),
             Self::MediaUnknown(path, media) => {
@@ -443,6 +452,12 @@ fn bounds_refused(path: &str, raw: &wire::MethodOptions) -> Vec<DescriptorRefusa
             refused.push(DescriptorRefusal::BoundOverCap(path.to_owned(), secs));
         }
         _ => {}
+    }
+    // Both stated (D m/44391): an absent ask is the host's default, which the method never claimed.
+    if let (Some(ask), Some(bound)) = (raw.ask_within_secs, raw.bound_secs.filter(|&b| b > 0))
+        && ask > bound
+    {
+        refused.push(DescriptorRefusal::AskPastBound(path.to_owned(), ask, bound));
     }
     refused
 }
