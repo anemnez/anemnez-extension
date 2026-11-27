@@ -167,3 +167,15 @@ async fn a_product_serving_a_refused_descriptor_fails_the_row_through_the_check(
     let mut product = Serves::of(admitted);
     assert_eq!(the_static_half_is_byte_stable(&mut product, &clock).await, Ok(()));
 }
+
+/// D m/41782 (rule 5): only a read that positively failed proves a down. One that still answers, and one unanswered
+/// within the bound (a half-open, silent connection), are each down-not-proven, said which way.
+#[test]
+fn only_a_failed_read_proves_a_down() {
+    use super::{DOWN_NOT_PROVEN, proven_down};
+    assert_eq!(proven_down(&Ok(Err("connection reset".into()))), Ok(()));
+    let answers = proven_down(&Ok(Ok(()))).expect_err("still answers");
+    assert!(answers.starts_with(DOWN_NOT_PROVEN) && answers.contains("still answers"), "{answers}");
+    let silent = proven_down(&Err(())).expect_err("unanswered");
+    assert!(silent.starts_with(DOWN_NOT_PROVEN) && silent.contains("unanswered"), "{silent}");
+}

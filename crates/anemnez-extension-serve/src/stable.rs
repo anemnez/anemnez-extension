@@ -107,6 +107,29 @@ pub async fn the_static_half_is_byte_stable(product: &mut impl Restartable, cloc
     checked
 }
 
+/// Whether a read on the downed instance's channel proves it down (rule 5, D m/41782): only a read that positively
+/// failed (a reset, a refusal, GOAWAY) does. One that still answers is `down-not-proven`, and so is one that never
+/// answered within the step's bound, since a half-open, silent connection proves nothing. `read` is the read's
+/// answer, or `Err(())` when it didn't answer in time. Pure.
+///
+/// # Errors
+/// `down-not-proven`, saying which way.
+pub fn proven_down(read: &Result<Result<(), String>, ()>) -> Result<(), String> {
+    match read {
+        Ok(Err(_)) => Ok(()),
+        Ok(Ok(())) => Err(format!(
+            "{DOWN_NOT_PROVEN}: after `down`, the instance still answers Describe on the channel that read it, so \
+             \"after it went down and came back\" would compare against one that never went down. End the plane in \
+             `down` (its closer, or its serve task's own end), not only a wrapper around it"
+        )),
+        Err(()) => Err(format!(
+            "{DOWN_NOT_PROVEN}: after `down`, a read on the channel that read it was unanswered within \
+             {STEP_WITHIN:?}, so nothing positively failed: a half-open, silent connection isn't down. End the plane \
+             so an old connection is reset or refused"
+        )),
+    }
+}
+
 async fn check(product: &mut impl Restartable, clock: &Clock) -> Result<(), String> {
     let channel = step(clock, "come up", product.up()).await?;
     let first = static_half(channel.clone(), clock).await?;
@@ -117,13 +140,8 @@ async fn check(product: &mut impl Restartable, clock: &Clock) -> Result<(), Stri
     // Down is proven, never assumed (N m/41684, H m/41479): the instance that went down answers no read on the channel
     // that read it. A product whose `down` leaves its listener answering would otherwise compare the restart against an
     // instance that never went down, and the leg would prove nothing.
-    if let Ok(Ok(_)) = clock.timeout(STEP_WITHIN, static_half(channel, clock)).await {
-        return Err(format!(
-            "{DOWN_NOT_PROVEN}: after `down`, the instance still answers Describe on the channel that read it, so \
-             \"after it went down and came back\" would compare against one that never went down. End the plane in \
-             `down` (its closer, or its serve task's own end), not only a wrapper around it"
-        ));
-    }
+    let read = clock.timeout(STEP_WITHIN, static_half(channel, clock)).await.map_err(|_| ());
+    proven_down(&read.map(|r| r.map(drop)))?;
     let channel = step(clock, "come back", product.up()).await?;
     same("after it went down and came back", &first, &static_half(channel, clock).await?)
 }

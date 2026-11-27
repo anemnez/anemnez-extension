@@ -243,6 +243,33 @@ async fn a_held_orient_answers_only_once_let_go() {
     assert_eq!(now, crate::ORIENT_NOW);
 }
 
+/// M m/41794 (rule 4): a call held open across stop() doesn't hold stop for ever. The graceful end waits on every
+/// in-flight call, so stop cuts it at STOP_WITHIN on the fixture's clock, aborts, and returns false. With no call held,
+/// stop ends gracefully and returns true. A real-time guard makes a hang red rather than a hung row.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_call_held_across_stop_is_cut_at_its_bound() {
+    let manual = ManualClock::new();
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let running = serve(dir.path(), manual.clock(), Variant::Good).await.expect("serves");
+    let mut fixture = pb::fixture_client::FixtureClient::new(running.channel().await.expect("connects"));
+    running.hold_orient(true);
+    let _held = tokio::spawn(async move { fixture.orient(pb::OrientRequest {}).await });
+    running.orient_held().await;
+    let stopping = tokio::spawn(running.stop());
+    assert!(manual.until_waiting(1, Duration::from_secs(5)).await, "stop's bound is armed");
+    manual.advance(crate::STOP_WITHIN).await;
+    let graceful = anemnez_clock::Clock::system()
+        .timeout(Duration::from_secs(20), stopping)
+        .await
+        .expect("stop returns at its bound, never hangs")
+        .expect("ran");
+    assert!(!graceful, "a held call is cut at the bound, not waited on");
+
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let idle = serve(dir.path(), ManualClock::new().clock(), Variant::Good).await.expect("serves");
+    assert!(idle.stop().await, "with no call held, stop ends gracefully");
+}
+
 /// B m/33548: the bounded twin names what didn't arrive when no Orient call is held within its bound, as an event on the
 /// clock handed in (no sleep), and answers once one is.
 #[tokio::test(flavor = "multi_thread")]
@@ -299,7 +326,7 @@ impl anemnez_extension_serve::stable::Restartable for Restarts {
             let socket = running.socket.clone();
             // Ended and awaited, so the driver's proof that it's down holds (N m/41684): dropping it alone left its
             // open connection answering.
-            running.stop().await;
+            let _ = running.stop().await;
             let _ = std::fs::remove_file(socket);
         }
     }
