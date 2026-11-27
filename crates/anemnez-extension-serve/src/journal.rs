@@ -247,14 +247,14 @@ impl Journal {
 
     /// The cursor of the newest event: subscribing after it gets every event from now on.
     pub fn head(&self) -> String {
-        self.cursor(self.ring().next - 1)
+        self.cursor(self.ring().next.saturating_sub(1))
     }
 
     /// The oldest cursor a subscriber may still resume after: subscribing after it is taken, and after any older one
     /// is [`Refusal::OutOfRange`]. A board says it so a follower sees it fell behind before it asks (D m/47 (c)).
     /// Before the journal has dropped anything, it is "before everything" (`<origin>:0`).
     pub fn floor(&self) -> String {
-        self.cursor(self.ring().first - 1)
+        self.cursor(self.ring().first.saturating_sub(1))
     }
 
     /// Subscribe to the events after `after` (empty for the head), of `kinds` (empty for every
