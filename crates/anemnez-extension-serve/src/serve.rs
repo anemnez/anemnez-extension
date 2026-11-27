@@ -34,6 +34,7 @@ use std::time::Duration;
 
 use anemnez_clock::Clock;
 use anemnez_extension::peer::{DRAIN_WINDOW_PASSED, RESERVED_SERVICE, SERVICE_NAMED_TWICE};
+use anemnez_extension::refusal::REPLICA_NEEDS_SWARM_SCOPE;
 use futures_util::{Stream, StreamExt as _};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tonic::body::BoxBody;
@@ -45,6 +46,28 @@ use crate::journal::{CALL_METHOD, EVENTS_METHOD, WATCH_METHOD};
 use crate::log_events::EventsFace;
 use crate::plane::ApiPlaneService;
 use crate::{Accepted, ApiPlaneLayer, Board, Describe, DigestLayer, pb};
+
+/// Whether `events` may be served under `describe`: a log face read from a replica needs `cursor_scope: SWARM`.
+pub(crate) fn replica_scope(describe: &Describe, events: &EventsFace) -> Result<(), String> {
+    let EventsFace::Log(log) = events else { return Ok(()) };
+    let replicas = log.replicas();
+    if replicas.is_empty() {
+        return Ok(());
+    }
+    let declared = anemnez_extension::descriptor::service_of(describe.descriptor()).map(|o| o.cursor_scope);
+    match declared {
+        Ok(anemnez_extension::options::CursorScope::Swarm) => Ok(()),
+        other => Err(format!(
+            "{REPLICA_NEEDS_SWARM_SCOPE}: the logs {} are read from a replica, whose cursors resume at any instance, \
+             and the descriptor declares {}; declare cursor_scope: SWARM",
+            replicas.join(", "),
+            match other {
+                Ok(scope) => format!("cursor_scope {scope:?}"),
+                Err(e) => format!("no scope that reads ({e})"),
+            }
+        )),
+    }
+}
 
 /// The packages the contract reserves: the API plane serves their faces itself, and never Lifecycle.
 pub const RESERVED_PACKAGES: [&str; 2] = ["anemnez.extension.", "anemnez.fabric."];
@@ -67,14 +90,44 @@ pub struct ApiFaces {
 impl ApiFaces {
     /// The three faces [`serve`] puts beside the product's calls. `events` is the product's Journal (an
     /// `EventsService`, retiring) or its own log (a `LogEvents`), as an [`EventsFace`].
+    ///
+    /// A log face read from a replica under a descriptor that doesn't declare `cursor_scope: SWARM` serves nothing:
+    /// each of its reads is refused [`REPLICA_NEEDS_SWARM_SCOPE`] by name, and the build says so at ERROR.
+    /// [`ApiFaces::try_new`] refuses it at build instead.
     pub fn new(describe: Describe, health: Board, events: impl Into<EventsFace>) -> ApiFaces {
+        let mut events = events.into();
+        if let Err(why) = replica_scope(&describe, &events) {
+            tracing::error!(refusal = REPLICA_NEEDS_SWARM_SCOPE, "{why}");
+            if let EventsFace::Log(log) = &mut events {
+                log.misdeclared(why);
+            }
+        }
+        ApiFaces::built(describe, health, events)
+    }
+
+    /// As [`ApiFaces::new`], refusing a log face read from a replica whose descriptor doesn't declare `cursor_scope:
+    /// SWARM` (ergon:M/log-face-any-replica, D m/42395): a replica's cursor resumes at any instance.
+    ///
+    /// # Errors
+    /// [`REPLICA_NEEDS_SWARM_SCOPE`] and why, naming the logs and the scope declared.
+    pub fn try_new(
+        describe: Describe,
+        health: Board,
+        events: impl Into<EventsFace>,
+    ) -> Result<ApiFaces, (&'static str, String)> {
+        let events = events.into();
+        replica_scope(&describe, &events).map_err(|why| (REPLICA_NEEDS_SWARM_SCOPE, why))?;
+        Ok(ApiFaces::built(describe, health, events))
+    }
+
+    fn built(describe: Describe, health: Board, events: EventsFace) -> ApiFaces {
         // The descriptor's callers = PRODUCT methods, none allowed: a carried call to one is product-callers-unnamed
         // until the product names who may call it (D m/32983).
         let products = crate::plane::ProductCallers::of(describe.descriptor(), &[]).unwrap_or_default();
         ApiFaces {
             describe,
             health,
-            events: events.into(),
+            events,
             claimed: crate::plane::ClaimedWrites::default(),
             products,
             bound: crate::plane::BoundDecided::default(),

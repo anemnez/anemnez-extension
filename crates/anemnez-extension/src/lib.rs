@@ -110,6 +110,10 @@ pub mod refusal {
     /// The product's own authorization of an `Events/Call` or `Events/Watch` refused it, or didn't answer within
     /// its bound: nothing of the log is served (CONTRACT.md, the log face). The reason follows the name.
     pub const UNAUTHORIZED: &str = "unauthorized";
+    /// A descriptor declaring `cursor_scope: INSTANCE` over a log face read from a replica (one that says its committed
+    /// end): a replica's cursor resumes at any instance, so its face declares SWARM (ergon:M/log-face-any-replica, D
+    /// m/42395). Refused when the faces are built, and every read is refused by it too, so it is never served unsaid.
+    pub const REPLICA_NEEDS_SWARM_SCOPE: &str = "replica-needs-swarm-scope";
     /// A keyed-route call carried an empty key: refused by the bridge before the call leaves, since
     /// no holder can be resolved for it.
     pub const NO_KEY: &str = "no-key";

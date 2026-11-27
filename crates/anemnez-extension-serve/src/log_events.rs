@@ -376,6 +376,11 @@ pub struct LogEvents {
     closed: Arc<Notify>,
     /// Each house reader's reads, said at a bounded rate ([`crate::house_reads`]).
     house_reads: Arc<std::sync::Mutex<crate::house_reads::Tally>>,
+    /// The node a replica's reads are said from ([`LogEvents::read_at`]).
+    node: Option<String>,
+    /// Why this face may serve nothing: its descriptor's scope can't hold a replica's cursors
+    /// ([`crate::replica::REPLICA_NEEDS_SWARM_SCOPE`]), set when [`crate::ApiFaces`] are built.
+    misdeclared: Option<String>,
 }
 
 impl LogEvents {
@@ -432,7 +437,39 @@ impl LogEvents {
             reading: Arc::new(AtomicUsize::new(0)),
             closed: Arc::new(Notify::new()),
             house_reads: Arc::default(),
+            node: None,
+            misdeclared: None,
         }
+    }
+
+    /// Say each read of a replica's log from `node` (ergon:M/log-face-any-replica, D m/42395): Call, Watch and
+    /// `Events/Events` answer [`anemnez_extension::READ_AT_METADATA`] = `<node>@<end>`, the end being what this
+    /// replica had committed of the log the read named ([`Face::end`]), and a `replica-behind` refusal names it too.
+    /// A log whose face says no end (a product's own, not replicated) is said by no header.
+    #[must_use]
+    pub fn read_at(mut self, node: impl Into<String>) -> LogEvents {
+        self.node = Some(node.into());
+        self
+    }
+
+    /// The logs this face reads from a replica, so its descriptor must declare SWARM.
+    pub(crate) fn replicas(&self) -> Vec<String> {
+        self.log.replicas()
+    }
+
+    /// Serve nothing, each call refused `why` by name: its faces were built with a scope it can't hold.
+    pub(crate) fn misdeclared(&mut self, why: String) {
+        self.misdeclared = Some(why);
+    }
+
+    #[allow(clippy::result_large_err)] // A tonic Status is the handler's own error, returned as is.
+    fn declared(&self) -> Result<(), tonic::Status> {
+        self.misdeclared.as_ref().map_or(Ok(()), |why| Err(tonic::Status::failed_precondition(why.clone())))
+    }
+
+    /// Where this face's reads are said from.
+    fn said(&self) -> crate::replica::ReadAt {
+        crate::replica::ReadAt { node: self.node.clone(), logs: self.log.clone() }
     }
 
     /// At most `max` watches at once, instead of [`WATCHES_MAX`].
@@ -557,7 +594,7 @@ impl LogEvents {
     /// One read of the log for `bytes` (a wire request), under the reads cap, within what `deadline` has left and at
     /// most [`CALL_WITHIN`]: the wire's reply, or the refusal by name. Call's, and Events' one bounded read.
     #[allow(clippy::result_large_err)] // A tonic Status is the handler's own error, returned as is.
-    async fn read_once(&self, bytes: Vec<u8>, deadline: Mono) -> Result<Vec<u8>, tonic::Status> {
+    async fn read_once(&self, bytes: Vec<u8>, deadline: Mono) -> Result<(Vec<u8>, Option<String>), tonic::Status> {
         let slot = Slot::take(&self.reading, self.calls_max, &self.closed).ok_or_else(|| {
             tonic::Status::resource_exhausted(format!(
                 "{}: this product holds {} reads, the most it may; retry",
@@ -578,15 +615,22 @@ impl LogEvents {
             // on a caller's within (L m/31024); several are routed by the request's log. A read that found a writer
             // holding its log is busy, and one that couldn't be read at all is unreadable, each by name.
             let faced = log.faced(within, &clock);
-            let reply = wire::serve(&*faced.face, &bytes);
+            // Each wait ends a hop before the read's bound, so a replica behind the cursor says so inside the call (D
+            // m/42395 (1)); the log it named and its refusal are seen, never parsed from the bytes.
+            let reading = crate::replica::Reading::new(Arc::clone(&faced.face), Some((until, clock)));
+            let reply = wire::serve(&reading, &bytes);
+            let seen = reading.seen();
             match (faced.unreadable(), faced.busy()) {
                 (Some(why), _) => Err(Unopened::Unreadable(why)),
                 (None, Some(why)) => Err(Unopened::Busy(why)),
-                (None, None) => Ok(Some(reply)),
+                (None, None) => Ok(Some((reply, seen))),
             }
         });
         match self.clock.timeout_at(until, read).await {
-            Ok(Ok(Ok(Some(reply)))) => Ok(reply),
+            Ok(Ok(Ok(Some((_, seen))))) if seen.behind.is_some() => {
+                Err(self.said().behind(seen.behind.as_deref().unwrap_or_default(), seen.log.as_deref()))
+            }
+            Ok(Ok(Ok(Some((reply, seen))))) => Ok((reply, seen.log)),
             Ok(Ok(Ok(None))) => Err(tonic::Status::internal("the log was opened and its read never ran")),
             Ok(Ok(Err(Unopened::Busy(why)))) => Err(tonic::Status::resource_exhausted(format!(
                 "{}: the log's writer holds it ({why}); retry",
@@ -690,6 +734,9 @@ struct Watching {
     drain: Option<Ended>,
     pending: VecDeque<Result<pb::WatchFrame, tonic::Status>>,
     finished: bool,
+    /// The face as the watch reads it, seen for a `replica-behind` refusal.
+    reading: Arc<crate::replica::Reading>,
+    said: crate::replica::ReadAt,
 }
 
 impl Watching {
@@ -698,6 +745,12 @@ impl Watching {
             match out {
                 Output::Send(frame) => self.pending.push_back(Ok(pb::WatchFrame { frame })),
                 Output::Stop => self.log.stop(&self.stopper),
+                Output::End(End::Producer) if self.reading.seen().behind.is_some() => {
+                    let seen = self.reading.seen();
+                    let why = seen.behind.as_deref().unwrap_or_default();
+                    self.pending.push_back(Err(self.said.behind(why, seen.log.as_deref())));
+                    self.finished = true;
+                }
                 Output::End(end) => {
                     if let Some(status) = status(end) {
                         self.pending.push_back(Err(status));
@@ -796,6 +849,7 @@ impl pb::events_server::Events for LogEvents {
         &self,
         request: tonic::Request<pb::EventsRequest>,
     ) -> Result<tonic::Response<Self::EventsStream>, tonic::Status> {
+        self.declared()?;
         let deadline = self.clock.now_mono() + FACE_WITHIN;
         self.admit(EVENTS_METHOD, Method::Call, &request, deadline).await?;
         let asked = request.into_inner();
@@ -822,7 +876,7 @@ impl pb::events_server::Events for LogEvents {
             })?;
             // A page's read the deadline cuts short says where to read on too, once a page was scanned (D m/40669):
             // else a caller retries from its first cursor and re-scans the same run every time.
-            let reply = match self.read_once(ask, deadline).await {
+            let (reply, _) = match self.read_once(ask, deadline).await {
                 Err(cut) if scanned.is_some() && cut.message().starts_with(refusal::EVENTS_CALL_UNANSWERED) => {
                     return Err(read_on(&scanned));
                 }
@@ -871,7 +925,9 @@ impl pb::events_server::Events for LogEvents {
                     })
             })
             .collect();
-        Ok(tonic::Response::new(Box::pin(futures_util::stream::iter(items))))
+        let mut response = tonic::Response::new(Box::pin(futures_util::stream::iter(items)) as EventStream);
+        self.said().say(response.metadata_mut(), Some(&from.log));
+        Ok(response)
     }
 
     type WatchStream = WatchStream;
@@ -880,6 +936,7 @@ impl pb::events_server::Events for LogEvents {
         &self,
         request: tonic::Request<pb::WatchRequest>,
     ) -> Result<tonic::Response<Self::WatchStream>, tonic::Status> {
+        self.declared()?;
         let deadline = self.clock.now_mono() + FACE_WITHIN;
         let (admitted, admit) = self.admit(WATCH_METHOD, Method::Watch, &request, deadline).await?;
         // A stream admitted without a token still ends within a token's life, so it re-opens, and is authorized
@@ -895,7 +952,10 @@ impl pb::events_server::Events for LogEvents {
         if !faced.sourced() {
             tracing::info!(log = %self.log.names(), "a watch re-reads on its beat alone: a log has no source of changes");
         }
-        let log = faced.face;
+        // Seen, so a replica behind the watch's cursor ends it Unavailable by name, not with a frame a router can't
+        // route on; each wait is the watch's beat, its own bound.
+        let reading = Arc::new(crate::replica::Reading::new(faced.face, None));
+        let log: Arc<dyn Face> = Arc::clone(&reading) as Arc<dyn Face>;
         let bytes = request.into_inner().request;
         // Read the request before taking a thread for it.
         wire::watch(&log, &bytes).map_err(|e| tonic::Status::invalid_argument(e.to_string()))?;
@@ -909,6 +969,7 @@ impl pb::events_server::Events for LogEvents {
         let (tx, frames) = tokio::sync::mpsc::channel(WATCH_BUFFER);
         let (said, stopper) = tokio::sync::oneshot::channel::<Stopper>();
         let watched = Arc::clone(&log);
+        let seen = Arc::clone(&reading);
         std::thread::Builder::new()
             .name("events-watch".into())
             .spawn(move || {
@@ -918,6 +979,10 @@ impl pb::events_server::Events for LogEvents {
                     return;
                 }
                 for frame in watching {
+                    // The refusal's frame is the watch's last: its end is said as a status instead.
+                    if seen.seen().behind.is_some() {
+                        return;
+                    }
                     if tx.blocking_send(frame).is_err() {
                         return;
                     }
@@ -939,7 +1004,16 @@ impl pb::events_server::Events for LogEvents {
             drain,
             pending: VecDeque::new(),
             finished: false,
+            reading,
+            said: self.said(),
         };
+        // A one-log face's watch says where it reads at its open; a many-log face's log is the request's, which this
+        // crate never parses, so its watch says it only in a replica-behind end.
+        let one = match &self.log {
+            crate::many::Logs::One(one) => Some(one.name().to_owned()),
+            crate::many::Logs::Many(_) => None,
+        };
+        let said = self.said();
         let stream = futures_util::stream::unfold(host, |mut host| async move {
             loop {
                 if let Some(item) = host.pending.pop_front() {
@@ -952,17 +1026,22 @@ impl pb::events_server::Events for LogEvents {
                 host.apply(input);
             }
         });
-        Ok(tonic::Response::new(Box::pin(stream)))
+        let mut response = tonic::Response::new(Box::pin(stream) as WatchStream);
+        said.say(response.metadata_mut(), one.as_deref());
+        Ok(response)
     }
 
     async fn call(
         &self,
         request: tonic::Request<pb::CallRequest>,
     ) -> Result<tonic::Response<pb::CallReply>, tonic::Status> {
+        self.declared()?;
         let deadline = self.clock.now_mono() + FACE_WITHIN;
         self.admit(CALL_METHOD, Method::Call, &request, deadline).await?;
-        let reply = self.read_once(request.into_inner().request, deadline).await?;
-        Ok(tonic::Response::new(pb::CallReply { reply }))
+        let (reply, log) = self.read_once(request.into_inner().request, deadline).await?;
+        let mut response = tonic::Response::new(pb::CallReply { reply });
+        self.said().say(response.metadata_mut(), log.as_deref());
+        Ok(response)
     }
 }
 

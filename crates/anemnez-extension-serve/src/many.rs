@@ -76,6 +76,25 @@ impl Logs {
         Faced { face, rereads }
     }
 
+    /// The committed end of the log named `log`, when its face says one (a replica's): on a one-log face, that log's
+    /// whatever the name.
+    pub fn end_of(&self, log: &str) -> Option<u64> {
+        let named = match self {
+            Logs::One(one) => Some(one),
+            Logs::Many(logs) => logs.iter().find(|(name, _)| name == log).map(|(_, one)| one),
+        };
+        named?.face()?.end()
+    }
+
+    /// The logs read from a replica: those whose face says a committed end.
+    pub fn replicas(&self) -> Vec<String> {
+        let is_replica = |log: &Arc<dyn Log>| log.face().is_some_and(|face| face.end().is_some());
+        match self {
+            Logs::One(one) => is_replica(one).then(|| one.name().to_owned()).into_iter().collect(),
+            Logs::Many(logs) => logs.iter().filter(|(_, log)| is_replica(log)).map(|(name, _)| name.clone()).collect(),
+        }
+    }
+
     /// The logs' names, as a log line says them.
     pub fn names(&self) -> String {
         match self {

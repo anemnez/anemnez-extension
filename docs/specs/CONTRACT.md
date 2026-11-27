@@ -187,6 +187,24 @@ own changes and Busy. Latest is answered from the log its request names (hydramq
 `latest-needs-its-log`, never routed by a prefix's spelling (D m/32100), and one naming a log the face doesn't serve is
 `ForeignLog`. Two logs of one name, or an empty one, are refused at build.
 
+<!-- claim: a-replicas-face-says-where-it-read -->
+**A log face read from a replica says where it read, and a replica behind the cursor says so by name**
+(ergon:M/log-face-any-replica; D m/42395, A m/42402). A `FaceLog` over a replicated partition's `PartitionEvents` is
+a replica's face: any replica serves its committed prefix, never wrong, only behind. With `LogEvents::read_at(node)`,
+`Events/Call`, `Events/Events` and a one-log face's `Events/Watch` answer the response header `anemnez-read-at`
+(`READ_AT_METADATA`) = `<node>@<end>`, the end being what this replica had committed of the log the read named (a
+many-log face's Watch names its log only in its request, which this crate never parses, so says it only in a
+`replica-behind` end); a log whose face says no end (a product's own, not replicated) says no header. A cursor strictly
+past this replica's end came from a replica further on: after its wait it is `replica-behind` as Unavailable, its name
+first, then the replica's end (`hydramq_events::replica_behind` reads it back) and the node, in its words and the same
+header, so a router tries the next replica; never an empty page read as the head. A cursor at the end is the head. The
+wait is what the call's deadline has left less a hop, never the request's own constant, so the refusal arrives inside
+the call (nested bounds). A Watch past the end ends with that status after its beat, not with a frame. A replica's
+cursors resume at any instance, so `ApiFaces::try_new` refuses a descriptor declaring `cursor_scope: INSTANCE` over one
+`replica-needs-swarm-scope` by name, and `ApiFaces::new` serves such a face nothing, each read refused by that name.
+Compaction is each replica's own, by offset: `Compacted` names this replica's start, which another's may differ from.
+Latest has no cursor: it is as of this replica's end, which the header says.
+
 <!-- claim: a-log-is-read-through-one-seam -->
 **A log is read through one seam, held or opened per read** (L m/30712). `LogEvents::new` takes a log held open for
 the server's life; `LogEvents::over` takes any `Log`, whose `with(within, read)` opens it once for a read, within what
