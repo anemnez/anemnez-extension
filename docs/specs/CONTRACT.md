@@ -510,12 +510,24 @@ refuses `cursor-face-unserved` by name, as `events-call-unserved` is refused tod
   is the mark as it now stands. A commit at or below the mark is done (a repeat is harmless), and the client reads
   "ours or further" from the answer (rule 5). Two refusals, by name (M 1, 2):
   - `commit-past-end`, naming the log's end: `through` past the end is refused, since a client can't have been
-    handed it, and committing it would skip the items between for good.
+    handed it, and committing it would skip the items between for good. The end is the deciding writer's, where the
+    mark is fenced (the leader the commit reaches through Reach), never a lagging replica's, so an item a fresher
+    replica handed is never refused (D m/44121).
   - `acked` never passes `handed`: an `acked` commit past `handed` raises `handed` with it, in one decided write.
-    It is never refused, because `handed` is advisory and a client's batched `handed` may lag its ack.
+    It is never refused, because `handed` is advisory and a client's batched `handed` may lag its ack. That write is
+    hydramq-cursor's own `Ack`, which already drops a `handed` below the new mark; the face says `handed` at least
+    `acked`, so nothing in `Marks::decide` changes (D m/44121).
   `session` rides `handed` for diagnosis only. The re-hand decision (the same session hands after its own
   position, a new one from `acked`) lives in the client's own memory, DELIVERY §1b's `Handed { pos, session }`, never
   in the producer's mark (M 4).
+
+<!-- claim: a-cursor-faces-positions-are-one-based -->
+**A position is one-based** (H, the build; -serve's `cursor_face`). The item at the log's offset `o` is at position
+`o + 1`, so `0` is before the first item: a fresh recipient's marks are `0`, and its first `Next { after: 0 }` reads the
+log from its first item. `acked = p` says every item through `p` is acked, inclusive, as the delivery client reads it
+(`Next { after: acked }`), and that is hydramq-cursor's `next` exactly (the first unacked offset is `p`), so the face
+maps `acked` onto `Ack { through: p }` with no arithmetic, and `handed = p` onto `Hand { through: p - 1 }`. The face
+says `handed` at least `acked`.
 
 **One kernel, never a second.** The rise-only mark is hydramq-cursor's: `Change::Ack { through }` never moves the mark
 back (a lower one is a no-op), `Change::Hand { through }` records what is in flight, and the store fences each
@@ -537,7 +549,7 @@ mark logic of its own: it maps the two calls onto `Marks::decide` and the store 
 own). An unanswered `Commit` is Unclear and read back by the next `Next`, whose marks say where it stands. That `Next`
 may come from a replica that hasn't seen the commit yet, so its marks can be the ones from before it (D m/43564 2). The
 client then commits again, which is harmless since a mark only rises, and may hand an item again, which is
-at-least-once's stated cost. `read_at` says how fresh the marks it read are.
+at-least-once's stated cost. `read_at` says how fresh the marks it read are: the reading replica's Wall stamp (rule 3), never a Mono or a host-local time, since the read crosses hosts, so a client compares two reads by Wall (E m/44129).
 
 **Scan cost.** A recipient with few items in a busy log scans far per call. A product whose log is keyed by recipient
 (a subject prefix per recipient) plugs a `Whose` that also seeks by recipient, so `Next` reads only that recipient's
