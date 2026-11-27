@@ -332,6 +332,9 @@ pub const JOB_MARGIN_SECS: u32 = 5;
 /// The most `bound_secs` may state: [`JOB_AT_MOST_SECS`] less [`JOB_MARGIN_SECS`], so the bound and its margin fit
 /// inside the cap. Past it a descriptor is refused `bound-over-cap`.
 pub const BOUND_CAP_SECS: u32 = JOB_AT_MOST_SECS - JOB_MARGIN_SECS;
+/// How far inside a method's `bound_secs` an Ask must end (E m/44479, m/44485): nested bounds are strictly ordered, so
+/// the Ask's bound fires first and names its own cause, never the work's.
+pub const ASK_MARGIN_SECS: u32 = 5;
 
 /// What an absent `ask_within_secs` reads as: Claude Code's hook hold, the longest a person-facing call
 /// waits today (I m/13420). Never 0, which means "never asks" and must be said.
@@ -370,13 +373,14 @@ impl MethodOptions {
     }
 
     /// How long a call of this method may hold an Ask open, in seconds: as stated, or
-    /// [`ASK_WITHIN_DEFAULT_SECS`] when absent, never past a stated `bound_secs` (D m/44447): an Ask is held inside
-    /// the method's work, so the default nests as a stated ask must (`ask-past-bound`). 0 means it never asks. A
-    /// caller's own per-call bound must exceed this plus its margin (nested bounds, rule 4).
+    /// [`ASK_WITHIN_DEFAULT_SECS`] when absent, ending at least [`ASK_MARGIN_SECS`] inside a stated `bound_secs` (D
+    /// m/44447, E m/44485): an Ask is held inside the method's work, so the default nests as a stated ask must
+    /// (`ask-past-bound`). 0 means it never asks. A caller's own per-call bound must exceed this plus its margin
+    /// (nested bounds, rule 4).
     pub fn ask_within(&self) -> u32 {
         match (self.ask_within_secs, self.bound_secs) {
             (Some(stated), _) => stated,
-            (None, Some(bound)) if bound > 0 => ASK_WITHIN_DEFAULT_SECS.min(bound),
+            (None, Some(bound)) if bound > 0 => ASK_WITHIN_DEFAULT_SECS.min(bound.saturating_sub(ASK_MARGIN_SECS)),
             (None, _) => ASK_WITHIN_DEFAULT_SECS,
         }
     }

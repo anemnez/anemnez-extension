@@ -385,8 +385,9 @@ fn a_work_bound_is_read_as_stated_and_refused_at_zero_and_past_its_cap() {
     }
 }
 
-/// D m/44391 (1): an Ask is held inside the method's work, so with both stated the ask's bound is the shorter. Equal
-/// is admitted; one past is refused ask-past-bound with both values; an absent ask claims nothing and is admitted.
+/// D m/44391 (1), E m/44479: an Ask is held inside the method's work, so it ends ASK_MARGIN_SECS inside the bound.
+/// Equal is refused ask-past-bound with both values, as is one inside by less than the margin; a stated 0 never asks;
+/// an absent ask reads its default inside the bound, and a bound with no room for one is refused bound-holds-no-ask.
 #[test]
 fn an_ask_bound_past_the_work_bound_is_refused() {
     let with = |ask: Option<u32>, bound: u32| {
@@ -396,18 +397,25 @@ fn an_ask_bound_past_the_work_bound_is_refused() {
         options
     };
     let bytes = set(vec![
-        method("Equal", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&with(Some(60), 60))),
+        method("Inside", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&with(Some(55), 60))),
         method("Unsaid", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&with(None, 30))),
+        method("Never", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&with(Some(0), 3))),
+        method("Long", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&with(None, 120))),
     ]);
     let admitted = check_descriptor(&bytes).expect("admitted");
-    // D m/44447: an unsaid ask reads its default, never past the stated bound, so it nests as a stated one must.
+    // D m/44447, E m/44485: an unsaid ask reads its default, ending the margin inside the stated bound.
     let asks: Vec<_> = admitted.iter().map(|m| m.options.ask_within()).collect();
-    assert_eq!(asks, [60, 30]);
-    let bytes = set(vec![method("Over", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&with(Some(61), 60)))]);
-    let refused = check_descriptor(&bytes).expect_err("past its bound");
-    assert_eq!(refused.iter().map(DescriptorRefusal::name).collect::<Vec<_>>(), ["ask-past-bound"]);
-    let said = refused[0].to_string();
-    assert!(said.contains("ask_within_secs 61") && said.contains("bound_secs 60"), "{said}");
+    assert_eq!(asks, [55, 25, 0, 45]);
+    for (ask, bound, name, said) in [
+        (Some(60), 60, "ask-past-bound", "ask_within_secs 60"),
+        (Some(56), 60, "ask-past-bound", "ask_within_secs 56"),
+        (None, 5, "bound-holds-no-ask", "bound_secs 5"),
+    ] {
+        let bytes = set(vec![method("Bad", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&with(ask, bound)))]);
+        let refused = check_descriptor(&bytes).expect_err("refused");
+        assert_eq!(refused.iter().map(DescriptorRefusal::name).collect::<Vec<_>>(), [name]);
+        assert!(refused[0].to_string().contains(said), "{}", refused[0]);
+    }
 }
 
 /// every-bridge-refuses-a-descriptor-alike: a good descriptor answers every offered method with
