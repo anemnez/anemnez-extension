@@ -139,24 +139,16 @@ fn args_mismatch(
     };
     for (key, value) in &args {
         let Some(field) = input.get_field_by_json_name(key).or_else(|| input.get_field_by_name(key)) else {
-            return if field_shaped(key) {
-                format!("{message} has no field `{key}`, for {path}")
-            } else {
-                // A key is the caller's input too: one that doesn't read as a field name may be a value put where a
-                // key goes, so it is said by its length alone (D m/42079).
-                format!("a key of {} chars isn't a field of {message}, for {path}", key.chars().count())
-            };
+            // A key is the caller's input too, and a token reads as a field name as well as any key does (D m/42164): an
+            // unknown key is never echoed. The message's own fields teach the fix better than the typo would.
+            let fields: Vec<String> = input.fields().map(|f| f.json_name().to_owned()).collect();
+            return format!("a key that isn't a field of {message}; its fields are {}, for {path}", fields.join(", "));
         };
         if let Some(expected) = never_takes(&field, value) {
             return format!("`{key}` takes {expected}, not {}, for {path}", json_kind(value));
         }
     }
     format!("an argument doesn't fit {message}, for {path} ({})", place(e))
-}
-
-/// Whether `key` reads as a field name, so naming it can't repeat a value: at most 64 of `[A-Za-z0-9_]` (D m/42079).
-fn field_shaped(key: &str) -> bool {
-    !key.is_empty() && key.len() <= 64 && key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
 }
 
 /// The JSON kind of `value`, never the value.

@@ -41,7 +41,7 @@ fn arguments_that_are_not_the_request_are_refused_by_name() {
     let calls = calls();
     let typo = calls.encode(HOLD, r#"{"repoo": "agora", "why": "x"}"#).expect_err("refused");
     assert_eq!(typo.name(), "args-mismatch");
-    assert!(typo.to_string().contains("repoo"), "{typo}");
+    assert!(typo.to_string().contains("its fields are repo, why") && !typo.to_string().contains("repoo"), "{typo}");
     let wrong = calls.encode(ITEMS, r#"{"cursor": 5}"#).expect_err("refused");
     assert_eq!(wrong.name(), "args-mismatch");
     let array = calls.encode(ITEMS, r#"["x"]"#).expect_err("refused");
@@ -109,10 +109,11 @@ fn an_args_refusal_names_the_key_and_kinds_never_the_value() {
     let nested = contract.encode(path, &format!(r#"{{"kinds": [{{"x": "{SECRET}"}}]}}"#)).expect_err("refused");
     assert!(!nested.to_string().contains(SECRET), "{nested}");
 
-    // D m/42079: a key is the caller's input too. One that reads as a field name is named; one that doesn't is said by
-    // its length alone.
-    let typo = contract.encode(path, r#"{"kindz": []}"#).expect_err("no such field").to_string();
-    assert!(typo.contains("has no field `kindz`"), "a field-shaped key is named: {typo}");
-    let keyed = contract.encode(path, &format!(r#"{{"{SECRET}-x": 1}}"#)).expect_err("no such field").to_string();
-    assert!(!keyed.contains(SECRET) && keyed.contains("a key of 23 chars isn't a field"), "{keyed}");
+    // D m/42164: a key is the caller's input too, and a bare token is as field-shaped as any key. An unknown key is
+    // never echoed; the message's own fields are said instead.
+    let keyed = contract.encode(path, &format!(r#"{{"{SECRET}": 1}}"#)).expect_err("no such field").to_string();
+    assert!(!keyed.contains(SECRET), "{keyed}");
+    assert!(
+        keyed.contains("a key that isn't a field of anemnez.extension.v1.EventsRequest; its fields are after, kinds")
+    );
 }
