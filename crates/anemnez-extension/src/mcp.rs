@@ -21,7 +21,8 @@ pub const EVENTS_PATH: &str = "/anemnez.extension.v1.Events/Events";
 pub enum ToolKind {
     /// One unary call of the method.
     Call,
-    /// The product's `Events` stream, read for at most `max` events and a bounded wait.
+    /// The product's `Events`, read once from a cursor, bounded by the face's own page (O m/41925: the contract's
+    /// `EventsRequest` is `after` and `kinds`, so the tool asks nothing else).
     Events,
 }
 
@@ -202,13 +203,12 @@ fn events_tool() -> Tool {
         name: EVENTS_TOOL.into(),
         kind: ToolKind::Events,
         path: EVENTS_PATH.into(),
-        description: "The product's events after a cursor, up to the head and at most `max`: pass the answer's \
-                      `next` as `after` to read on. Empty `after` starts at the oldest kept."
+        description: "The product's events after a cursor, one page up to the head: pass the answer's `next` as \
+                      `after` to read on. Empty `after` starts at the oldest kept."
             .into(),
         input_schema: object([
             ("after".to_owned(), json!({ "type": "string" })),
             ("kinds".to_owned(), json!({ "type": "array", "items": { "type": "string" } })),
-            ("max".to_owned(), json!({ "type": "integer", "minimum": 1 })),
         ]),
         effect: Effect::Read,
         consent: Permission::Allow,
