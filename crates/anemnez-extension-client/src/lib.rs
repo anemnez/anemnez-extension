@@ -216,6 +216,124 @@ pub async fn unary(
     grpc.unary(call, path, Raw).await.map(tonic::Response::into_inner).map_err(Box::new)
 }
 
+/// The most events one [`events_page`] reads, whatever the caller asks: the client's own page, never the arguments'.
+pub const EVENTS_PAGE_MAX: usize = 200;
+
+/// One page of a product's `Events` stream (a flattened face's `events` tool, ToolKind::Events), as
+/// [`events_page`] read it: each event's message bytes as the product sent it, the cursor to read on from, and why the
+/// page ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EventsPage {
+    /// Each `Event` message, in the order sent.
+    pub events: Vec<Vec<u8>>,
+    /// The last event's cursor, to pass as `after` to read on; empty when no event was read.
+    pub next: String,
+    /// Why the page ended: the stream ended, the page was full, or its bound passed (with or without events).
+    pub ended: PageEnd,
+    /// Where the face read from, as its [`READ_AT`] response header said (`<node>@<committed end>`), or none when the
+    /// face sends none (M m/42397).
+    pub read_at: Option<String>,
+}
+
+/// The response header a face names the replica and committed end it read at with: the kernel crate's one name.
+pub use anemnez_extension::READ_AT_METADATA as READ_AT;
+
+/// Why an [`events_page`] ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PageEnd {
+    /// The product ended its stream: everything after the cursor was read.
+    Ended,
+    /// [`EVENTS_PAGE_MAX`], or the caller's smaller `max`, was read: read on from `next`.
+    Full,
+    /// The bound passed. With events in hand that's a page; with none, nothing new arrived within it (rule 4: said,
+    /// never an error).
+    Waited,
+    /// The stream failed mid-page with the product's status, by its code and message (a follower behind, an expired
+    /// token, a drain): the events before it are kept, and nothing says the rest was read. Read on from `next`, here or
+    /// at another replica (D m/42486, M m/42499).
+    Broken {
+        /// The status's code, as tonic's `Code` names it in Debug (`Unavailable`, `FailedPrecondition`).
+        code: String,
+        /// The status's message: a refusal's name leads it.
+        message: String,
+    },
+}
+
+/// One event's cursor, read leniently from its message (field 1): the rest isn't this reader's.
+#[derive(Clone, PartialEq, prost::Message)]
+struct EventCursor {
+    #[prost(string, tag = "1")]
+    cursor: String,
+}
+
+/// Read one bounded page of a product's server-streamed `Events` (CONTRACT.md's `Events/Events`), the way a bridge
+/// offers it as a tool (M m/42248): `request` is the `EventsRequest` bytes as `Calls::encode` answered them, read
+/// until `max` events (at most [`EVENTS_PAGE_MAX`]) or `within` on `clock` (rule 3), and ending early when the stream
+/// ends. The stream is dropped at the end, so the producer stops sending. A unary call can't read it: it answers
+/// "Missing response message" (H m/42238).
+///
+/// # Errors
+/// The stream couldn't be opened within `within`, or the product refused it: its status.
+pub async fn events_page(
+    channel: tonic::transport::Channel,
+    path: &str,
+    request: Vec<u8>,
+    metadata: tonic::metadata::MetadataMap,
+    clock: &anemnez_clock::Clock,
+    max: usize,
+    within: std::time::Duration,
+) -> Result<EventsPage, Box<tonic::Status>> {
+    use prost::Message as _;
+    let path: http::uri::PathAndQuery =
+        path.parse().map_err(|_| Box::new(tonic::Status::invalid_argument(format!("{path} is not a method path"))))?;
+    let max = max.clamp(1, EVENTS_PAGE_MAX);
+    let until = clock.now_mono() + within;
+    let left = |clock: &anemnez_clock::Clock| until.saturating_since(clock.now_mono());
+    let opened = clock
+        .timeout(left(clock), async {
+            let mut grpc = tonic::client::Grpc::new(channel);
+            grpc.ready().await.map_err(|e| tonic::Status::unavailable(e.to_string()))?;
+            let mut call = tonic::Request::new(request);
+            *call.metadata_mut() = metadata;
+            grpc.server_streaming(call, path, Raw).await
+        })
+        .await
+        .map_err(|_| {
+            Box::new(tonic::Status::deadline_exceeded(format!("the Events stream didn't open within {within:?}")))
+        })?
+        .map_err(Box::new)?;
+    let read_at = opened.metadata().get(READ_AT).and_then(|v| v.to_str().ok()).map(str::to_owned);
+    let mut stream = opened.into_inner();
+    let mut page = EventsPage { events: Vec::new(), next: String::new(), ended: PageEnd::Waited, read_at };
+    loop {
+        if page.events.len() >= max {
+            page.ended = PageEnd::Full;
+            break;
+        }
+        match clock.timeout(left(clock), stream.message()).await {
+            Err(_) => break,
+            Ok(Ok(Some(event))) => {
+                if let Ok(read) = EventCursor::decode(event.as_slice()) {
+                    page.next = read.cursor;
+                }
+                page.events.push(event);
+            }
+            Ok(Ok(None)) => {
+                page.ended = PageEnd::Ended;
+                break;
+            }
+            Ok(Err(status)) if page.events.is_empty() => return Err(Box::new(status)),
+            Ok(Err(status)) => {
+                page.ended =
+                    PageEnd::Broken { code: format!("{:?}", status.code()), message: status.message().to_owned() };
+                break;
+            }
+        }
+    }
+    drop(stream);
+    Ok(page)
+}
+
 /// A codec that sends and receives a message's bytes untouched.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Raw;

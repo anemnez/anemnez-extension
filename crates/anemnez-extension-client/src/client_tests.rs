@@ -1,6 +1,8 @@
 //! The client against the fixture product, over a real socket.
 
 use anemnez_clock::ManualClock;
+use std::time::Duration;
+
 use anemnez_extension_fixture::{Variant, pb as fixture, serve};
 use prost::Message;
 
@@ -116,4 +118,61 @@ fn an_args_refusal_names_the_key_and_kinds_never_the_value() {
     assert!(
         keyed.contains("a key that isn't a field of anemnez.extension.v1.EventsRequest; its fields are after, kinds")
     );
+}
+
+/// M m/42248, H m/42238: a product's Events/Events is a server stream, so a bridge reads it as one bounded page: up to
+/// `max`, or until its bound on the handed clock, with the cursor to read on from. (An empty `after` is the head:
+/// only what's new, so the row reads after a real cursor.)
+#[tokio::test(flavor = "multi_thread")]
+async fn an_events_page_reads_the_stream_to_its_bound() {
+    use crate::{PageEnd, events_page};
+    const EVENTS: &str = "/anemnez.extension.v1.Events/Events";
+    // The contract's EventsRequest (after = 1, kinds = 2), as a product's own descriptor encodes it. The fixture's
+    // descriptor doesn't carry the contract's Events service, so it's encoded here directly.
+    #[derive(Clone, PartialEq, prost::Message)]
+    struct EventsRequest {
+        #[prost(string, tag = "1")]
+        after: String,
+    }
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let manual = ManualClock::new();
+    let running = serve(dir.path(), manual.clock(), Variant::Good).await.expect("serves");
+    let first = running.journal.publish("moved", b"event 0".to_vec());
+    for n in 1..4 {
+        running.journal.publish("moved", format!("event {n}").into_bytes());
+    }
+    let channel = running.channel().await.expect("connects");
+    let after = |cursor: &str| EventsRequest { after: cursor.into() }.encode_to_vec();
+
+    // A page smaller than what's there is full, and says where to read on.
+    // Guarded in real time: a page that ignored its `max` would wait on a clock no one advances, and must be red,
+    // never hung.
+    let page_clock = manual.clock();
+    let reading =
+        events_page(channel.clone(), EVENTS, after(&first), Default::default(), &page_clock, 2, Duration::from_secs(5));
+    let full = anemnez_clock::Clock::system()
+        .timeout(Duration::from_secs(5), reading)
+        .await
+        .expect("a page of 2 ends at its max, never waits out its bound")
+        .expect("a page");
+    assert_eq!((full.events.len(), full.ended), (2, PageEnd::Full));
+    assert!(!full.next.is_empty(), "it says where to read on");
+    assert_eq!(full.read_at, None, "a face that sends no read-at header has none");
+
+    // From there, the page is what arrived within its bound, said as waited, never an error.
+    // Other timers may already wait on this clock (the serve's own), so the page's wait is the one past them.
+    let before = manual.pending();
+    let (clock, next) = (manual.clock(), full.next.clone());
+    let reading = tokio::spawn(async move {
+        events_page(channel, EVENTS, after(&next), Default::default(), &clock, 10, Duration::from_secs(5)).await
+    });
+    assert!(manual.until_waiting(before + 1, Duration::from_secs(5)).await, "the page waits on its bound");
+    manual.advance(Duration::from_secs(5)).await;
+    let page = anemnez_clock::Clock::system()
+        .timeout(Duration::from_secs(5), reading)
+        .await
+        .expect("the page ends once its bound passes")
+        .expect("ran")
+        .expect("a page");
+    assert_eq!((page.events.len(), page.ended), (1, PageEnd::Waited), "the one event past the first page");
 }

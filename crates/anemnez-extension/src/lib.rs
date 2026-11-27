@@ -21,6 +21,10 @@ pub mod peer;
 pub mod signed;
 pub mod teaching;
 
+/// The response header an Events read names where it read with, `<node>@<committed end>` (D m/42395, M m/42499): the
+/// one name every face sends and every bridge reads.
+pub const READ_AT_METADATA: &str = "anemnez-read-at";
+
 /// The proto files, for a build that compiles them (`prost`, `tonic`) or a tool that reads them.
 pub mod protos {
     pub const OPTIONS: &str = include_str!("../proto/anemnez/extension/v1/options.proto");

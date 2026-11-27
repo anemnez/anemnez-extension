@@ -253,3 +253,96 @@ async fn watching<P: pb::events_server::Events>(
             .expect("the watch opens");
     hydramq_events::wire::Watcher::new(frames, from, beat)
 }
+
+/// A face that sends `events` on Events/Events, then `broken` if any, with the read-at header when `read_at` is some.
+struct Sending {
+    events: Vec<&'static str>,
+    broken: Option<tonic::Status>,
+    read_at: Option<&'static str>,
+}
+
+#[tonic::async_trait]
+impl pb::events_server::Events for Sending {
+    type EventsStream = tokio_stream::Iter<std::vec::IntoIter<Result<pb::Event, tonic::Status>>>;
+
+    async fn events(
+        &self,
+        _: tonic::Request<pb::EventsRequest>,
+    ) -> Result<tonic::Response<Self::EventsStream>, tonic::Status> {
+        let event = |n: &str| pb::Event { cursor: n.into(), kind: "moved".into(), payload: Vec::new() };
+        let mut sent: Vec<Result<pb::Event, tonic::Status>> = Vec::new();
+        for n in &self.events {
+            sent.push(Ok(event(n)));
+        }
+        sent.extend(self.broken.clone().map(Err));
+        let mut response = tonic::Response::new(tokio_stream::iter(sent));
+        if let Some(at) = self.read_at {
+            response.metadata_mut().insert(crate::READ_AT, at.parse().expect("ascii"));
+        }
+        Ok(response)
+    }
+
+    type WatchStream = tokio_stream::Empty<Result<pb::WatchFrame, tonic::Status>>;
+
+    async fn watch(
+        &self,
+        _: tonic::Request<pb::WatchRequest>,
+    ) -> Result<tonic::Response<Self::WatchStream>, tonic::Status> {
+        Err(tonic::Status::unimplemented("this producer serves Events"))
+    }
+
+    async fn call(&self, _: tonic::Request<pb::CallRequest>) -> Result<tonic::Response<pb::CallReply>, tonic::Status> {
+        Err(tonic::Status::unimplemented("this producer serves Events"))
+    }
+}
+
+/// One events page read from `producer`, served on a socket in `dir`, under a real-time guard.
+async fn page_from(dir: &std::path::Path, producer: Sending) -> crate::EventsPage {
+    let socket = dir.join("a.sock");
+    let incoming =
+        tokio_stream::wrappers::UnixListenerStream::new(tokio::net::UnixListener::bind(&socket).expect("binds"));
+    tokio::spawn(
+        tonic::transport::Server::builder()
+            .add_service(pb::events_server::EventsServer::new(producer))
+            .serve_with_incoming(incoming),
+    );
+    let clock = ManualClock::new().clock();
+    let page = crate::events_page(
+        channel(socket).await,
+        "/anemnez.extension.v1.Events/Events",
+        Vec::new(),
+        Default::default(),
+        &clock,
+        10,
+        Duration::from_secs(5),
+    );
+    anemnez_clock::Clock::system().timeout(Duration::from_secs(5), page).await.expect("ends").expect("a page")
+}
+
+/// M m/42397: an events page carries the face's read-at header as `read_at`, beside its cursor, and the stream's end
+/// ends the page.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_events_page_says_where_the_face_read() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let page = page_from(dir.path(), Sending { events: vec!["1", "2"], broken: None, read_at: Some("mb16@42") }).await;
+    assert_eq!(page.read_at.as_deref(), Some("mb16@42"));
+    assert_eq!((page.events.len(), page.next.as_str(), page.ended), (2, "2", crate::PageEnd::Ended));
+}
+
+/// D m/42486, M m/42499 (rule 5): a stream that fails mid-page is Broken, carrying the product's status by name, with
+/// the events before it and their cursor kept, never Ended (which says everything after the cursor was read). Red when
+/// a mid-page failure reads as Ended.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stream_that_breaks_mid_page_is_said_broken_never_ended() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let behind = tonic::Status::unavailable("replica-behind: this follower is behind the cursor");
+    let page = page_from(dir.path(), Sending { events: vec!["1", "2"], broken: Some(behind), read_at: None }).await;
+    assert_eq!((page.events.len(), page.next.as_str()), (2, "2"), "the events before the break are kept");
+    assert_eq!(
+        page.ended,
+        crate::PageEnd::Broken {
+            code: "Unavailable".into(),
+            message: "replica-behind: this follower is behind the cursor".into()
+        }
+    );
+}
