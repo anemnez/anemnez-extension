@@ -192,7 +192,8 @@ own changes and Busy. Latest is answered from the log its request names (hydramq
 (ergon:M/log-face-any-replica; D m/42395, A m/42402). A `FaceLog` over a replicated partition's `PartitionEvents` is
 a replica's face: any replica serves its committed prefix, never wrong, only behind. With `LogEvents::read_at(node)`,
 `Events/Call`, `Events/Events` and a one-log face's `Events/Watch` answer the response header `anemnez-read-at`
-(`READ_AT_METADATA`) = `<node>@<end>`, the end being what this replica had committed of the log the read named (a
+(`READ_AT_METADATA`) = `<node>@<end>`, the end being what this replica had committed of the log the read named, read just after the read and never when
+the reply is built, so a log that committed meanwhile never says an end the reply didn't reach (D m/43021) (a
 many-log face's Watch names its log only in its request, which this crate never parses, so says it only in a
 `replica-behind` end); a log whose face says no end (a product's own, not replicated) says no header. A cursor strictly
 past this replica's end came from a replica further on: after its wait it is `replica-behind` as Unavailable, its name

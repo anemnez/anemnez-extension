@@ -176,12 +176,31 @@ async fn a_log_that_is_no_replica_says_no_read_at() {
 fn a_reads_wait_ends_a_hop_inside_its_bound() {
     let (manual, part) = (ManualClock::new(), ManualClock::new());
     let until = manual.now() + Duration::from_secs(10);
-    let reading = Reading::new(replica(0, &part) as Arc<dyn Face>, Some((until, manual.clock())));
+    let reading =
+        Reading::new(replica(0, &part) as Arc<dyn Face>, logs_of(&replica(0, &part)), Some((until, manual.clock())));
     let hop = hydramq_events::wire::HOP_MARGIN;
     assert_eq!(reading.bounded(Duration::from_secs(30)), Duration::from_secs(10) - hop);
     assert_eq!(reading.bounded(Duration::from_secs(1)), Duration::from_secs(1), "a shorter ask stands");
-    let watched = Reading::new(replica(0, &part) as Arc<dyn Face>, None);
+    let watched = Reading::new(replica(0, &part) as Arc<dyn Face>, logs_of(&replica(0, &part)), None);
     assert_eq!(watched.bounded(Duration::from_secs(30)), Duration::from_secs(30), "a watch's beat is its own");
+}
+
+fn logs_of(replica: &Arc<PartitionEvents>) -> crate::many::Logs {
+    crate::many::Logs::One(Arc::new(FaceLog::new(Arc::clone(replica) as Arc<dyn Face>)))
+}
+
+/// D m/43021: the end said is the one the read reached, read just after it, never one read when the reply is built: a
+/// log that commits meanwhile mustn't tell a caller judging which replica is ahead an end its reply didn't reach.
+#[test]
+fn the_end_said_is_the_reads_own() {
+    let part = ManualClock::new();
+    let replica = replica(3, &part);
+    let reading = Reading::new(Arc::clone(&replica) as Arc<dyn Face>, logs_of(&replica), None);
+    let read = reading.read(&at(0), 10).expect("read");
+    assert!(matches!(read, Read::Events { ref events, .. } if events.len() == 3), "{read:?}");
+    replica.advanced(8);
+    let seen = reading.seen();
+    assert_eq!((seen.log.as_deref(), seen.end), (Some(LOG), Some(3)), "the read's end, not the log's since");
 }
 
 fn descriptor(scope: pb::CursorScope) -> crate::Describe {

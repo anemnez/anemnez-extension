@@ -33,6 +33,9 @@ pub(crate) struct Seen {
     pub log: Option<String>,
     /// The face's `replica-behind` refusal, in its words, when it refused one.
     pub behind: Option<String>,
+    /// That log's committed end as the face said it just after the read (D m/43021): what the reply reached, never
+    /// an end read later, when the log may have committed more.
+    pub end: Option<u64>,
 }
 
 /// The face one call or watch reads, bounded and seen: each read's wait ends a hop before `until`, and the log it named
@@ -41,12 +44,14 @@ pub(crate) struct Reading {
     until: Option<(Mono, Clock)>,
     seen: Mutex<Seen>,
     face: Arc<dyn Face>,
+    logs: crate::many::Logs,
 }
 
 impl Reading {
-    /// `face`, each read's wait ending a hop before `until` on `clock`; none for a watch, whose beat bounds each wait.
-    pub fn new(face: Arc<dyn Face>, until: Option<(Mono, Clock)>) -> Reading {
-        Reading { until, seen: Mutex::default(), face }
+    /// `face`, the face of `logs`, each read's wait ending a hop before `until` on `clock`; none for a watch, whose
+    /// beat bounds each wait.
+    pub fn new(face: Arc<dyn Face>, logs: crate::many::Logs, until: Option<(Mono, Clock)>) -> Reading {
+        Reading { until, seen: Mutex::default(), face, logs }
     }
 
     /// What was seen so far.
@@ -54,8 +59,12 @@ impl Reading {
         self.seen.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
     }
 
+    /// A read of `log` ended: its end is read now, just after it.
     fn named(&self, log: &str) {
-        self.seen.lock().unwrap_or_else(std::sync::PoisonError::into_inner).log = Some(log.to_owned());
+        let end = self.logs.end_of(log);
+        let mut seen = self.seen.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        seen.log = Some(log.to_owned());
+        seen.end = end;
     }
 
     fn judged<T>(&self, read: Result<T, EventsError>) -> Result<T, EventsError> {
@@ -82,8 +91,9 @@ impl Face for Reading {
     }
 
     fn read(&self, from: &Position, max: usize) -> Result<Read, EventsError> {
+        let read = self.face.read(from, max);
         self.named(&from.log);
-        self.judged(self.face.read(from, max))
+        self.judged(read)
     }
 
     fn read_until(
@@ -93,8 +103,9 @@ impl Face for Reading {
         within: Duration,
         stop: Option<&AtomicBool>,
     ) -> Result<Read, EventsError> {
+        let read = self.face.read_until(from, max, self.bounded(within), stop);
         self.named(&from.log);
-        self.judged(self.face.read_until(from, max, self.bounded(within), stop))
+        self.judged(read)
     }
 
     fn latest_all(&self, prefix: &str) -> Result<(Vec<Event>, Position), EventsError> {
@@ -124,32 +135,29 @@ impl Face for Reading {
     }
 }
 
-/// Where a face's reads are said from: its node, and the logs whose ends it reads.
+/// Where a face's reads are said from: its node.
 #[derive(Clone)]
 pub(crate) struct ReadAt {
     pub node: Option<String>,
-    pub logs: crate::many::Logs,
 }
 
 impl ReadAt {
-    /// The read-at value for a read of `log`, when this face says one: a node, and a replica's end for that log.
-    pub fn value(&self, log: Option<&str>) -> Option<tonic::metadata::MetadataValue<tonic::metadata::Ascii>> {
-        let node = self.node.as_deref()?;
-        let end = self.logs.end_of(log?)?;
-        read_at(node, end).parse().ok()
+    /// The read-at value for a read that reached `end`, when this face says one: a node, and a replica's end.
+    pub fn value(&self, end: Option<u64>) -> Option<tonic::metadata::MetadataValue<tonic::metadata::Ascii>> {
+        read_at(self.node.as_deref()?, end?).parse().ok()
     }
 
-    /// `metadata` with the read-at header for `log`, when there is one to say.
-    pub fn say(&self, metadata: &mut tonic::metadata::MetadataMap, log: Option<&str>) {
-        if let Some(at) = self.value(log) {
+    /// `metadata` with the read-at header for a read that reached `end`, when there is one to say.
+    pub fn say(&self, metadata: &mut tonic::metadata::MetadataMap, end: Option<u64>) {
+        if let Some(at) = self.value(end) {
             metadata.insert(anemnez_extension::READ_AT_METADATA, at);
         }
     }
 
     /// A `replica-behind` refusal (`why`, the face's words, its name first), as Unavailable by name, naming where it
     /// was read in its words and its header.
-    pub fn behind(&self, why: &str, log: Option<&str>) -> tonic::Status {
-        let at = self.value(log);
+    pub fn behind(&self, why: &str, end: Option<u64>) -> tonic::Status {
+        let at = self.value(end);
         let named = at.as_ref().and_then(|a| a.to_str().ok()).map_or_else(String::new, |a| format!("; read at {a}"));
         let mut status = tonic::Status::unavailable(format!("{why}{named}; read it at another replica"));
         if let Some(at) = at {

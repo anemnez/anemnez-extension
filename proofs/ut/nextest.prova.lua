@@ -289,6 +289,7 @@ spoken_for("a-replicas-face-says-where-it-read (behind)", "replica::tests::a_cur
 spoken_for("a-replicas-face-says-where-it-read (watch)", "replica::tests::a_watch_past_a_replicas_end_ends_replica_behind")
 spoken_for("a-replicas-face-says-where-it-read (no replica)", "replica::tests::a_log_that_is_no_replica_says_no_read_at")
 spoken_for("a-replicas-face-says-where-it-read (nested bound)", "replica::tests::a_reads_wait_ends_a_hop_inside_its_bound")
+spoken_for("a-replicas-face-says-where-it-read (the read's own end)", "replica::tests::the_end_said_is_the_reads_own")
 spoken_for("a-replicas-face-says-where-it-read (SWARM)", "replica::tests::a_replica_face_declares_swarm")
 spoken_for("an-unreadable-log-is-never-busy", "log_events_tests::a_log_that_cannot_be_read_is_unreadable_by_name_never_busy")
 spoken_for("an-unreadable-log-is-never-busy (watch)", "reread::tests::a_reread_of_an_unreadable_log_is_refused_by_name_not_busy")
