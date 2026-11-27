@@ -160,13 +160,19 @@ async fn an_events_page_reads_the_stream_to_its_bound() {
     assert_eq!(full.read_at, None, "a face that sends no read-at header has none");
 
     // From there, the page is what arrived within its bound, said as waited, never an error.
-    // Other timers may already wait on this clock (the serve's own), so the page's wait is the one past them.
+    // Other timers may already wait on this clock (the serve's own), so the page's wait is the one past them. Time
+    // moves only once the page has read the one event past the first page (its open done), and then waits on its
+    // read (ergon:E/extension-events-page-hydramq-b605): moved on a waiting timer alone, the clock could pass while
+    // the stream was still opening, and the open's bound, on the same deadline, answered DeadlineExceeded.
     let before = manual.pending();
     let (clock, next) = (manual.clock(), full.next.clone());
-    let reading = tokio::spawn(async move {
+    let read = std::sync::Arc::new(tokio::sync::Notify::new());
+    let reading = tokio::spawn(crate::PAGE_READ.scope(std::sync::Arc::clone(&read), async move {
         events_page(channel, EVENTS, after(&next), Default::default(), &clock, 10, Duration::from_secs(5)).await
-    });
-    assert!(manual.until_waiting(before + 1, Duration::from_secs(5)).await, "the page waits on its bound");
+    }));
+    let one_read = anemnez_clock::Clock::system().timeout(Duration::from_secs(30), read.notified()).await.is_ok();
+    assert!(one_read, "the page read the one event past the first page");
+    assert!(manual.until_waiting(before + 1, Duration::from_secs(30)).await, "the page waits on its bound");
     manual.advance(Duration::from_secs(5)).await;
     let page = anemnez_clock::Clock::system()
         .timeout(Duration::from_secs(5), reading)

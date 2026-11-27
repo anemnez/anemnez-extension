@@ -317,6 +317,8 @@ pub async fn events_page(
                     page.next = read.cursor;
                 }
                 page.events.push(event);
+                #[cfg(test)]
+                let _unset_outside_a_row = PAGE_READ.try_with(|read| read.notify_one());
             }
             Ok(Ok(None)) => {
                 page.ended = PageEnd::Ended;
@@ -332,6 +334,15 @@ pub async fn events_page(
     }
     drop(stream);
     Ok(page)
+}
+
+#[cfg(test)]
+tokio::task_local! {
+    /// Rung each time a page has read an event (ergon:E/extension-events-page-hydramq-b605): the deterministic word a
+    /// row waits on before it moves the page's clock, so the stream's open is done and only the read's wait is left.
+    /// Waiting timers can't say it: the open's bound and the read's are on one clock, toward one deadline. Set only
+    /// by a row, around its own page's task.
+    pub(crate) static PAGE_READ: std::sync::Arc<tokio::sync::Notify>;
 }
 
 /// A codec that sends and receives a message's bytes untouched.
