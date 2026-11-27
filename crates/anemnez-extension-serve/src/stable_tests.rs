@@ -62,10 +62,19 @@ fn a_face_refused_on_the_first_read_fails_the_row_by_name() {
     assert_eq!(has_a_face(&half("guidance", r#"{"name":"recent"}"#)), Ok(()));
 }
 
-/// A product whose Describe serves `fds`, each `up` a fresh server on a fresh socket, as a restart is.
+/// A product whose Describe serves `fds`, each `up` a fresh server on a fresh socket, as a restart is, and whose
+/// `down` ends that server (gracefully, awaited), unless `stays_up` plants the abort-only bug (N m/41684).
 struct Serves {
     fds: Vec<u8>,
     dirs: Vec<tempfile::TempDir>,
+    serving: Option<(tokio::sync::oneshot::Sender<()>, tokio::task::JoinHandle<()>)>,
+    stays_up: bool,
+}
+
+impl Serves {
+    fn of(fds: Vec<u8>) -> Serves {
+        Serves { fds, dirs: Vec::new(), serving: None, stays_up: false }
+    }
 }
 
 #[tonic::async_trait]
@@ -79,14 +88,57 @@ impl Restartable for Serves {
         let (dir, socket, incoming) =
             crate::serve_tests::listen_as(move |io| crate::Accepted::new(io, peer.clone(), Role::Agora));
         let describe = crate::pb::describe_server::DescribeServer::new(crate::Describe::new(self.fds.clone()));
-        tokio::spawn(tonic::transport::Server::builder().add_service(describe).serve_with_incoming(incoming));
+        let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+        let served = tokio::spawn(async move {
+            let shutdown = async move {
+                drop(stopped.await);
+            };
+            drop(
+                tonic::transport::Server::builder()
+                    .add_service(describe)
+                    .serve_with_incoming_shutdown(incoming, shutdown)
+                    .await,
+            );
+        });
+        self.serving = Some((stop, served));
         self.dirs.push(dir);
         Ok(crate::serve_tests::channel_to(socket).await)
     }
     async fn change(&mut self) -> Result<(), String> {
         Ok(())
     }
-    async fn down(&mut self) {}
+    async fn down(&mut self) {
+        if self.stays_up {
+            return;
+        }
+        if let Some((stop, served)) = self.serving.take() {
+            let _ = stop.send(());
+            drop(served.await);
+        }
+    }
+}
+
+/// N m/41684 by class: a product whose `down` leaves its server answering fails the check by name, so "the same after
+/// a restart" is never compared against an instance that never went down. The same product that really goes down
+/// passes. Red when the driver assumes `down` worked.
+#[tokio::test]
+async fn a_down_that_leaves_the_product_answering_fails_by_name() {
+    use crate::serve_tests::{descriptor_with, land_options};
+    let service = crate::pb::ServiceOptions {
+        contract: "h".into(),
+        version: "1.0.0".into(),
+        cursor_scope: crate::pb::CursorScope::Instance as i32,
+        guidance: "H lands trains.".into(),
+        ..Default::default()
+    };
+    let clock = anemnez_clock::Clock::system();
+    let fds =
+        descriptor_with("h.v1", &land_options(crate::pb::Effect::Write, crate::pb::Callers::Product), Some(&service));
+    let mut stays = Serves { stays_up: true, ..Serves::of(fds.clone()) };
+    let red = the_static_half_is_byte_stable(&mut stays, &clock).await.expect_err("red");
+    assert!(red.starts_with(super::DOWN_NOT_PROVEN), "{red}");
+    let mut goes = Serves::of(fds);
+    assert_eq!(the_static_half_is_byte_stable(&mut goes, &clock).await, Ok(()));
 }
 
 /// N m/40340: through the reader's own path. A product whose Describe serves a refused descriptor (Land with no result
@@ -107,11 +159,11 @@ async fn a_product_serving_a_refused_descriptor_fails_the_row_through_the_check(
     unsaid.result = None;
     let refused = descriptor_with("h.v1", &unsaid, Some(&service));
     assert!(anemnez_extension::descriptor::check_descriptor(&refused).is_err(), "the premise: it's refused");
-    let mut product = Serves { fds: refused, dirs: Vec::new() };
+    let mut product = Serves::of(refused);
     let red = the_static_half_is_byte_stable(&mut product, &clock).await.expect_err("red");
     assert!(red.starts_with("the static half has no face to hold stable"), "{red}");
     let admitted =
         descriptor_with("h.v1", &land_options(crate::pb::Effect::Write, crate::pb::Callers::Product), Some(&service));
-    let mut product = Serves { fds: admitted, dirs: Vec::new() };
+    let mut product = Serves::of(admitted);
     assert_eq!(the_static_half_is_byte_stable(&mut product, &clock).await, Ok(()));
 }

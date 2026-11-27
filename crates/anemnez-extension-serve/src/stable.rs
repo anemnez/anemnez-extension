@@ -89,6 +89,9 @@ pub async fn static_half(channel: Channel, clock: &Clock) -> Result<StaticHalf, 
     Ok(StaticHalf { instructions, tools, refused })
 }
 
+/// The refusal of a check whose product's `down` didn't take it down: the instance still answers.
+pub const DOWN_NOT_PROVEN: &str = "down-not-proven";
+
 /// `#the-static-half-is-byte-stable`, run over `product`: its static half read once up, again after its state
 /// moved, and again after it went down and came back; every read byte for byte the first. The product is down when
 /// this returns, whatever it answers.
@@ -109,8 +112,18 @@ async fn check(product: &mut impl Restartable, clock: &Clock) -> Result<(), Stri
     let first = static_half(channel.clone(), clock).await?;
     has_a_face(&first)?;
     step(clock, "move its state", product.change()).await?;
-    same("after its state moved", &first, &static_half(channel, clock).await?)?;
+    same("after its state moved", &first, &static_half(channel.clone(), clock).await?)?;
     down(product, clock).await?;
+    // Down is proven, never assumed (N m/41684, H m/41479): the instance that went down answers no read on the channel
+    // that read it. A product whose `down` leaves its listener answering would otherwise compare the restart against an
+    // instance that never went down, and the leg would prove nothing.
+    if let Ok(Ok(_)) = clock.timeout(STEP_WITHIN, static_half(channel, clock)).await {
+        return Err(format!(
+            "{DOWN_NOT_PROVEN}: after `down`, the instance still answers Describe on the channel that read it, so \
+             \"after it went down and came back\" would compare against one that never went down. End the plane in \
+             `down` (its closer, or its serve task's own end), not only a wrapper around it"
+        ));
+    }
     let channel = step(clock, "come back", product.up()).await?;
     same("after it went down and came back", &first, &static_half(channel, clock).await?)
 }
