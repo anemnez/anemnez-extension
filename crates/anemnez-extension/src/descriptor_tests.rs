@@ -385,6 +385,28 @@ fn a_work_bound_is_read_as_stated_and_refused_at_zero_and_past_its_cap() {
     }
 }
 
+/// D m/44391 (1): an Ask is held inside the method's work, so with both stated the ask's bound is the shorter. Equal
+/// is admitted; one past is refused ask-past-bound with both values; an absent ask claims nothing and is admitted.
+#[test]
+fn an_ask_bound_past_the_work_bound_is_refused() {
+    let with = |ask: Option<u32>, bound: u32| {
+        let mut options = good();
+        options.ask_within_secs = ask;
+        options.bound_secs = Some(bound);
+        options
+    };
+    let bytes = set(vec![
+        method("Equal", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&with(Some(60), 60))),
+        method("Unsaid", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&with(None, 30))),
+    ]);
+    assert_eq!(check_descriptor(&bytes).expect("admitted").len(), 2);
+    let bytes = set(vec![method("Over", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&with(Some(61), 60)))]);
+    let refused = check_descriptor(&bytes).expect_err("past its bound");
+    assert_eq!(refused.iter().map(DescriptorRefusal::name).collect::<Vec<_>>(), ["ask-past-bound"]);
+    let said = refused[0].to_string();
+    assert!(said.contains("ask_within_secs 61") && said.contains("bound_secs 60"), "{said}");
+}
+
 /// every-bridge-refuses-a-descriptor-alike: a good descriptor answers every offered method with
 /// its options, a keyed route's field number, and skips a method that carries no anemnez options.
 #[test]
