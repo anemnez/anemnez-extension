@@ -62,6 +62,10 @@ pub use serve::{ApiFaces, Planed, ProductRoutes, Refused, Stop, Stopped, serve, 
 #[allow(clippy::all, clippy::pedantic, missing_docs)]
 pub mod pb {
     tonic::include_proto!("anemnez.extension.v1");
+
+    /// The contract's own protos as an encoded `FileDescriptorSet`, so a face can encode a contract call (the `events`
+    /// tool's `Events/Events`) against the contract's types, whatever a product's own descriptor carries.
+    pub const FILE_DESCRIPTOR_SET: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/contract_descriptor.bin"));
 }
 
 #[cfg(test)]

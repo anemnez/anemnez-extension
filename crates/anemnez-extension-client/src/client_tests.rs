@@ -61,3 +61,30 @@ fn the_encoded_bytes_are_the_requests_own_encoding() {
     assert_eq!(encoded, generated);
     assert_eq!(anemnez_extension::principal::grpc_body(&encoded), anemnez_extension::principal::grpc_body(&generated));
 }
+
+/// O m/41925: the flattened `events` tool asks only what the contract's EventsRequest holds, so each argument it
+/// declares encodes against the contract's own descriptor, through the same Calls::encode every face uses. Red with
+/// the `max` the tool once declared and EventsRequest never had (args-mismatch for every call that passed it).
+#[test]
+fn every_argument_the_events_tool_declares_encodes_against_the_contracts_request() {
+    use anemnez_extension::descriptor::{check_descriptor, service_of};
+    use anemnez_extension::mcp::{EVENTS_PATH, EVENTS_TOOL, flatten, resolve};
+    let fds = Variant::Good.file_descriptor_set();
+    let tools = flatten(&service_of(fds).expect("declared"), &check_descriptor(fds).expect("admitted")).expect("flat");
+    let events = resolve(&tools, EVENTS_TOOL).expect("the fixture keeps events, so it has the events tool");
+    let properties = events.input_schema["properties"].as_object().expect("an object schema");
+    let contract =
+        Calls::new(anemnez_extension_serve::pb::FILE_DESCRIPTOR_SET).expect("the contract's descriptor reads");
+    assert!(!properties.is_empty(), "the tool asks something");
+    for (name, schema) in properties {
+        let sample = match schema["type"].as_str() {
+            Some("string") => serde_json::json!(""),
+            Some("array") => serde_json::json!([]),
+            Some("integer") => serde_json::json!(1),
+            other => panic!("{name}: a type this row doesn't sample: {other:?}"),
+        };
+        let args = serde_json::json!({ name: sample }).to_string();
+        let encoded = contract.encode(EVENTS_PATH, &args);
+        assert!(encoded.is_ok(), "{name} isn't a field of EventsRequest: {args}: {encoded:?}");
+    }
+}
