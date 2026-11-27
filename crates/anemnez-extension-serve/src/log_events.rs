@@ -106,8 +106,8 @@ pub struct House {
     pub via: Option<String>,
 }
 
-/// The target a house reader's admitted reads are said under, one INFO line each, naming the identifier (D m/40623
-/// (4): who reads facts stays visible).
+/// The target a house reader's admitted reads are said under, naming the identifier (D m/40623 (4): who reads facts
+/// stays visible): its first read, then each minute's count ([`crate::house_reads`], E m/41723).
 pub const HOUSE_READS_TARGET: &str = "anemnez_extension_serve::house_reads";
 
 /// The house principal of a call that carried no token, from the connection its accept judged: a house reader by its
@@ -374,6 +374,8 @@ pub struct LogEvents {
     open: Arc<AtomicUsize>,
     reading: Arc<AtomicUsize>,
     closed: Arc<Notify>,
+    /// Each house reader's reads, said at a bounded rate ([`crate::house_reads`]).
+    house_reads: Arc<std::sync::Mutex<crate::house_reads::Tally>>,
 }
 
 impl LogEvents {
@@ -429,6 +431,7 @@ impl LogEvents {
             open: Arc::new(AtomicUsize::new(0)),
             reading: Arc::new(AtomicUsize::new(0)),
             closed: Arc::new(Notify::new()),
+            house_reads: Arc::default(),
         }
     }
 
@@ -507,13 +510,7 @@ impl LogEvents {
         match self.clock.timeout(within, (self.authorize.0)(asked)).await {
             Ok(Ok(admit)) => {
                 if let Some(house) = reader {
-                    tracing::info!(
-                        target: HOUSE_READS_TARGET,
-                        method = path,
-                        identifier = %house.identifier,
-                        via = house.via.as_deref().unwrap_or("local"),
-                        "a house reader reads this product's log"
-                    );
+                    self.say_house_read(&house, path);
                 }
                 Ok((admitted, admit))
             }
@@ -522,6 +519,39 @@ impl LogEvents {
                 "{}: the product's authorization didn't answer within {within:?}",
                 refusal::UNAUTHORIZED,
             ))),
+        }
+    }
+
+    /// An authorized house read, said under [`HOUSE_READS_TARGET`] at most once a minute per (identifier, method), with
+    /// the count between (E m/41723).
+    fn say_house_read(&self, house: &House, path: &str) {
+        use crate::house_reads::Said;
+        let said = self.house_reads.lock().unwrap_or_else(std::sync::PoisonError::into_inner).read(
+            &house.identifier,
+            path,
+            self.clock.now_mono(),
+        );
+        let via = house.via.as_deref().unwrap_or("local");
+        match said {
+            Said::First => tracing::info!(
+                target: HOUSE_READS_TARGET,
+                method = path,
+                identifier = %house.identifier,
+                via,
+                "a house reader reads this product's log"
+            ),
+            Said::Counted { reads, over } => tracing::info!(
+                target: HOUSE_READS_TARGET,
+                method = path,
+                identifier = %house.identifier,
+                via,
+                reads = reads + 1,
+                over_secs = over.as_secs(),
+                "a house reader read this product's log {} time(s) in {}s",
+                reads + 1,
+                over.as_secs()
+            ),
+            Said::Quiet => {}
         }
     }
 
