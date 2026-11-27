@@ -413,6 +413,7 @@ pub(crate) fn land_options(effect: pb::Effect, callers: pb::Callers) -> pb::Meth
         ask_within_secs: Some(90),
         // Every option, written out: a new one fails to compile here until its parity is said.
         orient: false,
+        bound_secs: Some(120),
     }
 }
 
@@ -491,6 +492,7 @@ fn the_descriptor_check_reads_the_protos_own_encoding() {
     want.runs_to_completion = true;
     want.examples = vec![Example::new(r#"{"train": "train/h-x"}"#, "Land one")];
     want.ask_within_secs = Some(90);
+    want.bound_secs = Some(120);
     assert_eq!(methods[0].options, want);
 }
 

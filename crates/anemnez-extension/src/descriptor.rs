@@ -165,6 +165,10 @@ pub enum DescriptorRefusal {
     ExampleMismatch(String, String),
     /// `ask_within_secs` past the standard's cap ([`crate::options::ASK_WITHIN_CAP_SECS`]), with the value.
     AskBoundOverCap(String, u32),
+    /// `bound_secs` of 0: no work takes no time, so it is said absent or stated (`bound-zero`).
+    BoundZero(String),
+    /// `bound_secs` past [`crate::options::BOUND_CAP_SECS`], with the value (`bound-over-cap`).
+    BoundOverCap(String, u32),
     /// No service in the descriptor carries `anemnez_service`: it says nothing of what it serves.
     ServiceOptionsMissing,
     /// Two services carry `anemnez_service` (both named): a descriptor serves one contract.
@@ -223,6 +227,8 @@ impl DescriptorRefusal {
             Self::OptionsMalformed(_) => "options-malformed",
             Self::ExampleMismatch(..) => "example-mismatch",
             Self::AskBoundOverCap(..) => "ask-bound-over-cap",
+            Self::BoundZero(_) => "bound-zero",
+            Self::BoundOverCap(..) => "bound-over-cap",
             Self::ServiceOptionsMissing => "service-options-missing",
             Self::ServiceOptionsTwice(..) => "service-options-twice",
             Self::ServiceOptionsMalformed(_) => "service-options-malformed",
@@ -255,6 +261,16 @@ impl std::fmt::Display for DescriptorRefusal {
                 f,
                 "{path}: ask-bound-over-cap: ask_within_secs {secs} is past the cap of {}",
                 crate::options::ASK_WITHIN_CAP_SECS
+            ),
+            Self::BoundZero(path) => {
+                write!(f, "{path}: bound-zero: bound_secs 0 bounds no work; leave it absent, or state the bound")
+            }
+            Self::BoundOverCap(path, secs) => write!(
+                f,
+                "{path}: bound-over-cap: bound_secs {secs} is past the cap of {} (a job's {} less its {} margin)",
+                crate::options::BOUND_CAP_SECS,
+                crate::options::JOB_AT_MOST_SECS,
+                crate::options::JOB_MARGIN_SECS
             ),
             Self::ServiceOptionsMissing => f.write_str(self.name()),
             Self::MediaUnknown(path, media) => {
@@ -414,6 +430,23 @@ fn dot(package: &str) -> &'static str {
     if package.is_empty() { "" } else { "." }
 }
 
+/// A method's two stated bounds, each against its cap: `ask_within_secs` past [`crate::options::ASK_WITHIN_CAP_SECS`],
+/// and `bound_secs` at 0 or past [`crate::options::BOUND_CAP_SECS`], each by name.
+fn bounds_refused(path: &str, raw: &wire::MethodOptions) -> Vec<DescriptorRefusal> {
+    let mut refused = Vec::new();
+    if let Some(secs) = raw.ask_within_secs.filter(|&s| s > crate::options::ASK_WITHIN_CAP_SECS) {
+        refused.push(DescriptorRefusal::AskBoundOverCap(path.to_owned(), secs));
+    }
+    match raw.bound_secs {
+        Some(0) => refused.push(DescriptorRefusal::BoundZero(path.to_owned())),
+        Some(secs) if secs > crate::options::BOUND_CAP_SECS => {
+            refused.push(DescriptorRefusal::BoundOverCap(path.to_owned(), secs));
+        }
+        _ => {}
+    }
+    refused
+}
+
 fn check_method(
     path: &str,
     bytes: &[u8],
@@ -455,9 +488,7 @@ fn check_method(
             refused.push(DescriptorRefusal::ExampleMismatch(p(), why));
         }
     }
-    if let Some(secs) = raw.ask_within_secs.filter(|&s| s > crate::options::ASK_WITHIN_CAP_SECS) {
-        refused.push(DescriptorRefusal::AskBoundOverCap(p(), secs));
-    }
+    refused.extend(bounds_refused(path, &raw));
     if raw.orient {
         if effect.is_some_and(|e| e != Effect::Read) {
             refused.push(DescriptorRefusal::OrientNotARead(p()));
@@ -512,6 +543,7 @@ fn check_method(
                     .collect(),
                 ask_within_secs: raw.ask_within_secs,
                 orient: raw.orient,
+                bound_secs: raw.bound_secs,
             },
             route_key,
         )),
@@ -779,6 +811,8 @@ mod wire {
         pub ask_within_secs: Option<u32>,
         #[prost(bool, tag = "15")]
         pub orient: bool,
+        #[prost(uint32, optional, tag = "16")]
+        pub bound_secs: Option<u32>,
     }
 
     #[derive(Clone, PartialEq, prost::Message)]
@@ -866,600 +900,5 @@ mod wire {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use prost_types::field_descriptor_proto::{Label, Type};
-    use prost_types::{FieldDescriptorProto, MethodDescriptorProto, ServiceDescriptorProto};
-
-    fn varint_bytes(mut v: u64) -> Vec<u8> {
-        let mut out = Vec::new();
-        loop {
-            let byte = (v & 0x7f) as u8;
-            v >>= 7;
-            if v == 0 {
-                out.push(byte);
-                return out;
-            }
-            out.push(byte | 0x80);
-        }
-    }
-
-    /// A length-delimited field, as protoc writes an extension inside `MethodOptions`.
-    fn ld(field: u32, bytes: &[u8]) -> Vec<u8> {
-        let mut out = varint_bytes(u64::from(field) << 3 | 2);
-        out.extend(varint_bytes(bytes.len() as u64));
-        out.extend_from_slice(bytes);
-        out
-    }
-
-    fn method(name: &str, input: &str, output: &str, options: Option<&wire::MethodOptions>) -> Vec<u8> {
-        let mut bytes = MethodDescriptorProto {
-            name: Some(name.into()),
-            input_type: Some(input.into()),
-            output_type: Some(output.into()),
-            ..Default::default()
-        }
-        .encode_to_vec();
-        if let Some(o) = options {
-            bytes.extend(ld(4, &ld(METHOD_OPTIONS_FIELD, &o.encode_to_vec())));
-        }
-        bytes
-    }
-
-    fn message(name: &str, fields: &[(&str, i32, Type, Label)]) -> DescriptorProto {
-        DescriptorProto {
-            name: Some(name.into()),
-            field: fields
-                .iter()
-                .map(|(n, number, ty, label)| FieldDescriptorProto {
-                    name: Some((*n).into()),
-                    number: Some(*number),
-                    r#type: Some(*ty as i32),
-                    label: Some(*label as i32),
-                    ..Default::default()
-                })
-                .collect(),
-            ..Default::default()
-        }
-    }
-
-    /// A map field is known by its entry's `map_entry` option, never by its name: a hand-written
-    /// message named `…Entry` is a list of messages (D).
-    #[test]
-    fn a_map_field_is_known_by_its_entrys_map_entry() {
-        let mut request = message(
-            "MakeRequest",
-            &[
-                ("labels", 1, Type::Message, Label::Repeated),
-                ("rows", 2, Type::Message, Label::Repeated),
-                ("name", 3, Type::String, Label::Optional),
-            ],
-        );
-        request.field[0].type_name = Some(".pkg.MakeRequest.LabelsEntry".into());
-        request.field[1].type_name = Some(".pkg.MakeRequest.RowEntry".into());
-        let mut labels = message("LabelsEntry", &[]);
-        labels.options = Some(prost_types::MessageOptions { map_entry: Some(true), ..Default::default() });
-        request.nested_type = vec![labels, message("RowEntry", &[])];
-        let maps: Vec<(String, bool)> = super::fields_of(Some(&request)).into_iter().map(|f| (f.name, f.map)).collect();
-        assert_eq!(maps, [("labels".into(), true), ("rows".into(), false), ("name".into(), false)]);
-    }
-
-    fn set(methods: Vec<Vec<u8>>) -> Vec<u8> {
-        let mut service = ServiceDescriptorProto { name: Some("Herald".into()), ..Default::default() }.encode_to_vec();
-        for m in methods {
-            service.extend(ld(2, &m));
-        }
-        let mut file = FileDescriptorProto {
-            name: Some("herald.proto".into()),
-            package: Some("herald.v2".into()),
-            message_type: vec![
-                message(
-                    "LandRequest",
-                    &[("train", 1, Type::String, Label::Optional), ("repo", 3, Type::String, Label::Optional)],
-                ),
-                message("LandReply", &[]),
-                message("QueueReply", &[("trains", 1, Type::String, Label::Repeated)]),
-                message("OrientRequest", &[]),
-            ],
-            ..Default::default()
-        }
-        .encode_to_vec();
-        file.extend(ld(6, &service));
-        ld(1, &file)
-    }
-
-    /// One file with one service per entry: its name and, when given, its `anemnez_service`.
-    fn services(entries: &[(&str, Option<&wire::ServiceOptions>)]) -> Vec<u8> {
-        let mut file = FileDescriptorProto {
-            name: Some("herald.proto".into()),
-            package: Some("herald.v2".into()),
-            ..Default::default()
-        }
-        .encode_to_vec();
-        for (name, options) in entries {
-            let mut service =
-                ServiceDescriptorProto { name: Some((*name).into()), ..Default::default() }.encode_to_vec();
-            if let Some(o) = options {
-                service.extend(ld(3, &ld(SERVICE_OPTIONS_FIELD, &o.encode_to_vec())));
-            }
-            file.extend(ld(6, &service));
-        }
-        ld(1, &file)
-    }
-
-    fn herald() -> wire::ServiceOptions {
-        wire::ServiceOptions {
-            contract: "herald".into(),
-            version: "2.3.0".into(),
-            cursor_scope: 2,
-            parts_depth: 1,
-            events_kept: 64,
-            guidance: String::new(),
-        }
-    }
-
-    /// A bridge reads what a descriptor's one service declares of itself, with no manifest.
-    #[test]
-    fn service_of_reads_the_one_service_that_declares_itself() {
-        let options = service_of(&services(&[("Admin", None), ("Herald", Some(&herald()))]))
-            .expect("one service declares itself");
-        assert_eq!(options.contract, "herald");
-        assert_eq!(options.version, "2.3.0");
-        assert_eq!(options.cursor_scope, crate::options::CursorScope::Instance);
-        assert_eq!((options.parts_depth, options.events_kept), (1, 64));
-    }
-
-    /// D: a raw service list that doesn't match the decoded one is malformed, naming the file,
-    /// never a silent truncation answered as service-options-missing.
-    #[test]
-    fn a_service_list_that_does_not_match_is_malformed() {
-        let service = |name: &str| ServiceDescriptorProto { name: Some(name.into()), ..Default::default() };
-        let file = FileDescriptorProto {
-            name: Some("herald.proto".into()),
-            service: vec![service("Herald"), service("Admin")],
-            ..Default::default()
-        };
-        // The raw file carries one service where two were decoded: truncated.
-        let raw = ld(6, &service("Herald").encode_to_vec());
-        let refused = services_of(&file, &raw).expect_err("refused");
-        assert_eq!(refused.name(), "malformed");
-        assert!(refused.to_string().contains("herald.proto"), "{refused}");
-    }
-
-    /// A broken option is not a missing one: `anemnez_service` that can't be read (here, sent as a
-    /// varint, which protobuf itself would skip as an unknown field) is malformed, naming the service.
-    #[test]
-    fn an_unreadable_service_option_is_malformed_not_missing() {
-        let mut file = FileDescriptorProto {
-            name: Some("herald.proto".into()),
-            package: Some("herald.v2".into()),
-            ..Default::default()
-        }
-        .encode_to_vec();
-        let mut service = ServiceDescriptorProto { name: Some("Herald".into()), ..Default::default() }.encode_to_vec();
-        let mut varint = Vec::new();
-        prost::encoding::encode_key(SERVICE_OPTIONS_FIELD, prost::encoding::WireType::Varint, &mut varint);
-        varint.push(1);
-        service.extend(ld(3, &varint));
-        file.extend(ld(6, &service));
-        assert_eq!(
-            service_of(&ld(1, &file)).expect_err("refused"),
-            DescriptorRefusal::ServiceOptionsMalformed("herald.v2.Herald".into())
-        );
-    }
-
-    /// The same on a method: an `anemnez_method` that can't be read is options-malformed by path,
-    /// never 'not offered'.
-    #[test]
-    fn an_unreadable_method_option_is_malformed_not_unoffered() {
-        let mut land = method("Land", ".herald.v2.LandRequest", ".herald.v2.LandReply", None);
-        let mut varint = Vec::new();
-        prost::encoding::encode_key(METHOD_OPTIONS_FIELD, prost::encoding::WireType::Varint, &mut varint);
-        varint.push(1);
-        land.extend(ld(4, &varint));
-        let refused = check_descriptor(&set(vec![land])).expect_err("refused");
-        assert_eq!(refused, vec![DescriptorRefusal::OptionsMalformed("/herald.v2.Herald/Land".into())]);
-    }
-
-    /// Every refusal names what is wrong: none declares, two declare, or one says too little.
-    #[test]
-    fn service_of_refuses_by_name() {
-        let name = |r: Result<crate::options::ServiceOptions, DescriptorRefusal>| r.expect_err("refused").name();
-        assert_eq!(name(service_of(&services(&[("Herald", None)]))), "service-options-missing");
-        assert_eq!(
-            service_of(&services(&[("Herald", Some(&herald())), ("Other", Some(&herald()))])).expect_err("refused"),
-            DescriptorRefusal::ServiceOptionsTwice("herald.v2.Herald".into(), "herald.v2.Other".into())
-        );
-        let mut nameless = herald();
-        nameless.contract.clear();
-        assert_eq!(name(service_of(&services(&[("Herald", Some(&nameless))]))), "contract-missing");
-        let mut unversioned = herald();
-        unversioned.version.clear();
-        assert_eq!(name(service_of(&services(&[("Herald", Some(&unversioned))]))), "version-missing");
-        let mut scopeless = herald();
-        scopeless.cursor_scope = 0;
-        assert_eq!(name(service_of(&services(&[("Herald", Some(&scopeless))]))), "cursor-scope-missing");
-        assert_eq!(name(service_of(b"not a descriptor")), "malformed");
-    }
-
-    fn good() -> wire::MethodOptions {
-        wire::MethodOptions {
-            description: "Land a train on its repo's main.".into(),
-            result: Some(wire::Result { shape: Some(wire::Shape::One(wire::Empty {})) }),
-            effect: 2,
-            route: None,
-            person_act: false,
-            presence: 1,
-            permission: 2,
-            callers: 1,
-            session: 0,
-            blocks: false,
-            runs_to_completion: false,
-            examples: Vec::new(),
-            ask_within_secs: None,
-            orient: false,
-        }
-    }
-
-    /// A good orient (ORIENTATION.md `#orient-is-one-bounded-read`): a unary agent read with no argument, its
-    /// result bound at the most an orient may state.
-    fn orient() -> wire::MethodOptions {
-        wire::MethodOptions {
-            description: "What matters to you in Herald now: your trains and the approvals they wait on.".into(),
-            result: Some(wire::Result { shape: Some(wire::Shape::Bound(1)) }),
-            effect: 1,
-            orient: true,
-            ..good()
-        }
-    }
-
-    /// guidance-is-a-service-option: a product's guidance is read whole from its one service, its first line is its
-    /// summary, and both bounds are admitted exactly and refused one past, by name, saying the length.
-    #[test]
-    fn guidance_is_read_with_its_summary_and_refused_past_its_bounds() {
-        let mut said = herald();
-        said.guidance = "Herald lands trains and releases them.\nAsk `herald waits <repo>` what a train lacks.".into();
-        let read = service_of(&services(&[("Herald", Some(&said))])).expect("admitted");
-        assert_eq!(read.guidance, said.guidance);
-        assert_eq!(read.summary(), "Herald lands trains and releases them.");
-        assert_eq!(service_of(&services(&[("Herald", Some(&herald()))])).expect("none yet").summary(), "");
-
-        let summary = "s".repeat(crate::options::GUIDANCE_SUMMARY_MAX_CHARS);
-        let body = "b".repeat(crate::options::GUIDANCE_MAX_CHARS - summary.len() - 1);
-        let mut full = herald();
-        full.guidance = format!("{summary}\n{body}");
-        assert_eq!(full.guidance.chars().count(), crate::options::GUIDANCE_MAX_CHARS);
-        service_of(&services(&[("Herald", Some(&full))])).expect("both bounds, exactly");
-
-        let mut long = herald();
-        long.guidance = format!("{summary}\n{body}b");
-        let refused = service_of(&services(&[("Herald", Some(&long))])).expect_err("one past");
-        assert_eq!(refused, DescriptorRefusal::GuidanceTooLong("herald.v2.Herald".into(), 1_201));
-        assert!(refused.to_string().contains("1201 characters, past 1200"), "{refused}");
-
-        let mut headed = herald();
-        headed.guidance = format!("{summary}s\nthe rest");
-        let refused = service_of(&services(&[("Herald", Some(&headed))])).expect_err("a summary one past");
-        assert_eq!(refused, DescriptorRefusal::GuidanceSummaryTooLong("herald.v2.Herald".into(), 161));
-        // Characters, never bytes: a multi-byte summary at the bound is admitted.
-        let mut wide = herald();
-        wide.guidance = "é".repeat(crate::options::GUIDANCE_SUMMARY_MAX_CHARS);
-        service_of(&services(&[("Herald", Some(&wide))])).expect("160 characters, 320 bytes");
-    }
-
-    /// orient-is-one-bounded-read: one orient is admitted and read as such; a second, a write, one taking input,
-    /// one unbounded or bound to more than one reply, one for products, and one that streams are each refused by name.
-    #[test]
-    fn an_orient_is_one_unary_agent_read_with_no_input_and_a_bound() {
-        let empty = ".herald.v2.OrientRequest";
-        let reply = ".herald.v2.LandReply";
-        let methods = check_descriptor(&set(vec![
-            method("Orient", empty, reply, Some(&orient())),
-            method("Land", ".herald.v2.LandRequest", reply, Some(&good())),
-        ]))
-        .expect("admitted");
-        let marked: Vec<_> = methods.iter().map(|m| (m.path.as_str(), m.options.orient)).collect();
-        assert_eq!(marked, [("/herald.v2.Herald/Orient", true), ("/herald.v2.Herald/Land", false)]);
-
-        let refused = |options: wire::MethodOptions, input: &str| {
-            check_descriptor(&set(vec![method("Orient", input, reply, Some(&options))]))
-                .expect_err("refused")
-                .iter()
-                .map(DescriptorRefusal::name)
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(refused(wire::MethodOptions { effect: 2, ..orient() }, empty), ["orient-not-a-read"]);
-        assert_eq!(refused(orient(), ".herald.v2.LandRequest"), ["orient-takes-input"]);
-        // A count past one is many replies, never a longer text (K m/31487): 2 is refused as 1,500 always was.
-        let past = Some(wire::Result { shape: Some(wire::Shape::Bound(2)) });
-        assert_eq!(refused(wire::MethodOptions { result: past, ..orient() }, empty), ["orient-unbounded"]);
-        let one = Some(wire::Result { shape: Some(wire::Shape::One(wire::Empty {})) });
-        assert_eq!(refused(wire::MethodOptions { result: one, ..orient() }, empty), ["orient-unbounded"]);
-        assert_eq!(refused(wire::MethodOptions { callers: 2, ..orient() }, empty), ["orient-not-for-agents"]);
-
-        let twice = check_descriptor(&set(vec![
-            method("Orient", empty, reply, Some(&orient())),
-            method("Now", empty, reply, Some(&orient())),
-        ]))
-        .expect_err("two orients");
-        assert_eq!(
-            twice,
-            [DescriptorRefusal::OrientTwice("/herald.v2.Herald/Orient".into(), "/herald.v2.Herald/Now".into())]
-        );
-
-        let mut streaming = MethodDescriptorProto {
-            name: Some("Orient".into()),
-            input_type: Some(empty.into()),
-            output_type: Some(reply.into()),
-            server_streaming: Some(true),
-            ..Default::default()
-        }
-        .encode_to_vec();
-        streaming.extend(ld(4, &ld(METHOD_OPTIONS_FIELD, &orient().encode_to_vec())));
-        let refused = check_descriptor(&set(vec![streaming])).expect_err("a stream");
-        assert_eq!(refused.iter().map(DescriptorRefusal::name).collect::<Vec<_>>(), ["orient-streams"]);
-    }
-
-    /// an-ask-is-bounded-in-the-call: absent reads 45 and never 0, an explicit 0 stays 0 (it never asks),
-    /// the cap is admitted, and one past it refuses the descriptor by name.
-    #[test]
-    fn an_ask_bound_reads_45_when_absent_and_is_capped_at_120() {
-        let mut never = good();
-        never.ask_within_secs = Some(0);
-        let mut capped = good();
-        capped.ask_within_secs = Some(crate::options::ASK_WITHIN_CAP_SECS);
-        let bytes = set(vec![
-            method("Absent", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&good())),
-            method("Never", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&never)),
-            method("Capped", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&capped)),
-        ]);
-        let methods = check_descriptor(&bytes).expect("admitted");
-        let bounds: Vec<_> = methods.iter().map(|m| (m.options.ask_within_secs, m.options.ask_within())).collect();
-        assert_eq!(bounds, [(None, 45), (Some(0), 0), (Some(120), 120)]);
-
-        let mut over = good();
-        over.ask_within_secs = Some(crate::options::ASK_WITHIN_CAP_SECS + 1);
-        let bytes = set(vec![method("Over", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&over))]);
-        let refused = check_descriptor(&bytes).expect_err("past the cap");
-        assert_eq!(refused.iter().map(DescriptorRefusal::name).collect::<Vec<_>>(), ["ask-bound-over-cap"]);
-        assert!(refused[0].to_string().contains("121"), "the value is said: {}", refused[0]);
-    }
-
-    /// every-bridge-refuses-a-descriptor-alike: a good descriptor answers every offered method with
-    /// its options, a keyed route's field number, and skips a method that carries no anemnez options.
-    #[test]
-    fn a_good_descriptor_answers_every_offered_method() {
-        let mut land = good();
-        land.blocks = true;
-        land.examples =
-            vec![wire::WireExample { args_json: r#"{"repo": "agora"}"#.into(), caption: "Land agora".into() }];
-        land.route = Some(wire::Route {
-            to: Some(wire::To::Keyed(wire::Leader { group: "herald-repo".into(), key: "repo".into() })),
-        });
-        let mut queue = good();
-        queue.effect = 1;
-        queue.result = Some(wire::Result { shape: Some(wire::Shape::Cursor(wire::Empty {})) });
-        queue.route = Some(wire::Route { to: Some(wire::To::Any(wire::Empty {})) });
-        let bytes = set(vec![
-            method("Land", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&land)),
-            method("Queue", ".herald.v2.LandRequest", ".herald.v2.QueueReply", Some(&queue)),
-            method("Internal", ".herald.v2.LandRequest", ".herald.v2.LandReply", None),
-        ]);
-        let methods = check_descriptor(&bytes).expect("admitted");
-        let paths: Vec<_> = methods.iter().map(|m| m.path.as_str()).collect();
-        assert_eq!(paths, ["/herald.v2.Herald/Land", "/herald.v2.Herald/Queue"], "Internal has no face");
-        let input: Vec<_> =
-            methods[0].input.iter().map(|f| (f.name.as_str(), f.number, f.kind.clone(), f.repeated)).collect();
-        assert_eq!(
-            input,
-            [("train", 1, FieldKind::String, false), ("repo", 3, FieldKind::String, false)],
-            "the request's fields come back, so no bridge re-parses the descriptor"
-        );
-        assert_eq!(methods[0].input_type, ".herald.v2.LandRequest");
-        assert_eq!(methods[0].route_key, Some(RouteKey { name: "repo".into(), number: 3 }));
-        assert_eq!(methods[0].options.route, Route::Keyed { group: "herald-repo".into(), key: "repo".into() });
-        assert!(methods[0].options.blocks && !methods[0].options.runs_to_completion);
-        assert_eq!(methods[0].options.examples, [crate::options::Example::new(r#"{"repo": "agora"}"#, "Land agora")]);
-        assert_eq!(methods[1].options.result, ResultShape::Cursor);
-        assert_eq!(methods[1].options.route, Route::Any);
-    }
-
-    /// D m/22425, m/22441, m/22509: `node` and `keyed_via` are read as declared, keyed_via's key checked at connect
-    /// like keyed's; a route whose variant this build doesn't know (a newer descriptor's, whose tag prost drops) reads
-    /// as Unknown, never local-first, and only no route at all is local-first.
-    #[test]
-    fn node_and_keyed_via_are_read_and_an_unknown_route_is_never_local_first() {
-        use prost::Message as _;
-        let mut node = good();
-        node.route = Some(wire::Route { to: Some(wire::To::Node(wire::Empty {})) });
-        let mut via = good();
-        via.route = Some(wire::Route {
-            to: Some(wire::To::KeyedVia(wire::KeyedVia {
-                group: "substrate-mind".into(),
-                key: "repo".into(),
-                via: "residency".into(),
-            })),
-        });
-        // A variant from a later build: field 7, an empty message. prost drops the tag, so `to` is unset.
-        let later = wire::Route::decode(&[(7 << 3) | 2, 0][..]).expect("decodes");
-        assert_eq!(later.to, None, "an unknown oneof tag is dropped");
-        let mut newer = good();
-        newer.route = Some(later);
-        let mut absent = good();
-        absent.route = None;
-        let bytes = set(vec![
-            method("Pinned", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&node)),
-            method("Via", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&via)),
-            method("Newer", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&newer)),
-            method("Absent", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&absent)),
-        ]);
-        let methods = check_descriptor(&bytes).expect("admitted");
-        let routes: Vec<_> = methods.iter().map(|m| m.options.route.clone()).collect();
-        assert_eq!(
-            routes,
-            [
-                Route::Node,
-                Route::KeyedVia { group: "substrate-mind".into(), key: "repo".into(), via: "residency".into() },
-                Route::Unknown,
-                Route::LocalFirst,
-            ]
-        );
-        assert_eq!(
-            methods[1].route_key,
-            Some(RouteKey { name: "repo".into(), number: 3 }),
-            "keyed_via's key is checked"
-        );
-
-        let mut bad = via.clone();
-        bad.route = Some(wire::Route {
-            to: Some(wire::To::KeyedVia(wire::KeyedVia { group: "g".into(), key: "nope".into(), via: "r".into() })),
-        });
-        let bytes = set(vec![method("Bad", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&bad))]);
-        let refused = check_descriptor(&bytes).expect_err("no such field");
-        assert_eq!(refused.iter().map(DescriptorRefusal::name).collect::<Vec<_>>(), ["route-key"]);
-
-        // E m/22586: an empty group or residency fact is refused at connect, never resolved as "".
-        let unnamed = |to: wire::To| {
-            let mut m = good();
-            m.route = Some(wire::Route { to: Some(to) });
-            let bytes = set(vec![method("Unnamed", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&m))]);
-            let refused = check_descriptor(&bytes).expect_err("unnamed");
-            (refused[0].name(), refused[0].to_string())
-        };
-        let kv = |group: &str, via: &str| {
-            wire::To::KeyedVia(wire::KeyedVia { group: group.into(), key: "repo".into(), via: via.into() })
-        };
-        assert!(matches!(unnamed(kv("g", "")), ("route-unnamed", why) if why.ends_with("via is empty")));
-        assert!(matches!(unnamed(kv("", "r")), ("route-unnamed", why) if why.ends_with("group is empty")));
-        assert_eq!(unnamed(wire::To::Leader(String::new())).0, "route-unnamed");
-        let keyed = wire::To::Keyed(wire::Leader { group: String::new(), key: "repo".into() });
-        assert_eq!(unnamed(keyed).0, "route-unnamed");
-    }
-
-    /// Every refusal is answered, not the first, each naming its method.
-    #[test]
-    fn every_refusal_is_answered_by_name() {
-        let bare = wire::MethodOptions::default();
-        let mut person = good();
-        person.person_act = true;
-        person.permission = 1;
-        let mut keyed = good();
-        keyed.route = Some(wire::Route {
-            to: Some(wire::To::Keyed(wire::Leader { group: "herald-repo".into(), key: "nope".into() })),
-        });
-        let mut lost = keyed.clone();
-        lost.route =
-            Some(wire::Route { to: Some(wire::To::Keyed(wire::Leader { group: "g".into(), key: "repo".into() })) });
-        let bytes = set(vec![
-            method("Bare", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&bare)),
-            method("Person", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&person)),
-            method("Keyed", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&keyed)),
-            method("Queue", ".herald.v2.LandRequest", ".herald.v2.QueueReply", Some(&good())),
-            method("Lost", ".herald.v2.Missing", ".herald.v2.LandReply", Some(&lost)),
-        ]);
-        let refused = check_descriptor(&bytes).expect_err("refused");
-        let named: Vec<(&str, String)> = refused
-            .iter()
-            .map(|r| (r.name(), r.to_string().split(':').next().unwrap_or_default().to_owned()))
-            .collect();
-        let want = [
-            ("callers-missing", "/herald.v2.Herald/Bare"),
-            ("permission-missing", "/herald.v2.Herald/Bare"),
-            ("result-missing", "/herald.v2.Herald/Bare"),
-            ("effect-missing", "/herald.v2.Herald/Bare"),
-            ("presence-missing", "/herald.v2.Herald/Bare"),
-            ("description-missing", "/herald.v2.Herald/Bare"),
-            ("person-act-allowed", "/herald.v2.Herald/Person"),
-            ("route-key", "/herald.v2.Herald/Keyed"),
-            ("unbounded-collection", "/herald.v2.Herald/Queue"),
-            ("input-unknown", "/herald.v2.Herald/Lost"),
-        ];
-        let want: Vec<(&str, String)> = want.iter().map(|(n, p)| (*n, (*p).to_owned())).collect();
-        assert_eq!(named, want);
-    }
-
-    #[test]
-    fn bytes_that_are_not_a_descriptor_are_malformed() {
-        let refused = check_descriptor(&[0xff, 0xff, 0xff]).expect_err("refused");
-        assert_eq!(refused.len(), 1);
-        assert_eq!(refused[0].name(), "malformed");
-    }
-
-    /// A type is found by its full name wherever it sits in the file, nested types included.
-    #[test]
-    fn a_nested_or_later_input_type_is_found() {
-        let mut outer = message("Outer", &[]);
-        outer.nested_type.push(message("Inner", &[("repo", 7, Type::String, Label::Optional)]));
-        let set = FileDescriptorSet {
-            file: vec![FileDescriptorProto {
-                package: Some("p.v1".into()),
-                message_type: vec![message("First", &[]), outer],
-                ..Default::default()
-            }],
-        };
-        assert_eq!(find_message(&set, ".p.v1.First").map(DescriptorProto::name), Some("First"));
-        assert_eq!(find_message(&set, ".p.v1.Outer.Inner").map(DescriptorProto::name), Some("Inner"));
-        assert_eq!(find_message(&set, ".p.v1.Inner"), None, "a nested type is not top-level");
-        assert_eq!(find_message(&set, ".q.v1.First"), None, "another package");
-    }
-
-    /// An example must be a JSON object of the request's top-level fields, or the method is refused
-    /// example-mismatch by name; the full type check is the bridge's.
-    #[test]
-    fn an_example_that_is_not_the_requests_fields_is_refused() {
-        let example = |args: &str| wire::WireExample { args_json: args.into(), caption: String::new() };
-        let mut unknown = good();
-        unknown.examples = vec![example(r#"{"repo": "agora", "nope": 1}"#)];
-        let mut not_object = good();
-        not_object.examples = vec![example(r#"["agora"]"#)];
-        let mut not_json = good();
-        not_json.examples = vec![example("herald.land{repo = 'agora'}")];
-        let bytes = set(vec![
-            method("Unknown", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&unknown)),
-            method("NotObject", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&not_object)),
-            method("NotJson", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&not_json)),
-        ]);
-        let refused = check_descriptor(&bytes).expect_err("refused");
-        let found: Vec<String> = refused.iter().map(ToString::to_string).collect();
-        assert_eq!(refused.iter().map(DescriptorRefusal::name).collect::<Vec<_>>(), ["example-mismatch"; 3]);
-        assert!(found[0].contains("'nope' is not a field of LandRequest"), "{found:?}");
-        assert!(found[1].contains("not a JSON object"), "{found:?}");
-        assert!(found[2].contains("not JSON"), "{found:?}");
-    }
-
-    /// M m/31062: a descriptor's streaming methods, client, server and bidi, by their gRPC paths, and never a unary one;
-    /// bytes that aren't a descriptor are refused by name.
-    #[test]
-    fn streaming_paths_are_every_streaming_method_and_no_unary_one() {
-        use prost::Message as _;
-        use prost_types::{MethodDescriptorProto, ServiceDescriptorProto};
-        let method = |name: &str, client: bool, server: bool| MethodDescriptorProto {
-            name: Some(name.into()),
-            client_streaming: Some(client),
-            server_streaming: Some(server),
-            ..MethodDescriptorProto::default()
-        };
-        let set = FileDescriptorSet {
-            file: vec![FileDescriptorProto {
-                package: Some("typhon.v1".into()),
-                service: vec![ServiceDescriptorProto {
-                    name: Some("ModelRunner".into()),
-                    method: vec![
-                        method("ListModels", false, false),
-                        method("Subscribe", false, true),
-                        method("Upload", true, false),
-                        method("Chat", true, true),
-                    ],
-                    ..ServiceDescriptorProto::default()
-                }],
-                ..FileDescriptorProto::default()
-            }],
-        }
-        .encode_to_vec();
-        assert_eq!(
-            super::streaming_paths(&set).expect("reads"),
-            ["/typhon.v1.ModelRunner/Subscribe", "/typhon.v1.ModelRunner/Upload", "/typhon.v1.ModelRunner/Chat"]
-        );
-        assert!(matches!(super::streaming_paths(b"\xff\xff"), Err(DescriptorRefusal::Malformed(_))));
-    }
-}
+#[path = "descriptor_tests.rs"]
+mod tests;

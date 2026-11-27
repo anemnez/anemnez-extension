@@ -328,3 +328,21 @@ fn the_orient_tool_says_so_and_the_instructions_are_the_guidance() {
     assert_eq!(instructions(&guided), Some("Pkg keeps your items.\nEach tool answers its help."));
     assert_eq!(guided.summary(), "Pkg keeps your items.");
 }
+
+/// LONG-JOBS §2: a long tool carries its method's bound under `_meta.anemnez`, so a host bounds its job by it; a tool
+/// whose method states none says nothing, so its listing stays byte for byte as it was.
+#[test]
+fn a_long_tool_carries_its_bound_and_an_unbounded_one_says_nothing() {
+    let mut boot = agent("Boot a simulator.", Effect::Act, Permission::Allow);
+    boot.blocks = true;
+    boot.bound_secs = Some(120);
+    let methods = [
+        method("/pkg.S/Boot", boot, vec![]),
+        method("/pkg.S/Get", agent("Get one.", Effect::Read, Permission::Allow), vec![]),
+    ];
+    let tools = flatten(&service(0), &methods).expect("flattens");
+    assert_eq!((tools[0].long, tools[0].bound_secs), (true, Some(120)));
+    assert_eq!(tools[0].to_json()["_meta"]["anemnez"]["bound_secs"], 120);
+    assert_eq!(tools[1].bound_secs, None);
+    assert!(tools[1].to_json()["_meta"]["anemnez"].get("bound_secs").is_none(), "said only when stated");
+}
