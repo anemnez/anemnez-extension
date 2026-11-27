@@ -487,6 +487,45 @@ never reading an Unclear. The trailer is additive: the message stays `expired` f
 Cursors are instance-scoped today (`<inst8>.<boot>:<seq>`); a swarm-scoped journal, whose cursors
 resume at any instance, is the next slice.
 
+### 2a. The cursor face: a recipient's marks on a producer (DESIGN, H, 2026-11-27; agora DELIVERY.md §1a, §1b)
+
+<!-- claim: a-producer-serves-its-recipients-marks-through-the-cursor-face -->
+**A producer serves its recipients' marks through the cursor face** (the User, 2026-11-27: every product keeps its
+own cursors, and hydramq-deliver is their client; agora DELIVERY.md v0.6, D, A, I, M, B approved). The face is two
+calls, a contract minor offered only where a product declares it, readers first. A product that doesn't serve it
+refuses `cursor-face-unserved` by name, as `events-call-unserved` is refused today.
+
+- **`Cursor/Next { recipient, after, max }`**: the product's items for `recipient` past `after`, at most `max`, each
+  with its position, source key, kind, urgency, subject, `re` and sender (hydramq-deliver's item), plus the
+  recipient's `acked` and `handed` marks. A position below the log's retained start answers
+  `Trimmed { from, to }` by name, never a silent jump.
+- **`Cursor/Commit { recipient, mark: acked | handed, through, session }`**: moves that mark to `through`. The answer
+  is the mark as it now stands. A commit at or below the mark is done (a repeat is harmless), and the client reads
+  "ours or further" from the answer (rule 5). `session` rides `handed` for diagnosis only (DELIVERY §1b's WARN).
+
+**One kernel, never a second.** The rise-only mark is hydramq-cursor's: `Change::Ack { through }` never moves the mark
+back (a lower one is a no-op), `Change::Hand { through }` records what is in flight, and the store fences each
+write by its lease generation. The face's store is hydramq-cursors' `Cursors<S: LogStore>`, one subscriber stream
+per recipient, in the product's own replicated state (its replicated front end). So a commit is a write and goes to
+the product's leader through Reach, and `Next` is read from any replica (log-face-any-replica). The face adds no
+mark logic of its own: it maps the two calls onto `Marks::decide` and the store (rule 2).
+
+**What the product plugs in**, as `LogEvents` takes a `Log` and an `Authorize`:
+- its **log** (the `Log` it already serves Events from), which `Next` reads;
+- its **cursors** (`Cursors<S>` over its replicated store);
+- **`Whose`**, the predicate `(event, recipient) -> bool` that says whose an item is. For a routed product it is
+  Nomos's decision through the Decide port, never route logic copied into the face;
+- **callers**: a carried call whose principal is `recipient`, or a product caller on the face's `callers = PRODUCT`
+  list (Agora's and Substrate's identifiers, as `ApiFaces::product_callers` keeps). Anyone else is refused
+  `cursor-not-yours` by name, for `Next` and `Commit` alike.
+
+**Bounds.** Every call is bounded by the caller (DELIVERY §1b: `SOURCE_WITHIN`, 1.5 s, inside the carrier point's
+own). An unanswered `Commit` is Unclear and read back by the next `Next`, whose marks say where it stands.
+
+Rows, when built: a commit only rises and a repeat is done; a commit or `Next` from an unlisted caller is refused
+`cursor-not-yours`; `Next` below the retained start is `Trimmed`; two recipients' marks never touch; a product that
+declares no face refuses `cursor-face-unserved`; and a commit read back through `Next` from a replica.
+
 ## 3. The fixture: `anemnez-extension-fixture`
 
 <!-- claim: every-bridge-mounts-the-same-fixture -->
