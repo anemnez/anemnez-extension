@@ -132,23 +132,95 @@ pub struct Running {
 
 /// The fixture's open connections, each by a duplicate of its socket the fixture owns: shutting one down wakes every
 /// read on that connection with an end, so a held call fails rather than answers. It's a duplicate, never a borrowed
-/// descriptor, so it can't touch a socket reused by anything else.
+/// descriptor, so it can't touch a socket reused by anything else. Each entry goes when its served stream ends (D
+/// m/42087), so a connection the server closes normally isn't held open by its duplicate, and the set never grows.
 #[derive(Clone, Default)]
-struct Open(Arc<Mutex<Vec<std::os::unix::net::UnixStream>>>);
+struct Open(Arc<Mutex<(u64, std::collections::HashMap<u64, std::os::unix::net::UnixStream>)>>);
 
 impl Open {
-    fn keep(&self, stream: tokio::net::UnixStream) -> std::io::Result<tokio::net::UnixStream> {
+    fn keep(&self, stream: tokio::net::UnixStream) -> std::io::Result<Tracked> {
         let std = stream.into_std()?;
         let own = std.try_clone()?;
-        self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(own);
-        tokio::net::UnixStream::from_std(std)
+        let id = {
+            let mut open = self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            open.0 += 1;
+            let id = open.0;
+            open.1.insert(id, own);
+            id
+        };
+        Ok(Tracked { stream: tokio::net::UnixStream::from_std(std)?, id, open: self.clone() })
+    }
+
+    fn forget(&self, id: u64) {
+        self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).1.remove(&id);
     }
 
     /// End every connection, both ways.
     fn cut(&self) {
-        for stream in self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).drain(..) {
+        let open = std::mem::take(&mut self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).1);
+        for stream in open.into_values() {
             let _ = stream.shutdown(std::net::Shutdown::Both);
         }
+    }
+
+    #[cfg(test)]
+    fn count(&self) -> usize {
+        self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).1.len()
+    }
+}
+
+/// A served connection that drops its duplicate from [`Open`] when the server is done with it.
+struct Tracked {
+    stream: tokio::net::UnixStream,
+    id: u64,
+    open: Open,
+}
+
+impl Drop for Tracked {
+    fn drop(&mut self) {
+        self.open.forget(self.id);
+    }
+}
+
+impl tokio::io::AsyncRead for Tracked {
+    fn poll_read(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.get_mut().stream).poll_read(cx, buf)
+    }
+}
+
+impl tokio::io::AsyncWrite for Tracked {
+    fn poll_write(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        std::pin::Pin::new(&mut self.get_mut().stream).poll_write(cx, buf)
+    }
+
+    fn poll_flush(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.get_mut().stream).poll_flush(cx)
+    }
+
+    fn poll_shutdown(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.get_mut().stream).poll_shutdown(cx)
+    }
+}
+
+impl tonic::transport::server::Connected for Tracked {
+    type ConnectInfo = <tokio::net::UnixStream as tonic::transport::server::Connected>::ConnectInfo;
+
+    fn connect_info(&self) -> Self::ConnectInfo {
+        self.stream.connect_info()
     }
 }
 
