@@ -26,19 +26,19 @@ anemnez-extension = { path = "crates/anemnez-extension", version = "0.10.48", re
 # kernel takes it freely. Its first release here is 0.10.1, above every 0.3.x the SDK released of it (E m/33177).
 anemnez-trust = { path = "crates/anemnez-trust", version = "0.10.45", registry-index = "sparse+http://127.0.0.1:7787/crates/index/" }
 # The one clock, in the dual form at the rev every git-built closure shares (D m/16149: one crate, one source,
-# one rev; M m/16161): eabaaf22f8c4, the family's rev (E m/37983: dd75fd1's Rust, past a standards-only commit),
+# one rev; M m/16161): 92307ea4fe1e, the family's rev (E m/37983: dd75fd1's Rust, past a standards-only commit),
 # taken with hydramq's set so cargo builds one copy. The version is loose ("0.1") because the git tree says
 # 0.1.0; Herald rewrites it to the release at that rev when it publishes.
-anemnez-clock = { git = "ssh://git@github.com/anemnez/anemnez-clock.git", rev = "eabaaf22f8c4", version = "0.1", registry-index = "sparse+http://127.0.0.1:7787/crates/index/" }
+anemnez-clock = { git = "ssh://git@github.com/anemnez/anemnez-clock.git", rev = "92307ea4fe1e", version = "0.1", registry-index = "sparse+http://127.0.0.1:7787/crates/index/" }
 anemnez-layout = { git = "ssh://git@github.com/anemnez/anemnez-layout.git", rev = "cee4bbce7601", version = "0.1", registry-index = "sparse+http://127.0.0.1:7787/crates/index/" }
 # The deterministic simulation's runner, dev-only (MACHINES §4; D m/17459): its anemnez-clock is the same rev as ours.
-anemnez-sim = { git = "ssh://git@github.com/anemnez/anemnez-sim.git", rev = "3188cf0f6a7b", version = "0.1", registry-index = "sparse+http://127.0.0.1:7787/crates/index/" }
+anemnez-sim = { git = "ssh://git@github.com/anemnez/anemnez-sim.git", rev = "6f8624fb33f1", version = "0.1", registry-index = "sparse+http://127.0.0.1:7787/crates/index/" }
 # The one face for every product's events (fabric EVENTS.md §6a): the client reads it over Events/Call.
 # hydramq's leaves in the same dual form, at hydramq's step-2 release f852078 (A m/36770), so their anemnez-clock,
 # layout and sim are the same git copies as ours.
-hydramq-events = { git = "ssh://git@github.com/anemnez/hydramq.git", rev = "1bf74aa4c335", version = "0.5", registry-index = "sparse+http://127.0.0.1:7787/crates/index/" }
+hydramq-events = { git = "ssh://git@github.com/anemnez/hydramq.git", rev = "e4f37a457f31", version = "0.5", registry-index = "sparse+http://127.0.0.1:7787/crates/index/" }
 # The message codec, dev-only: a row builds a request of a kind hydramq-events can't name (ergon:M/events-carried-read).
-hydramq-message = { git = "ssh://git@github.com/anemnez/hydramq.git", rev = "1bf74aa4c335", version = "0.5", registry-index = "sparse+http://127.0.0.1:7787/crates/index/" }
+hydramq-message = { git = "ssh://git@github.com/anemnez/hydramq.git", rev = "e4f37a457f31", version = "0.5", registry-index = "sparse+http://127.0.0.1:7787/crates/index/" }
 tonic = "0.12"
 # A product's own HTTP routes on the API plane (ProductRoutes::http): tonic 0.12's own axum, so a Router converts.
 axum = { version = "0.7", default-features = false }

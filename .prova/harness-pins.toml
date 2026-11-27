@@ -5,13 +5,13 @@
 
 [hydramq-family]
 repo = "anemnez/hydramq"
-rev = "1bf74aa4c335"
+rev = "e4f37a457f31"
 why = "hydramq-events and its leaves, the log face -serve serves (Events, Watch) and the SDK's replica plane resolves beside it: one copy across the extension, the SDK and hydramq"
 owner = "M"
 
 [anemnez-clock-family]
 repo = "anemnez/anemnez-clock"
-rev = "eabaaf22f8c4"
+rev = "92307ea4fe1e"
 why = "the injected clock every kernel and host here takes (rule 3), the same git copy as hydramq's and the SDK's, so cargo builds one"
 owner = "M"
 
@@ -23,6 +23,6 @@ owner = "M"
 
 [anemnez-sim-family]
 repo = "anemnez/anemnez-sim"
-rev = "3188cf0f6a7b"
+rev = "6f8624fb33f1"
 why = "the deterministic simulation's runner, dev-only (MACHINES §4), its clock the same rev as ours"
 owner = "M"
