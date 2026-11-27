@@ -308,9 +308,14 @@ impl Reads {
 /// product reads it with `request.extensions().get::<CarriedBound>()` and decides what the principal may do (its
 /// grant, scoped with reach: `one-decision-per-call-at-the-product`).
 ///
-/// It has no public constructor (E m/36065, M m/36068): only [`CarriedBound::minted_by_the_sdks_carried_verify`],
-/// hidden from the docs and named for its one caller, so no code reaches it by accident. It is no fence against code in
-/// the product's own process that means to; the SDK's layer, outermost, removing any it didn't mint, is.
+/// **Sealed by its plane** (D m/44694, M m/44889): a bound is minted through the [`Binder`] of the plane that serves
+/// the call ([`ApiFaces::binder`](crate::ApiFaces::binder)), and the plane removes any bound not under its own seal
+/// before it judges the call and before the product's service sees the request. So neither the plane nor a product's
+/// own `extensions().get` reads a bound nobody meant to mint, on the SDK's paths or a product's own `serve`. It is no
+/// fence against code in the product's own process that takes its faces' binder on purpose.
+///
+/// Readers first: [`CarriedBound::minted_by_the_sdks_carried_verify`], unsealed, is still kept on a bound-decided
+/// method alone, until the SDK binds through the binder; then it goes and every unsealed bound is removed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct CarriedBound {
@@ -318,14 +323,34 @@ pub struct CarriedBound {
     pub principal: String,
     /// The node aegisd said the call came from.
     pub via: String,
+    /// The plane whose binder minted it; `None` for the unsealed mint, retiring.
+    seal: Option<Arc<Seal>>,
 }
 
 impl CarriedBound {
-    /// For anemnez-service's carried verify alone: what it found good. Nothing else calls this.
+    /// For anemnez-service's carried verify alone, unsealed: retiring once the SDK binds through
+    /// [`ApiFaces::binder`](crate::ApiFaces::binder). Nothing else calls this.
     #[doc(hidden)]
     #[must_use]
     pub fn minted_by_the_sdks_carried_verify(principal: String, via: String) -> CarriedBound {
-        CarriedBound { principal, via }
+        CarriedBound { principal, via, seal: None }
+    }
+}
+
+/// One plane's seal: compared by identity alone (`Arc::ptr_eq`), never by value, so no two planes share one.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct Seal;
+
+/// What mints a [`CarriedBound`] the plane it came from keeps: taken from that plane's faces
+/// ([`ApiFaces::binder`](crate::ApiFaces::binder)) by the SDK's carried verify. Cheap to clone and to call.
+#[derive(Clone, Debug)]
+pub struct Binder(Arc<Seal>);
+
+impl Binder {
+    /// The bound the carried verify found good for `principal`, carried from `via`, sealed by this binder's plane.
+    #[must_use]
+    pub fn bind(&self, principal: String, via: String) -> CarriedBound {
+        CarriedBound { principal, via, seal: Some(Arc::clone(&self.0)) }
     }
 }
 
@@ -338,7 +363,12 @@ const CONTRACT_PREFIX: &str = "/anemnez.extension.v1.";
 /// lands, never per product; default none, so a bound caller reaches reads only, as an unbound one does. Each method is
 /// one of the descriptor's own, never the contract's and never one products call, checked when the plane is built.
 #[derive(Clone, Debug, Default)]
-pub struct BoundDecided(Arc<HashSet<String>>);
+pub struct BoundDecided {
+    methods: Arc<HashSet<String>>,
+    /// This plane's seal, made fresh with it and shared by its clones: the binder mints under it, and the plane keeps
+    /// only bounds under it.
+    seal: Arc<Seal>,
+}
 
 impl BoundDecided {
     /// `methods` (gRPC paths), each held to the encoded `FileDescriptorSet` the plane serves.
@@ -361,11 +391,28 @@ impl BoundDecided {
             }
             decided.insert((*method).to_owned());
         }
-        Ok(BoundDecided(Arc::new(decided)))
+        Ok(BoundDecided { methods: Arc::new(decided), seal: Arc::default() })
     }
 
     fn decides(&self, path: &str) -> bool {
-        self.0.contains(path)
+        self.methods.contains(path)
+    }
+
+    /// The binder that mints bounds this plane keeps.
+    #[must_use]
+    pub fn binder(&self) -> Binder {
+        Binder(Arc::clone(&self.seal))
+    }
+
+    /// Whether this plane keeps `bound` on a call to `path`: one its own binder minted, on any path, or, until the SDK
+    /// binds through the binder, an unsealed one on a method this plane says is bound-decided (D m/44901 1). A bound
+    /// sealed by another plane is never kept, nor an unsealed one on any other method. Pure.
+    #[must_use]
+    pub fn keeps(&self, bound: &CarriedBound, path: &str) -> bool {
+        match &bound.seal {
+            Some(seal) => Arc::ptr_eq(seal, &self.seal),
+            None => self.decides(path),
+        }
     }
 }
 
@@ -901,6 +948,15 @@ where
     /// ([`carried_call_admits`]), the polled inner taken for it and a clone left in its place (tower's rule).
     fn call(&mut self, mut request: http::Request<BoxBody>) -> Self::Future {
         use futures_util::future::Either;
+        // A bound this plane didn't seal is removed before anything reads it: the rules below, and the product's own
+        // service (D m/44694).
+        if request
+            .extensions()
+            .get::<CarriedBound>()
+            .is_some_and(|bound| !self.bound.keeps(bound, request.uri().path()))
+        {
+            request.extensions_mut().remove::<CarriedBound>();
+        }
         let admitted = {
             let stamp = request.headers().get(STAMP_METADATA_KEY).map(|v| stamp_bytes(v.as_bytes()));
             let judged = request.extensions().get::<Judged>();

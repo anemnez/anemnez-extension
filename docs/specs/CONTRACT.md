@@ -889,6 +889,19 @@ the request carries no `Claimed` (D m/28960). Nothing is listed by default, so a
 bound caller as an unbound one, reads only, else `carried-write-unbound`: the plane never opens a write before the
 product decides it, readers first in the safe direction. A `CarriedBound` on any other role changes nothing.
 
+<!-- claim: a-plane-keeps-only-the-bounds-its-own-binder-sealed -->
+**A plane keeps only the bounds its own binder sealed** (D m/44694, M m/44889). The SDK's admit layer strips on the
+SDK's own paths, but a product may serve its API another way, through -serve's `serve`, where no SDK layer stands. So
+each plane has a seal, made afresh with its `BoundDecided` and shared by its clones, and the SDK's verify mints through
+that plane's `Binder` (`ApiFaces::binder`, taken after `bound_decided`). Before the plane judges a call, and before the
+product's service sees it, the plane removes any `CarriedBound` not under its own seal (`BoundDecided::keeps`). So
+neither the plane nor a product's own `extensions().get` reads a bound nobody meant to mint, on any path. It is no fence
+against code in the product's process that takes its faces' binder on purpose. Readers first, two steps: (a) a bound
+sealed by another plane is always removed, and the unsealed `minted_by_the_sdks_carried_verify` is kept on a
+bound-decided method alone and removed on every other (D m/44901). (b) Once the SDK that binds through the binder is
+the build every product runs, judged by placed builds, the unsealed mint is removed and every unsealed bound with it.
+The SDK keeps its own strip on plain `serve_api` after (b), which holds on a -serve older than (a).
+
 <!-- claim: a-carried-write-may-be-admitted-for-a-claimed-lane -->
 **A carried write reaches a product only when it lists the method for claimed lanes, and then as a claim** (D m/28960;
 O m/28968; K m/29040). Trust doesn't depend on location: a lane's write from another host through a verified aegisd is

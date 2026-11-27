@@ -314,3 +314,7 @@ spoken_for("a-producer-serves-its-recipients-marks-through-the-cursor-face (a tr
 spoken_for("a-producer-serves-its-recipients-marks-through-the-cursor-face (two recipients)", "cursor_face_tests::two_recipients_marks_never_touch")
 spoken_for("a-producer-serves-its-recipients-marks-through-the-cursor-face (explored)", "cursor_face_tests::every_short_commit_sequence_keeps_the_marks_rising")
 spoken_for("a-cursor-faces-positions-are-one-based", "cursor_face_tests::acked_through_a_position_is_the_cursors_next_exactly")
+spoken_for("a-plane-keeps-only-the-bounds-its-own-binder-sealed", "plane_tests::a_plane_keeps_only_the_bounds_its_own_binder_sealed")
+spoken_for("a-plane-keeps-only-the-bounds-its-own-binder-sealed (never admitted)", "plane_tests::a_bound_from_another_plane_is_never_admitted_as_bound")
+spoken_for("a-plane-keeps-only-the-bounds-its-own-binder-sealed (one plane's)", "plane_tests::a_seal_is_one_planes_and_its_clones")
+spoken_for("a-plane-keeps-only-the-bounds-its-own-binder-sealed (unsealed on a decided method alone)", "plane_tests::the_unsealed_mint_is_kept_on_a_bound_decided_method_alone")

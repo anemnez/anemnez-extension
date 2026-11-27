@@ -189,6 +189,14 @@ impl ApiFaces {
         let bound = crate::plane::BoundDecided::of(self.describe.descriptor(), methods)?;
         Ok(ApiFaces { bound, ..self })
     }
+
+    /// The binder whose bounds this plane keeps (D m/44694, M m/44889): the SDK's carried verify mints each
+    /// `CarriedBound` through it, and the plane removes any bound it didn't seal before reading it. Take it after
+    /// [`ApiFaces::bound_decided`], which makes the plane's seal afresh.
+    #[must_use]
+    pub fn binder(&self) -> crate::plane::Binder {
+        self.bound.binder()
+    }
 }
 
 /// A product's own services for the API plane: its descriptor's calls, each checked by name as it is added.

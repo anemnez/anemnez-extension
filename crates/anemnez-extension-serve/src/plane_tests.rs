@@ -462,6 +462,96 @@ async fn the_layer_serves_a_bound_carried_call_only_where_its_product_decides() 
     assert_eq!(call(&write, None).await.1, Some(Some(Claimed { lane: "K".into(), via: "node-b".into() })));
 }
 
+/// A carried read of Land through `layer`, with `bound` on it: its status, and the `CarriedBound` the product's own
+/// service found on the request (None: never reached; Some(None): reached, with no bound on it).
+async fn bound_land(
+    layer: &ApiPlaneLayer,
+    bound: Option<CarriedBound>,
+) -> (http::StatusCode, Option<Option<CarriedBound>>) {
+    bound_call(layer, LAND, bound).await
+}
+
+/// [`bound_land`] to `path`.
+async fn bound_call(
+    layer: &ApiPlaneLayer,
+    path: &str,
+    bound: Option<CarriedBound>,
+) -> (http::StatusCode, Option<Option<CarriedBound>>) {
+    use tower_layer::Layer as _;
+    use tower_service::Service as _;
+
+    let seen = Seen::<CarriedBound>::default();
+    let mut service = layer.layer(seen.clone());
+    let mut request = http::Request::builder().uri(path).body(tonic::body::empty_body()).expect("a request");
+    request.extensions_mut().insert(carried(Some("node-b")));
+    if let Some(bound) = bound {
+        request.extensions_mut().insert(bound);
+    }
+    let response = service.call(request).await.expect("answered");
+    (response.status(), seen.got())
+}
+
+/// D m/44901 (1): on a plane that decides Land, a call to another method is stripped of the unsealed mint, so a product
+/// reading its extensions there never sees a planted bound; its own binder's bound is kept on every path. Red with the
+/// unsealed mint kept wherever any method is bound-decided.
+#[tokio::test]
+async fn the_unsealed_mint_is_kept_on_a_bound_decided_method_alone() {
+    let decided = deciding(pb::Effect::Read);
+    let ours = decided.binder().bind("agent:K".into(), "node-b".into());
+    let mut reads = Reads::of(&land_descriptor_as(pb::Effect::Read, pb::Callers::Agent));
+    std::sync::Arc::make_mut(&mut reads.0).insert(FUNCTIONAL.to_owned());
+    let plane = ApiPlaneLayer::new(reads).bound_decided(decided);
+    assert_eq!(bound_call(&plane, FUNCTIONAL, Some(bound())).await, (http::StatusCode::OK, Some(None)), "stripped");
+    assert_eq!(bound_call(&plane, LAND, Some(bound())).await.1, Some(Some(bound())), "kept where decided, until (b)");
+    assert_eq!(bound_call(&plane, FUNCTIONAL, Some(ours.clone())).await.1, Some(Some(ours)), "its own seal: kept");
+}
+
+/// D m/44694, M m/44889: a bound is kept only by the plane whose binder sealed it. Land is a read here, so every call is
+/// served and the row reads what the product's own service finds. Its own plane's bound reaches it; one sealed by
+/// another plane is removed before anything reads it; where no method is bound-decided, even the retiring unsealed mint
+/// is removed, so a product serving its API its own way never reads one it didn't opt into. Red with the strip off.
+#[tokio::test]
+async fn a_plane_keeps_only_the_bounds_its_own_binder_sealed() {
+    let read = || Reads::of(&land_descriptor_as(pb::Effect::Read, pb::Callers::Agent));
+    let decided = deciding(pb::Effect::Read);
+    let ours = decided.binder().bind("agent:K".into(), "node-b".into());
+    let theirs = deciding(pb::Effect::Read).binder().bind("agent:K".into(), "node-b".into());
+    let plane = ApiPlaneLayer::new(read()).bound_decided(decided);
+    assert_eq!(bound_land(&plane, Some(ours.clone())).await, (http::StatusCode::OK, Some(Some(ours))), "its own");
+    assert_eq!(bound_land(&plane, Some(theirs.clone())).await, (http::StatusCode::OK, Some(None)), "another plane's");
+    let undecided = ApiPlaneLayer::new(read());
+    assert_eq!(bound_land(&undecided, Some(bound())).await, (http::StatusCode::OK, Some(None)), "not opted in");
+    assert_eq!(bound_land(&undecided, Some(theirs)).await, (http::StatusCode::OK, Some(None)), "sealed, not opted in");
+    // Readers first: the unsealed mint is still kept where a method is bound-decided, until the SDK binds sealed.
+    let legacy = ApiPlaneLayer::new(read()).bound_decided(deciding(pb::Effect::Read));
+    assert_eq!(bound_land(&legacy, Some(bound())).await, (http::StatusCode::OK, Some(Some(bound()))), "retiring");
+}
+
+/// A bound sealed by another plane is never admitted as bound: an act it would decide is refused as unbound.
+#[tokio::test]
+async fn a_bound_from_another_plane_is_never_admitted_as_bound() {
+    let reads = || Reads::of(&land_descriptor_as(pb::Effect::Act, pb::Callers::Agent));
+    let decided = deciding(pb::Effect::Act);
+    let ours = decided.binder().bind("agent:K".into(), "node-b".into());
+    let theirs = deciding(pb::Effect::Act).binder().bind("agent:K".into(), "node-b".into());
+    let act = ApiPlaneLayer::new(reads()).bound_decided(decided);
+    assert_eq!(carried_land(&act, Some(ours)).await.0, http::StatusCode::OK, "its own binder's: served");
+    assert_eq!(carried_land(&act, Some(theirs)).await, (http::StatusCode::FORBIDDEN, None), "another's: unbound");
+}
+
+/// The seal is the plane's, shared by its clones and by every binder taken from it, and never by another plane, even
+/// one built from the same descriptor and methods.
+#[test]
+fn a_seal_is_one_planes_and_its_clones() {
+    let decided = deciding(pb::Effect::Write);
+    let bound = decided.binder().bind("agent:K".into(), "node-b".into());
+    assert!(decided.keeps(&bound, LAND) && decided.clone().keeps(&bound, LAND), "its own, and its clone's");
+    let clones = decided.clone().binder().bind("agent:D".into(), "node-c".into());
+    assert!(decided.keeps(&clones, FUNCTIONAL), "a clone's binder, on any path");
+    assert!(!deciding(pb::Effect::Write).keeps(&bound, LAND), "the same methods, another plane");
+    assert!(!BoundDecided::default().keeps(&bound, LAND), "a plane deciding nothing");
+}
+
 /// O m/29572, a live regression: Agora carries its stamp on every far send (I's narrowed `{class, lane}`), so a carried
 /// read arrives with one. A carried read is admitted as a read, its stamp unused and never believed, with no Claimed on
 /// it, so reads stay location agnostic whatever the caller sends. A carried stamp to an unlisted write is still refused.
