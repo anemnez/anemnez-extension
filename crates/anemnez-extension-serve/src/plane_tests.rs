@@ -674,9 +674,91 @@ async fn the_layer_admits_a_proven_product_and_hands_its_caller_to_the_service()
     let (said, _) = send(carried_signed(anemnez_trust::ANEMNEZ_TEAM, "ai.anemnez.stoad"), FUNCTIONAL).await;
     assert!(said.is_some_and(|m| m.starts_with(CARRIED_WRITE_UNBOUND)), "a code identity opens only PRODUCT methods");
 
+    // A local peer is judged as a carried one is (N m/41747 (3)): by its own accept's code identity, never a preface,
+    // where the method's product named its list (LAND's names stoad).
     let (said, seen) = send(judged(Role::Other), LAND).await;
-    assert_eq!(said, None, "a direct call is the plane's ordinary path");
-    assert_eq!(seen, Some(None), "with no ProductCaller: a direct caller's code is its own accept's, never a preface");
+    assert!(said.is_some_and(|m| m.starts_with("product-caller-untrusted")), "another team's local peer, refused");
+    assert!(seen.is_none(), "the handler never judges a caller itself");
+    let (said, seen) = send(local_signed(Role::Other, anemnez_trust::ANEMNEZ_TEAM, "ai.anemnez.stoad"), LAND).await;
+    assert_eq!(said, None, "a local proven product is served");
+    assert_eq!(seen.flatten().map(|c| c.node), Some(crate::plane::LOCAL_NODE.to_owned()), "its caller, named local");
+}
+
+/// Two steps (N m/41747 (3)): a `callers = PRODUCT` method whose product has named no list keeps today's local path, so
+/// no local caller in service (stoa's rooms, typhon's PRODUCT methods name none yet) is cut off when this lands. A
+/// carried call to it is still refused `product-callers-unnamed`, as before. Naming the list is the step that judges the
+/// local caller.
+#[tokio::test]
+async fn a_local_caller_to_a_method_with_no_list_keeps_todays_path() {
+    use crate::plane::{ProductCaller, ProductCallers};
+    use tower_layer::Layer as _;
+    use tower_service::Service as _;
+    let send = |judged: Judged| {
+        let seen = Seen::<ProductCaller>::default();
+        let unnamed = ProductCallers::of(&land_descriptor_with(pb::Effect::Write), &[]).expect("Land is PRODUCT");
+        let mut service = ApiPlaneLayer::new(Reads::default()).products(unnamed).layer(seen.clone());
+        let mut request = http::Request::builder()
+            .uri(LAND)
+            .header("content-type", "application/grpc")
+            .body(tonic::body::empty_body())
+            .expect("a request");
+        request.extensions_mut().insert(judged);
+        async move {
+            let response = service.call(request).await.expect("answered");
+            (tonic::Status::from_header_map(response.headers()).map(|s| s.message().to_owned()), seen.got())
+        }
+    };
+    let (said, seen) = send(judged(Role::Other)).await;
+    assert_eq!((said, seen), (None, Some(None)), "a local caller, unnamed method: today's path, no ProductCaller");
+    let (said, _) = send(carried_signed(anemnez_trust::ANEMNEZ_TEAM, "ai.anemnez.stoad")).await;
+    assert!(said.is_some_and(|m| m.starts_with("product-callers-unnamed")), "a carried one: refused, as before");
+}
+
+/// A peer on this host, judged at accept as `role`, signed by `team` as `identifier`.
+fn local_signed(role: Role, team: &str, identifier: &str) -> Judged {
+    let code = Ok(Code { identifier: identifier.into(), team: team.into() });
+    Accepted::new((), Peer::from_token([501, 501, 20, 501, 20, 41, 100_001, 7], code), role).judged().clone()
+}
+
+/// N m/41747 (3), rule 2: a `callers = PRODUCT` method judges this host's own peer as it judges a carried one, by the
+/// same rule and the same names: its code identity as its accept read it, the house's team, and its identifier on the
+/// method's list; Agora is judged alike (a delivery client calls a cursor face as a product). An unreadable code
+/// identity is unproven, another team untrusted, a team-signed house CLI not on the list not allowed, and a method with
+/// no list fails closed. A proven local caller is named `local`.
+#[test]
+fn a_local_product_caller_is_judged_as_a_carried_one() {
+    use crate::plane::{LOCAL_NODE, ProductCaller, product_admits};
+    use anemnez_extension::peer::{
+        PRODUCT_CALLER_NOT_ALLOWED, PRODUCT_CALLER_UNPROVEN, PRODUCT_CALLER_UNTRUSTED, PRODUCT_CALLERS_UNNAMED,
+    };
+    let house = anemnez_trust::ANEMNEZ_TEAM;
+    let horaid = ["ai.anemnez.horaid".to_owned(), "ai.anemnez.agora".to_owned()];
+    let proven = product_admits(&local_signed(Role::Other, house, "ai.anemnez.horaid"), Some(&horaid)).expect("listed");
+    let identity =
+        anemnez_extension::carried::CodeIdentity { team: house.into(), identifier: "ai.anemnez.horaid".into() };
+    assert_eq!(proven, ProductCaller { node: LOCAL_NODE.into(), identity });
+    assert!(
+        product_admits(&local_signed(Role::Agora, house, "ai.anemnez.agora"), Some(&horaid)).is_ok(),
+        "Agora alike"
+    );
+    let cli = local_signed(Role::Other, house, "ai.anemnez.ergon");
+    assert_eq!(
+        product_admits(&cli, Some(&horaid)),
+        Err(PRODUCT_CALLER_NOT_ALLOWED),
+        "a house CLI, team-signed, refused"
+    );
+    let unread = Accepted::new(
+        (),
+        Peer::from_token([501, 501, 20, 501, 20, 41, 100_001, 7], Err("no code".into())),
+        Role::Other,
+    )
+    .judged()
+    .clone();
+    assert_eq!(product_admits(&unread, Some(&horaid)), Err(PRODUCT_CALLER_UNPROVEN), "its code unreadable at accept");
+    let other = local_signed(Role::Other, "ABCDE12345", "ai.anemnez.horaid");
+    assert_eq!(product_admits(&other, Some(&horaid)), Err(PRODUCT_CALLER_UNTRUSTED), "another team");
+    let listless = product_admits(&local_signed(Role::Other, house, "ai.anemnez.horaid"), None);
+    assert_eq!(listless, Err(PRODUCT_CALLERS_UNNAMED), "no list fails closed");
 }
 
 /// A m/33037: a method of another descriptor the product serves (the SDK's replica Open) is named beside the product's

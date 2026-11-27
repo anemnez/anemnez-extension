@@ -463,25 +463,32 @@ impl ProductCallers {
     }
 }
 
-/// A carried product caller, proven and allowed: the node aegisd said the call came from, and the code identity it
-/// judged of the far process. On the request, for the handler's further narrowing (D m/32662).
+/// The node a [`ProductCaller`] names when it called on this host, with no aegisd between (N m/41747 (3)).
+pub const LOCAL_NODE: &str = "local";
+
+/// A product caller, proven and allowed: the node it called from ([`LOCAL_NODE`] for this host's own peer, else the
+/// node aegisd said a carried call came from), and its code identity, read at accept for a local peer and by the near
+/// aegisd for a carried one. On the request, for the handler's further narrowing (D m/32662).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProductCaller {
     pub node: String,
     pub identity: anemnez_extension::carried::CodeIdentity,
 }
 
-/// Whether the carried call `judged` to a method allowing `allowed` (None: its product named none) is from a proven,
-/// allowed product: aegisd's preface carries the far caller's code identity, its team the house's (anemnez-trust's
-/// anchor, never "the far aegisd said so"), and its identifier on the list. Pure.
+/// Whether the call `judged` to a method allowing `allowed` (None: its product named none) is from a proven, allowed
+/// product: its code identity (a local peer's, read at accept; a carried one's, in aegisd's preface), its team the
+/// house's (anemnez-trust's anchor, never "the far aegisd said so"), and its identifier on the list. A local peer and a
+/// carried one are judged alike, by the same names (N m/41747 (3), rule 2), so no handler judges a caller itself. The
+/// plane asks it of a local peer only where the method's product has named its list: until then a local caller keeps
+/// today's path, so naming the list is the step that closes it. Pure.
 ///
 /// # Errors
-/// [`PRODUCT_CALLERS_UNNAMED`] when the method has no list; [`PRODUCT_CALLER_UNPROVEN`] with no preface or no code
-/// identity in it, one meaning whatever the cause; [`PRODUCT_CALLER_UNTRUSTED`] for another team;
-/// [`PRODUCT_CALLER_NOT_ALLOWED`] for an identifier not on the list.
+/// [`PRODUCT_CALLERS_UNNAMED`] when the method has no list; [`PRODUCT_CALLER_UNPROVEN`] with no code identity (a local
+/// peer's unreadable at accept, or no preface or no code in it), one meaning whatever the cause;
+/// [`PRODUCT_CALLER_UNTRUSTED`] for another team; [`PRODUCT_CALLER_NOT_ALLOWED`] for an identifier not on the list.
 pub fn product_admits(judged: &Judged, allowed: Option<&[String]>) -> Result<ProductCaller, &'static str> {
     let Some(allowed) = allowed else { return Err(PlaneRefusal::ProductCallersUnnamed.name()) };
-    let caller = house_signed(judged)?;
+    let caller = if judged.role == Role::Carried { house_signed(judged)? } else { local_signed(judged)? };
     if !allowed.contains(&caller.identity.identifier) {
         return Err(PlaneRefusal::ProductCallerNotAllowed.name());
     }
@@ -502,6 +509,21 @@ pub fn house_signed(judged: &Judged) -> Result<ProductCaller, &'static str> {
         return Err(PlaneRefusal::ProductCallerUntrusted.name());
     }
     Ok(ProductCaller { node: preface.node.clone(), identity: identity.clone() })
+}
+
+/// This host's peer `judged`, when its code identity was read at accept and its team is the house's: the local half of
+/// [`product_admits`], with the same names as [`house_signed`]. Pure.
+///
+/// # Errors
+/// [`PRODUCT_CALLER_UNPROVEN`] when its code identity couldn't be read; [`PRODUCT_CALLER_UNTRUSTED`] for another team.
+fn local_signed(judged: &Judged) -> Result<ProductCaller, &'static str> {
+    let Ok(code) = &judged.peer.code else { return Err(PlaneRefusal::ProductCallerUnproven.name()) };
+    if code.team != anemnez_trust::ANEMNEZ_TEAM {
+        return Err(PlaneRefusal::ProductCallerUntrusted.name());
+    }
+    let identity =
+        anemnez_extension::carried::CodeIdentity { team: code.team.clone(), identifier: code.identifier.clone() };
+    Ok(ProductCaller { node: LOCAL_NODE.to_owned(), identity })
 }
 
 /// Whether a call to `path` on a connection judged `role` may go on, beyond [`api_admits`]: a carried call only to a
@@ -875,8 +897,17 @@ where
             let judged = request.extensions().get::<Judged>();
             let path = request.uri().path();
             match judged {
-                // A method products call, carried: admitted only from a proven product, its caller on the request.
-                Some(j) if j.role == Role::Carried && self.products.lists(path) => {
+                // A method products call, carried: admitted only from a proven product on its list, its caller on the
+                // request. This host's own peer (a local product, or Agora) is judged the same way, by the same names,
+                // where the method's product has named its list (N m/41747 (3)). A method with no list keeps today's
+                // local path until its product names one (two steps, so no local caller in service is cut off; its gap
+                // is said at build: ProductCallers::unnamed). Fabricd and a house reader keep their own rules below.
+                Some(j)
+                    if self.products.lists(path)
+                        && (j.role == Role::Carried
+                            || (matches!(j.role, Role::Other | Role::Agora)
+                                && self.products.allowed(path).is_some())) =>
+                {
                     match product_admits(j, self.products.allowed(path)) {
                         Ok(caller) => Ok(Some(Admitted::Product(caller))),
                         Err(name) => Err(name),

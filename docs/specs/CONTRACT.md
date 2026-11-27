@@ -859,8 +859,18 @@ against the descriptor that declares it (A m/33037), and either call order gives
 allow-lists, from two places, is refused when the faces are built (`product-callers-twice`), never the later one
 silently (D m/33063). Each `callers = PRODUCT` method no list names is said once at build,
 a WARN by name, so the gap is seen before a caller meets it (D m/33036). A code identity never opens any other
-method: a carried write from an agent still needs its bound token (`carried-write-unbound`). A direct caller carries no
-`ProductCaller`: its code is the local accept's, never a preface it sent.
+method: a carried write from an agent still needs its bound token (`carried-write-unbound`).
+
+<!-- claim: a-local-product-caller-is-judged-as-a-carried-one -->
+**A product caller on this host is judged as a carried one** (N m/41747 (3), rule 2). A `callers = PRODUCT` method
+whose product has named its allow-list judges this host's own peer (a local product, or Agora, a delivery client) by
+the same rule and the same names: its code identity as its accept read it, never a preface it sent, its team the
+house's, and its identifier on the list. It is admitted with `ProductCaller { node: "local" (LOCAL_NODE), identity }`,
+and refused `product-caller-unproven` (its code unreadable at accept), `-untrusted` or `-not-allowed`, so no handler
+judges a caller itself. Two steps, so no local caller in service is cut off: a method whose product has named no list
+keeps today's local path, unjudged, and its gap is said at build (`ProductCallers::unnamed`); naming the list is the
+step that judges its local callers. A carried call to an unnamed method is still `product-callers-unnamed`. Fabricd and
+a house reader keep their own rules (Describe alone; the contract's faces).
 
 <!-- claim: a-carried-connection-says-its-preface-once -->
 **A carried connection says where it came from once, at accept** (K m/25625; M m/25661; D m/25623). aegisd writes
