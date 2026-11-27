@@ -278,6 +278,31 @@ async fn a_call_held_across_stop_is_cut_at_its_bound() {
     assert!(idle.stop().await, "with no call held, stop ends gracefully");
 }
 
+/// D m/42087: a connection's duplicate goes when its served stream ends, so a connection the server closes normally
+/// isn't held open by the fixture, and the fixture holds none it no longer serves. Red when the duplicate is kept for
+/// the fixture's whole life.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_closed_connection_leaves_no_duplicate_behind() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let running = serve(dir.path(), anemnez_clock::Clock::system(), Variant::Good).await.expect("serves");
+    let mut fixture = pb::fixture_client::FixtureClient::new(running.channel().await.expect("connects"));
+    fixture.orient(pb::OrientRequest {}).await.expect("answered");
+    assert_eq!(running.open.count(), 1, "the served connection is held");
+    drop(fixture);
+    let open = running.open.clone();
+    let clock = anemnez_clock::Clock::system();
+    let gone = clock.until("the closed connection's duplicate to go", || {
+        let n = open.count();
+        async move { (n == 0).then_some(()) }
+    });
+    // A real-time guard, so a duplicate kept for ever is red in seconds, never a wait to the house backstop.
+    clock
+        .timeout(Duration::from_secs(5), gone)
+        .await
+        .expect("the closed connection's duplicate goes, never held for the fixture's life");
+    assert!(running.stop().await, "and stop is graceful with nothing held");
+}
+
 /// B m/33548: the bounded twin names what didn't arrive when no Orient call is held within its bound, as an event on the
 /// clock handed in (no sleep), and answers once one is.
 #[tokio::test(flavor = "multi_thread")]
