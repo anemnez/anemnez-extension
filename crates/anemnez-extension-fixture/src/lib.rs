@@ -121,6 +121,9 @@ pub struct Running {
     /// Whether `Orient` holds its answer ([`Running::hold_orient`]), and the fixture's word that it holds one.
     orient: Arc<OrientHold>,
     server: tokio::task::JoinHandle<()>,
+    /// Ends the server gracefully, every open connection with it (an abort alone ends only the accept loop, and each
+    /// connection, served on a task of its own, goes on answering: N m/41684).
+    stop: Option<tokio::sync::oneshot::Sender<()>>,
 }
 
 /// `Orient`'s hold: while `held` is true it answers nothing; `holding` is told each time one waits.
@@ -175,8 +178,24 @@ impl Running {
     }
 }
 
+impl Running {
+    /// Take the fixture down, as a product's own end does: every connection ended, awaited, so a dial or a read on an
+    /// old channel fails afterwards.
+    pub async fn stop(mut self) {
+        if let Some(stop) = self.stop.take() {
+            let _ = stop.send(());
+        }
+        let server = std::mem::replace(&mut self.server, tokio::spawn(async {}));
+        drop(server.await);
+    }
+}
+
 impl Drop for Running {
     fn drop(&mut self) {
+        // Best effort when not stopped: the graceful end first, then the accept loop's abort.
+        if let Some(stop) = self.stop.take() {
+            let _ = stop.send(());
+        }
         self.server.abort();
     }
 }
@@ -215,10 +234,15 @@ pub async fn serve(dir: &Path, clock: Clock, variant: Variant) -> std::io::Resul
             verifier,
         )));
     let incoming = tokio_stream::wrappers::UnixListenerStream::new(listener);
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
     let server = tokio::spawn(async move {
-        let _ = router.serve_with_incoming(incoming).await;
+        let shutdown = async move {
+            drop(stopped.await);
+        };
+        let _ = router.serve_with_incoming_shutdown(incoming, shutdown).await;
     });
     Ok(Running {
+        stop: Some(stop),
         socket,
         instance_id: INSTANCE_ID.into(),
         contract: variant.contract(),

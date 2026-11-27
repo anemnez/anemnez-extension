@@ -297,7 +297,9 @@ impl anemnez_extension_serve::stable::Restartable for Restarts {
     async fn down(&mut self) {
         if let Some(running) = self.running.take() {
             let socket = running.socket.clone();
-            drop(running);
+            // Ended and awaited, so the driver's proof that it's down holds (N m/41684): dropping it alone left its
+            // open connection answering.
+            running.stop().await;
             let _ = std::fs::remove_file(socket);
         }
     }
