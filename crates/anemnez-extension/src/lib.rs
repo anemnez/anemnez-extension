@@ -125,6 +125,15 @@ pub mod refusal {
     /// A call whose method declares a route this build doesn't know (a newer descriptor's variant): refused by name,
     /// `route-unknown: <method>`, never sent local-first or any (D m/22441).
     pub const ROUTE_UNKNOWN: &str = "route-unknown";
+    /// `Cursor/Next` or `Cursor/Commit` on a product that declares no cursor face (CONTRACT.md §2a): it keeps no
+    /// recipient's marks to serve, so a retry won't either.
+    pub const CURSOR_FACE_UNSERVED: &str = "cursor-face-unserved";
+    /// `Cursor/Next` or `Cursor/Commit` from a caller that is neither the recipient named nor a product on the face's
+    /// `callers = PRODUCT` list (CONTRACT.md §2a): another's marks are never read or moved.
+    pub const CURSOR_NOT_YOURS: &str = "cursor-not-yours";
+    /// `Cursor/Commit` through a position past the log's end (CONTRACT.md §2a): no client was handed it, and committing
+    /// it would skip the items between for good. The end follows the name.
+    pub const COMMIT_PAST_END: &str = "commit-past-end";
 }
 
 /// The principal token (CONTRACT.md `#every-call-carries-its-callers-principal`).

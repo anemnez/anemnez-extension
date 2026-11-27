@@ -16,6 +16,7 @@
 //! [`Clock`]: anemnez_clock::Clock
 
 pub mod accepted;
+pub mod cursor_face;
 pub mod describe;
 pub mod digest;
 pub mod edge;
@@ -74,6 +75,8 @@ pub mod pb {
 
 #[cfg(test)]
 mod accepted_tests;
+#[cfg(test)]
+mod cursor_face_tests;
 #[cfg(test)]
 mod describe_tests;
 #[cfg(test)]

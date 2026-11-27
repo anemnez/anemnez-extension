@@ -37,6 +37,8 @@ tower-service.workspace = true
 # The log face (CONTRACT.md `#a-products-events-are-read-through-one-call`): a product's own hydramq-events log,
 # served through `wire`. The core kernel crate still depends on nothing of hydramq.
 hydramq-events.workspace = true
+# The cursor face's marks (CONTRACT.md §2a): hydramq-cursor's rise-only kernel, mapped, never reimplemented.
+hydramq-cursor.workspace = true
 
 [build-dependencies]
 # The contract's protos come from the kernel crate itself (`protos::write_all`): the version this

@@ -6,7 +6,7 @@ members = ["crates/*"]
 edition = "2024"
 repository = "https://github.com/anemnez/anemnez-extension"
 license = "MIT OR Apache-2.0"
-version = "0.10.52"
+version = "0.10.53"
 # Released to Artichoke only for now (the User, 2026-11-05); crates.io comes when third-party
 # extensibility is advertised, and then Herald publishes each version to both, same bytes
 # (fabric CONVERGENCE.md §0 (7)).
@@ -21,7 +21,7 @@ serde_json = "1"
 
 # The serving face (crates/anemnez-extension-serve): the gRPC stack matches Substrate's and
 # anemnez-service's (tonic 0.12 / prost 0.13), so a product pulls in no second copy.
-anemnez-extension = { path = "crates/anemnez-extension", version = "0.10.52", registry-index = "sparse+http://127.0.0.1:7787/crates/index/" }
+anemnez-extension = { path = "crates/anemnez-extension", version = "0.10.53", registry-index = "sparse+http://127.0.0.1:7787/crates/index/" }
 # The house's trust anchor, its one home (D m/32487), moved here from the SDK (D m/33174): no dependencies, so the
 # kernel takes it freely. Its first release here is 0.10.1, above every 0.3.x the SDK released of it (E m/33177).
 anemnez-trust = { path = "crates/anemnez-trust", version = "0.10.45", registry-index = "sparse+http://127.0.0.1:7787/crates/index/" }
@@ -37,6 +37,8 @@ anemnez-sim = { git = "ssh://git@github.com/anemnez/anemnez-sim.git", rev = "6f8
 # hydramq's leaves in the same dual form, at hydramq's step-2 release f852078 (A m/36770), so their anemnez-clock,
 # layout and sim are the same git copies as ours.
 hydramq-events = { git = "ssh://git@github.com/anemnez/hydramq.git", rev = "6c49f08ea8ea", version = "0.5", registry-index = "sparse+http://127.0.0.1:7787/crates/index/" }
+# A recipient's rise-only marks (CONTRACT.md §2a, the cursor face): hydramq-cursor's kernel, never a second one.
+hydramq-cursor = { git = "ssh://git@github.com/anemnez/hydramq.git", rev = "6c49f08ea8ea", version = "0.5", registry-index = "sparse+http://127.0.0.1:7787/crates/index/" }
 # The message codec, dev-only: a row builds a request of a kind hydramq-events can't name (ergon:M/events-carried-read).
 hydramq-message = { git = "ssh://git@github.com/anemnez/hydramq.git", rev = "6c49f08ea8ea", version = "0.5", registry-index = "sparse+http://127.0.0.1:7787/crates/index/" }
 tonic = "0.12"
