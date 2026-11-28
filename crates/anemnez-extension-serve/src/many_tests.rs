@@ -7,10 +7,12 @@ use anemnez_clock::ManualClock;
 use hydramq_events::wire::{latest_reply, read_reply, read_request};
 use hydramq_events::{Events, Face, Position, Read};
 
-use super::ManyLogs;
+use super::{Family, ManyLogs};
 use crate::log_events::{Authorize, Log, LogEvents};
 use crate::pb;
 use crate::pb::events_server::Events as _;
+use std::collections::BTreeMap;
+use std::sync::Mutex;
 
 /// A held log named `log`, with `n` events published.
 fn log(dir: &std::path::Path, log: &str, n: usize) -> Arc<Events> {
@@ -163,6 +165,111 @@ async fn a_watch_on_a_face_log_streams_from_its_face() {
     let frame = bound.await.expect("delivered within its bound").expect("a frame").expect("not refused");
     match read_reply(&frame.frame).expect("an events frame") {
         Read::Events { events, .. } => assert_eq!(events.len(), 1, "the face's own event"),
+        other => panic!("not an events frame: {other:?}"),
+    }
+}
+
+/// The books a product holds now, one log each under `book/`, opened while it serves.
+#[derive(Default)]
+struct Books(Mutex<BTreeMap<String, Arc<dyn Face>>>);
+
+impl Books {
+    fn open(&self, name: &str, face: Arc<dyn Face>) {
+        self.0.lock().unwrap().insert(name.to_owned(), face);
+    }
+}
+
+impl Family for Books {
+    fn prefix(&self) -> &str {
+        "book/"
+    }
+
+    fn face(&self, log: &str) -> Option<Arc<dyn Face>> {
+        self.0.lock().unwrap().get(log).cloned()
+    }
+}
+
+/// An exact name beats its family; a family's log is read as its own; a book opened after the face was built is read;
+/// one the family doesn't hold is ForeignLog, naming the family as `book/*`.
+#[test]
+fn a_family_is_resolved_per_request_after_an_exact_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let books = Arc::new(Books::default());
+    books.open("book/A", log(dir.path(), "book/A", 2));
+    let exact: BTreeMap<String, Arc<dyn Face>> =
+        [("book/O".to_owned(), log(dir.path(), "book/O", 1) as Arc<dyn Face>)].into();
+    books.open("book/O", log(dir.path(), "book/O-family", 3));
+    let many = ManyLogs::with_families(exact, vec![Arc::clone(&books) as Arc<dyn Family>]);
+    let serve = |log: &str| hydramq_events::wire::serve(&many, &read_request(&at(log), 10, Duration::ZERO).unwrap());
+    assert_eq!(count(&serve("book/O")), Ok(1), "the exact name, never the family's");
+    assert_eq!(count(&serve("book/A")), Ok(2), "the family's own log");
+    let missing = count(&serve("book/B")).expect_err("not held yet");
+    assert!(missing.contains("book/B") && missing.contains("book/O, book/*"), "named, with the family: {missing}");
+    books.open("book/B", log(dir.path(), "book/B", 4));
+    assert_eq!(count(&serve("book/B")), Ok(4), "opened after the face was built, and read");
+}
+
+/// Through the face: a Call and an Events cursor name a family's log as any other; an empty prefix and two families of
+/// one prefix are refused at build.
+#[tokio::test]
+async fn over_families_serves_a_family_and_refuses_an_unnamed_or_doubled_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let manual = ManualClock::new();
+    let verifier = || crate::principal_tests::verifier(&manual, true);
+    let items: Arc<dyn Log> = Arc::new(log(dir.path(), "items", 1));
+    let books = Arc::new(Books::default());
+    books.open("book/A", log(dir.path(), "book/A", 2));
+    let build = |families: Vec<Arc<dyn Family>>| {
+        let logs = vec![("items".to_owned(), Arc::clone(&items))];
+        LogEvents::over_families(logs, families, verifier(), Authorize::allow_all(), manual.clock())
+    };
+    struct Unnamed;
+    impl Family for Unnamed {
+        fn prefix(&self) -> &str {
+            ""
+        }
+        fn face(&self, _: &str) -> Option<Arc<dyn Face>> {
+            None
+        }
+    }
+    assert!(build(vec![Arc::new(Unnamed)]).err().expect("refused").starts_with("family-unnamed"));
+    let twice = vec![Arc::clone(&books) as Arc<dyn Family>, Arc::clone(&books) as Arc<dyn Family>];
+    assert!(build(twice).err().expect("refused").starts_with("family-twice"));
+    let face = build(vec![Arc::clone(&books) as Arc<dyn Family>]).expect("a log and a family");
+    let call = |log: &str| {
+        tonic::Request::new(pb::CallRequest { request: read_request(&at(log), 10, Duration::ZERO).unwrap() })
+    };
+    let read = face.call(call("book/A")).await.expect("served").into_inner();
+    assert_eq!(count(&read.reply), Ok(2), "the family's log, read through the face");
+    let cursor = |after: &str| tonic::Request::new(pb::EventsRequest { after: after.into(), ..Default::default() });
+    assert!(face.events(cursor("book/A:")).await.is_ok(), "a cursor names a family's log");
+    let Err(foreign) = face.events(cursor("book/Z:")).await else { panic!("no such book, and it opened") };
+    assert!(foreign.message().contains("book/*"), "{}", foreign.message());
+}
+
+/// A Watch on a family's log streams from its face: an event published after the watch opens is delivered in its bound.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_watch_on_a_familys_log_streams_from_its_face() {
+    use futures_util::StreamExt as _;
+    use hydramq_events::wire::watch_request;
+    let dir = tempfile::tempdir().unwrap();
+    let manual = ManualClock::new();
+    let verifier = crate::principal_tests::verifier(&manual, true);
+    let book = log(dir.path(), "book/A", 0);
+    let books = Arc::new(Books::default());
+    books.open("book/A", Arc::clone(&book) as Arc<dyn Face>);
+    let logs = vec![("items".to_owned(), Arc::new(log(dir.path(), "items", 1)) as Arc<dyn Log>)];
+    let families = vec![books as Arc<dyn Family>];
+    let face =
+        LogEvents::over_families(logs, families, verifier, Authorize::allow_all(), manual.clock()).expect("built");
+    let request = watch_request(&at("book/A"), 10, Duration::from_secs(10)).expect("a request");
+    let mut stream = face.watch(tonic::Request::new(pb::WatchRequest { request })).await.expect("opens").into_inner();
+    let body = hydramq_events::body("ergon.commit", &[]).expect("encodes");
+    book.publish_next("book/A", "commit", &body, 1).expect("published");
+    let bound = anemnez_clock::Clock::system().timeout(Duration::from_secs(10), stream.next());
+    let frame = bound.await.expect("delivered within its bound").expect("a frame").expect("not refused");
+    match read_reply(&frame.frame).expect("an events frame") {
+        Read::Events { events, .. } => assert_eq!(events.len(), 1, "the family's own event"),
         other => panic!("not an events frame: {other:?}"),
     }
 }

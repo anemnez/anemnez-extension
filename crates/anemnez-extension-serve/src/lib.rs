@@ -50,6 +50,7 @@ pub use log_events::{
     Admit, Asked, Authorize, Busy, EventsFace, FaceLog, HOUSE_READS_TARGET, House, Log, LogEvents, Method, Revoke,
     Unopened, house_of,
 };
+pub use many::Family;
 pub use plane::{
     ApiPlaneLayer, Binder, BoundDecided, CarriedBound, Claimed, ClaimedMethods, ClaimedWrites, LOCAL_NODE,
     ProductCaller, ProductCallers, Reads, answer_refusal, api_admits, bound_admits, carried_admits, carried_claim,

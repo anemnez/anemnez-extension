@@ -421,7 +421,31 @@ impl LogEvents {
         if let Some((name, _)) = logs.iter().find(|(name, _)| !seen.insert(name.clone())) {
             return Err(format!("log-names-twice: {name:?} names two logs on one face"));
         }
-        Ok(LogEvents::over_logs(crate::many::Logs::Many(logs), verifier, authorize, clock))
+        LogEvents::over_families(logs, Vec::new(), verifier, authorize, clock)
+    }
+
+    /// [`LogEvents::over_many`], beside `families` whose logs the product opens while it serves (a book per owner,
+    /// `book/<owner>`; ergon:M/history-log-family): a request naming a log no fixed one is called is read from the
+    /// family of the longest prefix it starts with, asked then, so a log opened after the face started is served.
+    /// A fixed name always wins over a family's.
+    ///
+    /// # Errors
+    /// As [`LogEvents::over_many`], and `family-unnamed` for an empty prefix, `family-twice` for two of one prefix.
+    pub fn over_families(
+        logs: Vec<(String, Arc<dyn Log>)>,
+        families: Vec<Arc<dyn crate::many::Family>>,
+        verifier: Verifier,
+        authorize: Authorize,
+        clock: Clock,
+    ) -> Result<LogEvents, String> {
+        if families.iter().any(|f| f.prefix().is_empty()) {
+            return Err("family-unnamed: a family of logs serves one prefix, never an empty one".into());
+        }
+        let mut prefixes = std::collections::BTreeSet::new();
+        if let Some(f) = families.iter().find(|f| !prefixes.insert(f.prefix().to_owned())) {
+            return Err(format!("family-twice: {:?} names two families on one face", f.prefix()));
+        }
+        Ok(LogEvents::over_logs(crate::many::Logs::Many { named: logs, families }, verifier, authorize, clock))
     }
 
     fn over_logs(log: crate::many::Logs, verifier: Verifier, authorize: Authorize, clock: Clock) -> LogEvents {
@@ -659,7 +683,7 @@ impl LogEvents {
         let (log, offset) = match after.rsplit_once(':') {
             None if after.is_empty() => match &self.log {
                 crate::many::Logs::One(log) => (log.name().to_owned(), None),
-                crate::many::Logs::Many(_) => {
+                crate::many::Logs::Many { .. } => {
                     return Err(tonic::Status::invalid_argument(format!(
                         "{READ_NEEDS_ITS_LOG}: this face serves the logs {}: pass after = \"<log>:\" to read one from \
                          its start",
@@ -674,11 +698,7 @@ impl LogEvents {
             },
             None => return Err(not_a_cursor(after)),
         };
-        let served = match &self.log {
-            crate::many::Logs::One(one) => one.name() == log,
-            crate::many::Logs::Many(logs) => logs.iter().any(|(name, _)| *name == log),
-        };
-        if !served {
+        if !self.log.serves(&log) {
             return Err(tonic::Status::failed_precondition(format!(
                 "{}: {after:?} names the log {log:?}, and this face serves {}",
                 refusal::CURSOR_NOT_MINE,
@@ -1016,7 +1036,7 @@ impl pb::events_server::Events for LogEvents {
         // crate never parses, so its watch says it only in a replica-behind end.
         let opened_at = match &self.log {
             crate::many::Logs::One(one) => self.log.end_of(one.name()),
-            crate::many::Logs::Many(_) => None,
+            crate::many::Logs::Many { .. } => None,
         };
         let said = self.said();
         let stream = futures_util::stream::unfold(host, |mut host| async move {
