@@ -245,9 +245,12 @@ fn log_tool() -> Tool {
         kind: ToolKind::Log,
         path: LOG_PATH.into(),
         description: "The product's event log from a position, by cursor: `log` names the log (empty for the \
-                      product's own), `from` is the offset to read from (0 for the oldest kept), and `max` caps the \
-                      page. Pass the answer's `next` as `from` to read on. A log compacted below `from` says its floor; \
-                      a product whose events aren't on its log refuses events-call-unserved."
+                      product's own; a face serving many logs has no own log, and refuses an empty one \
+                      read-needs-its-log), `from` is the offset to read from (0 for the oldest kept), and `max` caps the \
+                      page. The face's own reply bound wins over `max`: a page it caps says so, with the `next` to read \
+                      on from, so asking for more than fits returns fewer, never an error. Pass the answer's `next` as \
+                      `from` to read on. A log compacted below `from` says its floor; a product whose events aren't on \
+                      its log refuses events-call-unserved."
             .into(),
         input_schema: object([
             ("log".to_owned(), json!({ "type": "string" })),

@@ -784,7 +784,9 @@ outside clients only: an agent of ours never polls (Stoa delivers). A refusal th
 **A face's log is read by cursor through its one Call** (ergon:O/ask/agora-events-call; D's ruling on
 ergon:O/o-history-face: history is read by cursor, never by an rpc beside Events). Beside `events`, a product that keeps
 events has the `log_read` tool (`ToolKind::Log`, at `/anemnez.extension.v1.Events/Call`): `{log?, from?, max?}` in, where
-`log` names one of the face's logs (empty for its own), `from` is the offset to read from and `max` caps the page. The
+`log` names one of the face's logs (empty for its own; a face serving many logs, such as Ergon's books, has no own log
+and refuses an empty one `read-needs-its-log`, M m/48098), `from` is the offset to read from and `max` caps the page, though the face's own reply bound wins over it (D
+m/48081): a page it caps says so with its `next`, so an agent asking for more than fits learns why it got fewer. The
 host encodes hydramq-events' wire read for it (`#a-products-events-are-read-through-one-call`), so the arguments name no
 proto, and answers the events with their positions and the `next` to pass as `from`. A log compacted below `from` says
 its floor, and a product whose events aren't on its log refuses `events-call-unserved`, said by name. A method that
