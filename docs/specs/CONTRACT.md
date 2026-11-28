@@ -189,6 +189,12 @@ own changes and Busy. Latest is answered from the log its request names (hydramq
 `latest_all_in(log, prefix)`, K m/33557, L m/34051), that log's subjects only. One naming no log is refused
 `latest-needs-its-log`, never routed by a prefix's spelling (D m/32100), and one naming a log the face doesn't serve is
 `ForeignLog`. Two logs of one name, or an empty one, are refused at build.
+A product whose logs open while it serves (a book per owner) names a **family** beside them
+(`LogEvents::over_families`, a `Family`: a prefix such as `book/` and a pure resolver asked per request, opening nothing;
+ergon:M/history-log-family). A request's log routes by an exact name first, then by the family of the longest prefix
+it starts with, so a log opened after the face started is served. One neither holds is `ForeignLog`, whose `ours`
+names each family as `<prefix>*`. Call, Watch, Latest and an `Events/Events` cursor all route the same one way. An
+empty prefix (`family-unnamed`) and two families of one prefix (`family-twice`) are refused at build.
 
 <!-- claim: a-replicas-face-says-where-it-read -->
 **A log face read from a replica says where it read, and a replica behind the cursor says so by name**

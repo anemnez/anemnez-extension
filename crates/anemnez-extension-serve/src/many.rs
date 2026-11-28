@@ -21,11 +21,36 @@ use crate::reread::ReRead;
 /// The refusal of a many-log face's `Latest` that names no log: a client names it (`latest_all_in(log, prefix)`).
 pub const LATEST_NEEDS_ITS_LOG: &str = "latest-needs-its-log";
 
-/// What a [`crate::LogEvents`] reads: one log, or several by name.
+/// A family of logs served by one prefix (ergon:M/history-log-family; O's ask, M's shape): logs a product opens while it
+/// serves, such as a book per owner (`book/<owner>`), each read as a face of its own. It is asked per request, by the
+/// log the request names, and is pure: it hands back the face it holds for that name, or none, and opens nothing.
+pub trait Family: Send + Sync + 'static {
+    /// The prefix every log of the family's name starts with (`book/`), never empty.
+    fn prefix(&self) -> &str;
+
+    /// The face of the log named `log` (which starts with [`Family::prefix`]), when the product holds one now.
+    fn face(&self, log: &str) -> Option<Arc<dyn Face>>;
+
+    /// Wakes every read waiting on one of the family's logs, as [`Face::wake`] does for one.
+    fn wake(&self) {}
+}
+
+/// What a [`crate::LogEvents`] reads: one log, or several by name and by family.
 #[derive(Clone)]
 pub(crate) enum Logs {
     One(Arc<dyn Log>),
-    Many(Vec<(String, Arc<dyn Log>)>),
+    Many { named: Vec<(String, Arc<dyn Log>)>, families: Vec<Arc<dyn Family>> },
+}
+
+/// The family that serves `log`, by the longest prefix it starts with: the one resolution every read takes, after an
+/// exact name ([`ManyLogs`]' route, [`Logs::serves`]).
+fn family_of<'a>(families: &'a [Arc<dyn Family>], log: &str) -> Option<&'a Arc<dyn Family>> {
+    families.iter().filter(|f| log.starts_with(f.prefix())).max_by_key(|f| f.prefix().len())
+}
+
+/// The names a many-log face says it serves: each log's, then each family's as `<prefix>*`.
+fn names_of<'a>(named: impl Iterator<Item = &'a str>, families: &[Arc<dyn Family>]) -> String {
+    named.map(str::to_owned).chain(families.iter().map(|f| format!("{}*", f.prefix()))).collect::<Vec<_>>().join(", ")
 }
 
 /// The face one call or one watch reads, and the re-reads it opened, for their `Busy`.
@@ -68,9 +93,9 @@ impl Logs {
         };
         let face = match self {
             Logs::One(log) => face_of(log),
-            Logs::Many(logs) => {
-                let faces = logs.iter().map(|(name, log)| (name.clone(), face_of(log))).collect();
-                Arc::new(ManyLogs::new(faces))
+            Logs::Many { named, families } => {
+                let faces = named.iter().map(|(name, log)| (name.clone(), face_of(log))).collect();
+                Arc::new(ManyLogs::with_families(faces, families.clone()))
             }
         };
         Faced { face, rereads }
@@ -81,9 +106,23 @@ impl Logs {
     pub fn end_of(&self, log: &str) -> Option<u64> {
         let named = match self {
             Logs::One(one) => Some(one),
-            Logs::Many(logs) => logs.iter().find(|(name, _)| name == log).map(|(_, one)| one),
+            Logs::Many { named, families } => match named.iter().find(|(name, _)| name == log) {
+                Some((_, one)) => Some(one),
+                None => return family_of(families, log)?.face(log)?.end(),
+            },
         };
         named?.face()?.end()
+    }
+
+    /// Whether this face serves the log named `log` now: its one log, a log of that name, or a family's that holds it.
+    pub fn serves(&self, log: &str) -> bool {
+        match self {
+            Logs::One(one) => one.name() == log,
+            Logs::Many { named, families } => {
+                named.iter().any(|(name, _)| name == log)
+                    || family_of(families, log).is_some_and(|f| f.face(log).is_some())
+            }
+        }
     }
 
     /// The logs read from a replica: those whose face says a committed end.
@@ -91,7 +130,9 @@ impl Logs {
         let is_replica = |log: &Arc<dyn Log>| log.face().is_some_and(|face| face.end().is_some());
         match self {
             Logs::One(one) => is_replica(one).then(|| one.name().to_owned()).into_iter().collect(),
-            Logs::Many(logs) => logs.iter().filter(|(_, log)| is_replica(log)).map(|(name, _)| name.clone()).collect(),
+            Logs::Many { named, .. } => {
+                named.iter().filter(|(_, log)| is_replica(log)).map(|(name, _)| name.clone()).collect()
+            }
         }
     }
 
@@ -99,7 +140,7 @@ impl Logs {
     pub fn names(&self) -> String {
         match self {
             Logs::One(log) => log.name().to_owned(),
-            Logs::Many(logs) => logs.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(", "),
+            Logs::Many { named, families } => names_of(named.iter().map(|(n, _)| n.as_str()), families),
         }
     }
 }
@@ -107,6 +148,7 @@ impl Logs {
 /// Several named logs as one [`Face`], each read routed by the log its position names.
 pub struct ManyLogs {
     faces: BTreeMap<String, Arc<dyn Face>>,
+    families: Vec<Arc<dyn Family>>,
     names: String,
 }
 
@@ -114,14 +156,24 @@ impl ManyLogs {
     /// The faces, by their log's name.
     #[must_use]
     pub fn new(faces: BTreeMap<String, Arc<dyn Face>>) -> ManyLogs {
-        let names = faces.keys().cloned().collect::<Vec<_>>().join(", ");
-        ManyLogs { faces, names }
+        ManyLogs::with_families(faces, Vec::new())
     }
 
-    fn route(&self, log: &str) -> Result<&Arc<dyn Face>, EventsError> {
-        self.faces.get(log).ok_or_else(|| {
-            EventsError::Refused(Refused::ForeignLog { asked: log.to_owned(), ours: self.names.clone() })
-        })
+    /// The faces, by their log's name, and the families whose logs are resolved per request.
+    #[must_use]
+    pub fn with_families(faces: BTreeMap<String, Arc<dyn Face>>, families: Vec<Arc<dyn Family>>) -> ManyLogs {
+        let names = names_of(faces.keys().map(String::as_str), &families);
+        ManyLogs { faces, families, names }
+    }
+
+    /// The face of the log named `log`: an exact name first, then the family of the longest prefix it starts with;
+    /// one neither holds is `ForeignLog`, naming every log and family served.
+    fn route(&self, log: &str) -> Result<Arc<dyn Face>, EventsError> {
+        let foreign = || EventsError::Refused(Refused::ForeignLog { asked: log.to_owned(), ours: self.names.clone() });
+        match self.faces.get(log) {
+            Some(face) => Ok(Arc::clone(face)),
+            None => family_of(&self.families, log).and_then(|f| f.face(log)).ok_or_else(foreign),
+        }
     }
 }
 
@@ -166,6 +218,9 @@ impl Face for ManyLogs {
     fn wake(&self) {
         for face in self.faces.values() {
             face.wake();
+        }
+        for family in &self.families {
+            family.wake();
         }
     }
 }
