@@ -240,6 +240,47 @@ impl Authorize {
     pub fn allow_all() -> Authorize {
         Authorize::new(|_| async { Ok(()) })
     }
+
+    /// Every caller the API plane admitted on this host reads the log, and a far caller (through aegisd) only as a
+    /// house product, its preface proving the house's team ([`house_of`]): the rule for a log whose readers are this
+    /// host's products and the house's, on a plane opened to other hosts (horaid's first, ergon:L/horaid-events-house-only,
+    /// D m/42661; Herald's next, O m/47881). Decided by [`local_or_far_house`].
+    #[must_use]
+    pub fn local_or_far_house() -> Authorize {
+        Authorize::new(|asked| {
+            let decided = local_or_far_house(asked.judged.as_ref().map(|j| j.role), asked.house.is_some());
+            async move { decided.map_err(str::to_owned) }
+        })
+    }
+}
+
+/// Why [`Authorize::local_or_far_house`] refuses a far caller with no house preface.
+pub const FAR_NOT_HOUSE: &str = "this log is read from another host by house products only, and this caller came \
+     through aegisd without a preface proving the house's team: run the reader as a team-signed house build, or ask \
+     the product's owner for a grant";
+
+/// Why [`Authorize::local_or_far_house`] refuses a call that no accept judged.
+pub const UNJUDGED_READER: &str =
+    "this log is read only on a connection its API plane judged at accept, and this call had none";
+
+/// Why [`Authorize::local_or_far_house`] refuses a role it doesn't name: one the SDK added after this build (D m/42971).
+pub const ROLE_UNDECIDED: &str = "this log admits only the caller roles it names, and this caller's role is one it \
+     hasn't decided: ask the SDK's steward to decide it in local_or_far_house";
+
+/// [`Authorize::local_or_far_house`]'s decision, from the connection's judged role and whether a house principal was
+/// found in it. Every local role is named, so a role added later ([`Role`] is non-exhaustive) is refused,
+/// [`ROLE_UNDECIDED`], until it is decided here. Pure, so each arm is a row.
+///
+/// # Errors
+/// [`UNJUDGED_READER`], [`FAR_NOT_HOUSE`] or [`ROLE_UNDECIDED`], by name.
+pub fn local_or_far_house(role: Option<Role>, house: bool) -> Result<(), &'static str> {
+    match (role, house) {
+        (None, _) => Err(UNJUDGED_READER),
+        (Some(_), true) => Ok(()),
+        (Some(Role::Carried), false) => Err(FAR_NOT_HOUSE),
+        (Some(Role::Fabricd | Role::Agora | Role::Other | Role::HouseReader), false) => Ok(()),
+        (Some(_), false) => Err(ROLE_UNDECIDED),
+    }
 }
 
 impl std::fmt::Debug for Authorize {
