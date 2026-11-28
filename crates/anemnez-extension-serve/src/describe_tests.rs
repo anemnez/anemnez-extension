@@ -105,3 +105,38 @@ fn a_per_caller_describe_of_a_descriptor_not_admitted_is_refused() {
     let refused = Describe::new(vec![0xff, 0xff, 0xff]).per_caller(engine(&asked, |_| Vec::new()));
     assert!(refused.is_err_and(|refusals| !refusals.is_empty()), "refused with its reasons");
 }
+
+/// The fewest fields a registry entry needs: `kind`, its body schema (open, no fields), a version, a description and a
+/// stability.
+fn bare_entry(kind: &str) -> Vec<u8> {
+    use hydramq_message::{Message, Schema, Shape, Symbol, Value};
+    use std::borrow::Cow::{Borrowed, Owned};
+    let text = |t: &str| Value::String(Owned(t.to_owned()));
+    let body = Schema { name: format!("h.{kind}"), body: Shape::Struct { fields: vec![], open: true } };
+    let fields = [
+        ("kind", text(kind)),
+        ("schema", body.to_message().body.expect("a schema's body")),
+        ("version", Value::from(1i64)),
+        ("description", text("A train landed.")),
+        ("stability", Value::Symbol(Symbol::Text(Borrowed("experimental")))),
+    ];
+    let body = Value::Struct(fields.into_iter().map(|(k, v)| (Symbol::from(k), v)).collect());
+    let entry = Message { kind: Some(Borrowed(hydramq_message::ENTRY_TYPE)), body: Some(body), ..Message::default() };
+    hydramq_message::encode_message_canonical(&entry).expect("encodes")
+}
+
+/// CONTRACT.md a-product-says-what-it-tells, served: Describe answers the registry the product built, its causes filled
+/// from the methods, under a digest that covers it; a registry the check refuses never serves.
+#[tokio::test]
+async fn describe_serves_the_registry_under_its_digest() {
+    let describe = Describe::new(land_descriptor()).with_registry(vec![bare_entry("train.landed")]).expect("checked");
+    let reply = described(describe, Role::Other).await;
+    let served = reply.registry.expect("field 4").entries;
+    let registry = anemnez_extension::described::registry_of(&land_descriptor(), vec![bare_entry("train.landed")])
+        .expect("the kernel's");
+    assert_eq!(served, registry.entries, "the kernel's filled entries, as the wire carries them");
+    assert_eq!(reply.digest, anemnez_extension::describe::digest_of(&land_descriptor(), Some(&registry)));
+    assert_ne!(reply.digest, anemnez_extension::describe::digest(&land_descriptor()), "the digest moved with it");
+    let refused = Describe::new(land_descriptor()).with_registry(vec![bare_entry("train.landed"), b"x".to_vec()]);
+    assert!(matches!(refused, Err(r) if r.iter().any(|r| r.name() == "entry-unread")), "never served");
+}

@@ -372,7 +372,13 @@ skips it, and its digest comparison still holds, since the digest it compares is
 entry that writes its own `causes`), `example-invalid`
 (an example body its kind's own schema refuses, with the caption), and, from the methods, `cause-undeclared` and
 `repeat-field` (§1's rows). `check_descriptor` alone keeps its answer for every reader that doesn't read field 4.
-Substrate's mount, Agora's MCP face and the conformance proof move to `check_described` in their own heads.
+
+**Built entries and served ones are judged apart** (D m/48108). `check_described` judges the entries a product builds,
+which carry no `causes`, as the serving face does once at build. A reader of the reply judges what was served with
+`described::check_served(fds, &registry)`: each served entry must carry `causes` equal to what the methods say, and
+with them taken out it is checked as a built entry is. A served entry whose causes are absent or disagree with the
+descriptor is refused `causes-mismatch`, naming the kind, what it served and what the methods say. Substrate's mount,
+Agora's MCP face and the conformance proof move to `check_served` in their own heads.
 
 **`causes` is declared once, on the methods** (G, rule 2). Option 17 is the one declaration: a product never writes an
 entry's `causes`, which `check_described` refuses (`causes-written`, naming the kind). The serving face fills each
@@ -396,7 +402,7 @@ fresh one), `DescribeReply` folds field 4 in and becomes `#[non_exhaustive]`.
 
 **Heads, readers first.** (1) This section. (2) The kernel: `Events`, `DescribeEvents`, `Registry`, `events_of`,
 `digest_of`, `reply_with`, the `causes` and `repeat` options read, and `check_described`, each refusal red first.
-(3) `-serve`: `Describe::with_events(entries)` checked at build, the digest moved, the stable row extended. (4) The MCP
+(3) `-serve`: `Describe::with_registry(entries)` checked at build, the digest moved, the stable row extended. (4) The MCP
 face's `catalog` (§7). Then each producer declares its own kinds (ROUTING §7a's waves, H's adoption asks).
 
 

@@ -22,7 +22,7 @@ dependencies = [
 
 [[package]]
 name = "anemnez-extension"
-version = "0.10.68"
+version = "0.10.69"
 dependencies = [
  "anemnez-trust",
  "base64",
@@ -38,7 +38,7 @@ dependencies = [
 
 [[package]]
 name = "anemnez-extension-client"
-version = "0.10.68"
+version = "0.10.69"
 dependencies = [
  "anemnez-clock",
  "anemnez-extension",
@@ -60,7 +60,7 @@ dependencies = [
 
 [[package]]
 name = "anemnez-extension-fixture"
-version = "0.10.68"
+version = "0.10.69"
 dependencies = [
  "anemnez-clock",
  "anemnez-extension",
@@ -78,7 +78,7 @@ dependencies = [
 
 [[package]]
 name = "anemnez-extension-serve"
-version = "0.10.68"
+version = "0.10.69"
 dependencies = [
  "anemnez-clock",
  "anemnez-extension",
@@ -141,7 +141,7 @@ dependencies = [
 
 [[package]]
 name = "anemnez-trust"
-version = "0.10.68"
+version = "0.10.69"
 
 [[package]]
 name = "anyhow"

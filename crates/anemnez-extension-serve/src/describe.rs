@@ -72,7 +72,23 @@ impl Describe {
         Ok(Describe { shown: Some(shown), offered, ..self })
     }
 
-    /// The descriptor's SHA-256, lowercase hex.
+    /// The same service, serving the product's event registry beside its descriptor (CONTRACT.md §1a): `entries` are
+    /// the `hydramq.registry.entry` messages its build wrote, one per kind, in its order. They are checked with the
+    /// descriptor once, here (`described::registry_of`), each entry's `causes` filled from the methods, and the digest
+    /// moved to cover them. The same bytes then answer every caller for the life of the process.
+    ///
+    /// # Errors
+    /// Every refusal `check_described` finds: a product with a bad registry doesn't serve, as one with a bad
+    /// descriptor doesn't.
+    pub fn with_registry(mut self, entries: Vec<Vec<u8>>) -> Result<Describe, Vec<DescriptorRefusal>> {
+        let fds = &self.reply.file_descriptor_set;
+        let registry = anemnez_extension::described::registry_of(fds, entries)?;
+        self.reply.digest = anemnez_extension::describe::digest_of(fds, Some(&registry));
+        self.reply.registry = Some(pb::EventRegistry { entries: registry.entries });
+        Ok(self)
+    }
+
+    /// The descriptor's SHA-256, lowercase hex: with a registry, the reply's digest over both.
     pub fn digest(&self) -> &str {
         &self.reply.digest
     }

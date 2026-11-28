@@ -234,6 +234,9 @@ pub enum DescriptorRefusal {
     CausesWritten(String),
     /// An entry's example body its kind's own schema refuses (the kind, the caption, and what).
     ExampleInvalid(String, String, String),
+    /// A served entry whose `causes` aren't what the methods say (the kind, what it served, or none, and what the
+    /// methods say): a reader of the reply judges served entries by `check_served` (D m/48108).
+    CausesMismatch(String, Option<Vec<String>>, Vec<String>),
 }
 
 impl DescriptorRefusal {
@@ -286,6 +289,7 @@ impl DescriptorRefusal {
             Self::DeprecatedWithoutReplacement(_) => "deprecated-without-replacement",
             Self::CausesWritten(_) => "causes-written",
             Self::ExampleInvalid(..) => "example-invalid",
+            Self::CausesMismatch(..) => "causes-mismatch",
         }
     }
 }
@@ -358,6 +362,12 @@ impl std::fmt::Display for DescriptorRefusal {
                 "{kind}: causes-written: an entry's causes are the methods' (option 17), filled by the serving face; \
                  drop them from the entry"
             ),
+            Self::CausesMismatch(kind, served, derived) => match served {
+                None => write!(f, "{kind}: causes-mismatch: served no causes, and the methods say {derived:?}"),
+                Some(served) => {
+                    write!(f, "{kind}: causes-mismatch: served {served:?}, and the methods say {derived:?}")
+                }
+            },
             Self::ExampleInvalid(kind, caption, what) => {
                 write!(f, "{kind}: example-invalid: {caption:?} doesn't fit the kind's schema: {what}")
             }
