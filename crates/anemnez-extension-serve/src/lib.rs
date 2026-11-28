@@ -47,8 +47,8 @@ pub use journal::{
     EventsService, Journal, Refusal, STREAM_METHODS, StreamEnd, Subscription, origin_for, until_drained,
 };
 pub use log_events::{
-    Admit, Asked, Authorize, Busy, EventsFace, FaceLog, HOUSE_READS_TARGET, House, Log, LogEvents, Method, Revoke,
-    Unopened, house_of,
+    Admit, Asked, Authorize, Busy, EventsFace, FAR_NOT_HOUSE, FaceLog, HOUSE_READS_TARGET, House, Log, LogEvents,
+    Method, ROLE_UNDECIDED, Revoke, UNJUDGED_READER, Unopened, house_of, local_or_far_house,
 };
 pub use plane::{
     ApiPlaneLayer, Binder, BoundDecided, CarriedBound, Claimed, ClaimedMethods, ClaimedWrites, LOCAL_NODE,

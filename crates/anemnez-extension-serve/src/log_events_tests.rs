@@ -970,3 +970,19 @@ async fn a_house_reader_reads_the_log_with_no_token_as_its_code_identity() {
     assert_eq!((refused.code(), refused.message()), (tonic::Code::InvalidArgument, "malformed"), "the verifier's own");
     assert_eq!(seen.lock().unwrap().len(), 1, "never decided");
 }
+
+/// ergon:L/herald-horai-api-remote (O m/47881; horaid's rule, D m/42661, made one for every product, rule 2): a far
+/// caller reads only as a house product, its preface proven; one that isn't is refused by name, and so is a call no
+/// accept judged. Every role the plane admits locally reads, and a role it doesn't name is refused, never admitted.
+#[test]
+fn a_far_caller_reads_only_as_a_house_product_and_every_local_role_reads() {
+    use crate::log_events::{FAR_NOT_HOUSE, UNJUDGED_READER, local_or_far_house};
+    use anemnez_extension::peer::Role;
+    assert_eq!(local_or_far_house(Some(Role::Carried), true), Ok(()), "a far house product, its preface proven");
+    assert_eq!(local_or_far_house(Some(Role::Carried), false), Err(FAR_NOT_HOUSE), "a far caller not proven house");
+    for local in [Role::Fabricd, Role::Agora, Role::Other, Role::HouseReader] {
+        assert_eq!(local_or_far_house(Some(local), false), Ok(()), "{local:?}: admitted on this host");
+    }
+    assert_eq!(local_or_far_house(None, false), Err(UNJUDGED_READER), "no judged connection");
+    assert_eq!(local_or_far_house(None, true), Err(UNJUDGED_READER), "a house principal never stands unjudged");
+}
