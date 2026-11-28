@@ -777,6 +777,52 @@ mod registry {
         assert!(!described.declared && described.kinds.is_empty());
     }
 
+    /// CONTRACT.md a-registry-is-byte-stable and §1a's causes: the registry served is the entries in their order, each
+    /// entry's causes filled from the methods (an empty list for a kind none causes), the same bytes every time.
+    #[test]
+    fn the_served_registry_takes_its_causes_from_the_methods() {
+        let entries = vec![entry("train.landed", |_| {}), entry("train.bounced", |_| {})];
+        let served = crate::described::registry_of(&causing(&["train.landed"]), entries.clone()).expect("served");
+        let table = hydramq_message::SymbolTable::system();
+        let causes = |bytes: &[u8]| -> Option<Vec<String>> {
+            let message = hydramq_message::decode_message(bytes, &hydramq_message::Limits::default(), &table)
+                .expect("reads")
+                .body
+                .expect("a body");
+            let Value::Struct(fields) = message else { panic!("a struct") };
+            let (_, said) = fields.into_iter().find(|(k, _)| matches!(k, Symbol::Text(t) if t == "causes"))?;
+            let Value::List(paths) = said else { return None };
+            Some(paths.iter().map(|p| if let Value::String(p) = p { p.to_string() } else { String::new() }).collect())
+        };
+        assert_eq!(causes(&served.entries[0]), Some(vec!["/herald.v2.Herald/Land".to_owned()]));
+        assert_eq!(causes(&served.entries[1]), Some(Vec::new()), "said empty, never absent");
+        let again = crate::described::registry_of(&causing(&["train.landed"]), entries).expect("served");
+        assert_eq!(again, served, "the same build serves the same bytes");
+        let written = vec![entry("train.held", |f| f.push(("causes", Value::List(Vec::new()))))];
+        let refused = crate::described::registry_of(&causing(&[]), written).expect_err("refused");
+        assert_eq!(names(refused), ["causes-written"]);
+    }
+
+    /// D m/48108: what the serving face serves passes a reader's check and fails the built check (its causes are
+    /// filled), and a served entry whose causes are absent or disagree with the methods is causes-mismatch.
+    #[test]
+    fn served_entries_are_judged_apart_from_built_ones() {
+        let fds = causing(&["train.landed"]);
+        let built = vec![entry("train.landed", |_| {}), entry("train.bounced", |_| {})];
+        let served = crate::described::registry_of(&fds, built.clone()).expect("served").entries;
+        let read =
+            crate::described::check_served(&fds, &Registry::Declared(served.clone())).expect("a reader admits it");
+        assert_eq!(read.kinds, ["train.landed", "train.bounced"]);
+        let as_built = check_described(&fds, &Registry::Declared(served)).expect_err("served bytes aren't built ones");
+        assert_eq!(names(as_built), ["causes-written", "causes-written"]);
+        let wrong = vec![entry("train.landed", |f| f.push(("causes", Value::List(vec![s("/x.v1.X/Other")]))))];
+        let refused = crate::described::check_served(&fds, &Registry::Declared(wrong)).expect_err("refused");
+        assert_eq!(names(refused.clone()), ["causes-mismatch"]);
+        assert!(refused[0].to_string().contains("/herald.v2.Herald/Land"), "{}", refused[0]);
+        let absent = crate::described::check_served(&fds, &Registry::Declared(built)).expect_err("refused");
+        assert_eq!(names(absent), ["causes-mismatch", "causes-mismatch"], "a served entry carries its causes");
+    }
+
     /// CONTRACT.md's repeat option: same_by names a top-level scalar of the request, by number; a missing field is
     /// repeat-field; a variant this build doesn't know is repeat-unknown, never none; absent is none.
     #[test]

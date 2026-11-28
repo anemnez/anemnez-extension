@@ -52,6 +52,9 @@ pub struct StaticHalf {
     /// `tools` says the same as text. A refusal is stable text, so the check refuses it by name on the first read,
     /// never holds it as a stable face (N m/40210).
     pub refused: Option<String>,
+    /// Its event registry as served, one entry's bytes per line in hex, or `events undeclared` (CONTRACT.md
+    /// `a-registry-is-byte-stable`): declared only, so it holds byte for byte like the rest.
+    pub registry: String,
 }
 
 /// The product's static half as a consumer reads it: `Describe` over `channel`, bounded by [`READ_WITHIN`] on `clock`,
@@ -86,7 +89,16 @@ pub async fn static_half(channel: Channel, clock: &Clock) -> Result<StaticHalf, 
             Ok(tools) => (tools.iter().map(|tool| tool.to_json().to_string()).collect::<Vec<_>>().join("\n"), None),
         },
     };
-    Ok(StaticHalf { instructions, tools, refused })
+    let registry = match &reply.registry {
+        None => anemnez_extension::describe::Registry::Undeclared.to_string(),
+        Some(registry) => registry
+            .entries
+            .iter()
+            .map(|entry| entry.iter().map(|b| format!("{b:02x}")).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n"),
+    };
+    Ok(StaticHalf { instructions, tools, refused, registry })
 }
 
 /// The refusal of a check whose product's `down` didn't take it down: the instance still answers.
@@ -195,6 +207,9 @@ fn same(when: &str, first: &StaticHalf, now: &StaticHalf) -> Result<(), String> 
     }
     if first.tools != now.tools {
         return Err(differs("tool list", &first.tools, &now.tools));
+    }
+    if first.registry != now.registry {
+        return Err(differs("event registry", &first.registry, &now.registry));
     }
     Ok(())
 }

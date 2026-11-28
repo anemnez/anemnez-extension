@@ -5,7 +5,7 @@ use std::time::Duration;
 use super::{Restartable, STEP_WITHIN, StaticHalf, has_a_face, same, the_static_half_is_byte_stable};
 
 fn half(instructions: &str, tools: &str) -> StaticHalf {
-    StaticHalf { instructions: instructions.into(), tools: tools.into(), refused: None }
+    StaticHalf { instructions: instructions.into(), tools: tools.into(), refused: None, registry: String::new() }
 }
 
 /// D m/33887: the tool list is cached too, so a tool description built from live state is red by the same check, and
@@ -19,6 +19,17 @@ fn a_changed_tool_list_is_red_and_named() {
     assert!(red.starts_with("the static half's tool list changed after its state moved"), "{red}");
     let said = same("after it went down and came back", &first, &half("other", &first.tools)).expect_err("red");
     assert!(said.starts_with("the static half's instructions changed"), "{said}");
+}
+
+/// CONTRACT.md a-registry-is-byte-stable: the registry is part of the static half, so one that moves with live state
+/// is red by the same check, named as the event registry.
+#[test]
+fn a_changed_registry_is_red_and_named() {
+    let first = StaticHalf { registry: "0a01".into(), ..half("guidance", "tools") };
+    assert_eq!(same("after its state moved", &first, &first.clone()), Ok(()));
+    let moved = StaticHalf { registry: "0a02".into(), ..first.clone() };
+    let red = same("after its state moved", &first, &moved).expect_err("red");
+    assert!(red.starts_with("the static half's event registry changed after its state moved"), "{red}");
 }
 
 /// A product whose `up` never answers.
@@ -54,7 +65,8 @@ async fn a_step_that_never_answers_is_named_at_its_bound() {
 #[test]
 fn a_face_refused_on_the_first_read_fails_the_row_by_name() {
     let why = "its descriptor is refused: [UnboundedCollection(\"Check.result\")]".to_owned();
-    let refused = StaticHalf { instructions: "guidance".into(), tools: why.clone(), refused: Some(why) };
+    let refused =
+        StaticHalf { instructions: "guidance".into(), tools: why.clone(), refused: Some(why), registry: String::new() };
     assert_eq!(same("after its state moved", &refused, &refused.clone()), Ok(()), "byte for byte it would pass");
     let red = has_a_face(&refused).expect_err("red");
     assert!(red.starts_with("the static half has no face to hold stable"), "{red}");
