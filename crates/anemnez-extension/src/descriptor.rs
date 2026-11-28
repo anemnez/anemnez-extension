@@ -213,6 +213,27 @@ pub enum DescriptorRefusal {
     OrientNotForAgents(String),
     /// An `orient` method that streams: it is one unary read.
     OrientStreams(String),
+    /// A `same_by` repeat that names no top-level, non-repeated scalar field of the request (the path, and why).
+    RepeatField(String, String),
+    /// A `repeat` with no variant this build knows: a newer descriptor's, refused, never read as none.
+    RepeatUnknown(String),
+    /// A method's `causes` names a kind the registry doesn't declare (the path, and the kind); with the registry
+    /// undeclared, every cause is (CONTRACT.md §1a).
+    CauseUndeclared(String, String),
+    /// A registry entry whose bytes aren't one hydramq message (its place in the registry, and why).
+    EntryUnread(usize, String),
+    /// A registry entry whose message isn't a `hydramq.registry.entry` (its place, and the type it said).
+    EntryNotAnEntry(usize, String),
+    /// A registry entry `registry::entry_schema` refuses (its kind, or its place, and what), or whose schema doesn't read.
+    EntryInvalid(String, String),
+    /// Two registry entries declare one kind (the kind).
+    KindTwice(String),
+    /// A deprecated entry that names no replacement: hydramq's `registry::check_entry` (its words).
+    DeprecatedWithoutReplacement(String),
+    /// An entry that writes its own `causes`: they are the methods' (option 17), filled by the serving face (G).
+    CausesWritten(String),
+    /// An entry's example body its kind's own schema refuses (the kind, the caption, and what).
+    ExampleInvalid(String, String, String),
 }
 
 impl DescriptorRefusal {
@@ -255,6 +276,16 @@ impl DescriptorRefusal {
             Self::OrientUnbounded(_) => "orient-unbounded",
             Self::OrientNotForAgents(_) => "orient-not-for-agents",
             Self::OrientStreams(_) => "orient-streams",
+            Self::RepeatField(..) => "repeat-field",
+            Self::RepeatUnknown(_) => "repeat-unknown",
+            Self::CauseUndeclared(..) => "cause-undeclared",
+            Self::EntryUnread(..) => "entry-unread",
+            Self::EntryNotAnEntry(..) => "entry-not-an-entry",
+            Self::EntryInvalid(..) => "entry-invalid",
+            Self::KindTwice(_) => "kind-twice",
+            Self::DeprecatedWithoutReplacement(_) => "deprecated-without-replacement",
+            Self::CausesWritten(_) => "causes-written",
+            Self::ExampleInvalid(..) => "example-invalid",
         }
     }
 }
@@ -311,6 +342,25 @@ impl std::fmt::Display for DescriptorRefusal {
                 crate::options::GUIDANCE_SUMMARY_MAX_CHARS
             ),
             Self::OrientUnbounded(p) => write!(f, "{p}: orient-unbounded: an orient answers one reply: bound 1"),
+            Self::RepeatField(p, why) => write!(f, "{p}: repeat-field: {why}"),
+            Self::CauseUndeclared(p, kind) => {
+                write!(f, "{p}: cause-undeclared: {kind:?} is not a kind the product's registry declares")
+            }
+            Self::EntryUnread(at, why) => write!(f, "registry entry {at}: entry-unread: {why}"),
+            Self::EntryNotAnEntry(at, kind) => {
+                write!(f, "registry entry {at}: entry-not-an-entry: its type is {kind:?}, not hydramq.registry.entry")
+            }
+            Self::EntryInvalid(kind, what) => write!(f, "{kind}: entry-invalid: {what}"),
+            Self::KindTwice(kind) => write!(f, "{kind}: kind-twice: two entries declare it"),
+            Self::DeprecatedWithoutReplacement(words) => f.write_str(words),
+            Self::CausesWritten(kind) => write!(
+                f,
+                "{kind}: causes-written: an entry's causes are the methods' (option 17), filled by the serving face; \
+                 drop them from the entry"
+            ),
+            Self::ExampleInvalid(kind, caption, what) => {
+                write!(f, "{kind}: example-invalid: {caption:?} doesn't fit the kind's schema: {what}")
+            }
             Self::CallersMissing(p)
             | Self::PermissionMissing(p)
             | Self::PersonActAllowed(p)
@@ -330,7 +380,8 @@ impl std::fmt::Display for DescriptorRefusal {
             | Self::OrientNotARead(p)
             | Self::OrientTakesInput(p)
             | Self::OrientNotForAgents(p)
-            | Self::OrientStreams(p) => write!(f, "{p}: {}", self.name()),
+            | Self::OrientStreams(p)
+            | Self::RepeatUnknown(p) => write!(f, "{p}: {}", self.name()),
         }
     }
 }
@@ -539,6 +590,7 @@ fn check_method(
             refused.push(DescriptorRefusal::OrientNotForAgents(p()));
         }
     }
+    let repeat = repeat_of(path, &raw, input, &mut refused);
     let mut route_key = None;
     let unnamed = match &route {
         Route::Leader(group) | Route::Keyed { group, .. } if group.is_empty() => Some("group"),
@@ -580,10 +632,43 @@ fn check_method(
                 ask_within_secs: raw.ask_within_secs,
                 orient: raw.orient,
                 bound_secs: raw.bound_secs,
+                causes: raw.causes,
+                repeat,
             },
             route_key,
         )),
         _ => Err(refused),
+    }
+}
+
+/// A method's `repeat` as the kernel's type, each refusal it earns pushed onto `refused`: `same_by` names a top-level
+/// scalar of the request (`repeat-field`), and a variant this build doesn't know is `repeat-unknown`, never none.
+fn repeat_of(
+    path: &str,
+    raw: &wire::MethodOptions,
+    input: Option<&DescriptorProto>,
+    refused: &mut Vec<DescriptorRefusal>,
+) -> crate::options::Repeat {
+    let p = || path.to_owned();
+    match raw.repeat.as_ref().map(|r| &r.how) {
+        None | Some(Some(wire::How::None(_))) => crate::options::Repeat::None,
+        Some(Some(wire::How::SameBy(by))) => match input.map(|i| crate::options::check_same_by(i, &by.field)) {
+            Some(Ok(number)) => crate::options::Repeat::SameBy { field: by.field.clone(), number },
+            Some(Err(why)) => {
+                refused.push(DescriptorRefusal::RepeatField(p(), why));
+                crate::options::Repeat::None
+            }
+            None => {
+                refused.push(DescriptorRefusal::InputUnknown(p()));
+                crate::options::Repeat::None
+            }
+        },
+        // Present with no variant this build knows (prost drops an unknown oneof tag): a newer descriptor's, refused,
+        // never read as none (rule 8).
+        Some(None) => {
+            refused.push(DescriptorRefusal::RepeatUnknown(p()));
+            crate::options::Repeat::None
+        }
     }
 }
 
@@ -849,6 +934,30 @@ mod wire {
         pub orient: bool,
         #[prost(uint32, optional, tag = "16")]
         pub bound_secs: Option<u32>,
+        #[prost(string, repeated, tag = "17")]
+        pub causes: Vec<String>,
+        #[prost(message, optional, tag = "18")]
+        pub repeat: Option<Repeat>,
+    }
+
+    #[derive(Clone, PartialEq, prost::Message)]
+    pub struct Repeat {
+        #[prost(oneof = "How", tags = "1, 2")]
+        pub how: Option<How>,
+    }
+
+    #[derive(Clone, PartialEq, prost::Oneof)]
+    pub enum How {
+        #[prost(message, tag = "1")]
+        None(Empty),
+        #[prost(message, tag = "2")]
+        SameBy(SameBy),
+    }
+
+    #[derive(Clone, PartialEq, prost::Message)]
+    pub struct SameBy {
+        #[prost(string, tag = "1")]
+        pub field: String,
     }
 
     #[derive(Clone, PartialEq, prost::Message)]

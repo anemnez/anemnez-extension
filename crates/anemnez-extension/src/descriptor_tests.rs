@@ -231,6 +231,8 @@ fn good() -> wire::MethodOptions {
         ask_within_secs: None,
         orient: false,
         bound_secs: None,
+        causes: Vec::new(),
+        repeat: None,
     }
 }
 
@@ -647,4 +649,155 @@ fn streaming_paths_are_every_streaming_method_and_no_unary_one() {
         ["/typhon.v1.ModelRunner/Subscribe", "/typhon.v1.ModelRunner/Upload", "/typhon.v1.ModelRunner/Chat"]
     );
     assert!(matches!(super::streaming_paths(b"\xff\xff"), Err(DescriptorRefusal::Malformed(_))));
+}
+
+/// The registry rows (CONTRACT.md §1a): an entry built the way a producer's build writes one.
+mod registry {
+    use std::borrow::Cow;
+
+    use hydramq_message::{Field, Message, Schema, Shape, Symbol, Value};
+
+    use super::*;
+    use crate::describe::Registry;
+    use crate::described::check_described;
+
+    fn s(t: &str) -> Value<'static> {
+        Value::String(Cow::Owned(t.to_owned()))
+    }
+
+    fn sym(t: &str) -> Value<'static> {
+        Value::Symbol(Symbol::Text(Cow::Owned(t.to_owned())))
+    }
+
+    fn st(fields: Vec<(&'static str, Value<'static>)>) -> Value<'static> {
+        Value::Struct(fields.into_iter().map(|(k, v)| (Symbol::from(k), v)).collect())
+    }
+
+    /// A `train.landed` entry, its body a closed struct with one required string, `train`; `edit` changes its fields.
+    fn entry(kind: &str, edit: impl FnOnce(&mut Vec<(&'static str, Value<'static>)>)) -> Vec<u8> {
+        let shape = Shape::String { min_len: None, max_len: None };
+        let body = Shape::Struct { fields: vec![Field { name: "train".into(), shape, required: true }], open: false };
+        let schema = Schema { name: format!("herald.{kind}"), body }.to_message().body.expect("a schema's body");
+        let example = st(vec![("caption", s("one train landed")), ("body", st(vec![("train", s("train/h-x"))]))]);
+        let mut fields = vec![
+            ("kind", s(kind)),
+            ("schema", schema),
+            ("version", Value::from(1i64)),
+            ("description", s("A train landed on its repo's main; published once per landing.")),
+            ("examples", Value::List(vec![example])),
+            ("stability", sym("stable")),
+            ("asks", s("none")),
+        ];
+        edit(&mut fields);
+        let message = Message {
+            kind: Some(Cow::Borrowed(hydramq_message::ENTRY_TYPE)),
+            body: Some(st(fields)),
+            ..Message::default()
+        };
+        hydramq_message::encode_message_canonical(&message).expect("encodes")
+    }
+
+    fn causing(causes: &[&str]) -> Vec<u8> {
+        let options = wire::MethodOptions { causes: causes.iter().map(|c| (*c).to_owned()).collect(), ..good() };
+        set(vec![method("Land", ".herald.v2.LandRequest", ".herald.v2.LandReply", Some(&options))])
+    }
+
+    fn names(refused: Vec<DescriptorRefusal>) -> Vec<&'static str> {
+        let mut names: Vec<_> = refused.iter().map(DescriptorRefusal::name).collect();
+        names.sort_unstable();
+        names
+    }
+
+    /// CONTRACT.md a-registry-is-checked-as-the-descriptor-is: a declared kind and a method that causes it are admitted
+    /// together, the kinds in the registry's order.
+    #[test]
+    fn a_registry_and_its_causes_are_admitted_together() {
+        let registry = Registry::Declared(vec![entry("train.landed", |_| {}), entry("train.bounced", |_| {})]);
+        let described = check_described(&causing(&["train.landed"]), &registry).expect("admitted");
+        assert_eq!(described.kinds, ["train.landed", "train.bounced"]);
+        assert!(described.declared);
+        assert_eq!(described.methods[0].options.causes, ["train.landed"]);
+    }
+
+    /// CONTRACT.md a-registry-is-checked-as-the-descriptor-is: every refusal at once, each by name, the descriptor's
+    /// own included.
+    #[test]
+    fn every_registry_refusal_is_said_at_once() {
+        let other = hydramq_message::encode_message_canonical(&Message {
+            kind: Some(Cow::Borrowed("herald.train.landed")),
+            body: Some(st(vec![])),
+            ..Message::default()
+        })
+        .expect("encodes");
+        let registry = Registry::Declared(vec![
+            b"not a message".to_vec(),
+            other,
+            entry("train.queued", |f| f.retain(|(k, _)| *k != "description")),
+            entry("train.landed", |_| {}),
+            entry("train.landed", |_| {}),
+            entry("train.parked", |f| {
+                f.retain(|(k, _)| *k != "stability");
+                f.push(("stability", sym("deprecated")));
+            }),
+            entry("train.held", |f| f.push(("causes", Value::List(vec![s("/herald.v2.Herald/Land")])))),
+            entry("train.bounced", |f| {
+                f.retain(|(k, _)| *k != "examples");
+                let wrong = st(vec![("caption", s("no train")), ("body", st(vec![("repo", s("ergon"))]))]);
+                f.push(("examples", Value::List(vec![wrong])));
+            }),
+        ]);
+        let refused = check_described(&causing(&["train.landed", "train.lost"]), &registry).expect_err("refused");
+        assert_eq!(
+            names(refused.clone()),
+            [
+                "cause-undeclared",
+                "causes-written",
+                "deprecated-without-replacement",
+                "entry-invalid",
+                "entry-not-an-entry",
+                "entry-unread",
+                "example-invalid",
+                "kind-twice",
+            ],
+            "{refused:#?}"
+        );
+        let said: Vec<String> = refused.iter().map(ToString::to_string).collect();
+        assert!(said.iter().any(|l| l.contains("\"train.lost\"") && l.contains("/herald.v2.Herald/Land")), "{said:?}");
+        assert!(said.iter().any(|l| l.starts_with("train.queued: entry-invalid") && l.contains("description")));
+        assert!(said.iter().any(|l| l.starts_with("train.bounced: example-invalid") && l.contains("no train")));
+    }
+
+    /// CONTRACT.md an-undeclared-registry-is-said: with no registry, a method that names a cause is refused, and one
+    /// that names none is admitted as undeclared, never as "no events".
+    #[test]
+    fn with_no_registry_every_cause_is_undeclared() {
+        let refused = check_described(&causing(&["train.landed"]), &Registry::Undeclared).expect_err("refused");
+        assert_eq!(names(refused), ["cause-undeclared"]);
+        let described = check_described(&causing(&[]), &Registry::Undeclared).expect("admitted");
+        assert!(!described.declared && described.kinds.is_empty());
+    }
+
+    /// CONTRACT.md's repeat option: same_by names a top-level scalar of the request, by number; a missing field is
+    /// repeat-field; a variant this build doesn't know is repeat-unknown, never none; absent is none.
+    #[test]
+    fn a_repeat_names_a_scalar_of_the_request_or_is_refused() {
+        let repeat = |how: Option<wire::How>| {
+            let options = wire::MethodOptions { repeat: Some(wire::Repeat { how }), ..good() };
+            check_descriptor(&set(vec![method(
+                "Land",
+                ".herald.v2.LandRequest",
+                ".herald.v2.LandReply",
+                Some(&options),
+            )]))
+        };
+        let by = |field: &str| Some(wire::How::SameBy(wire::SameBy { field: field.into() }));
+        let admitted = repeat(by("repo")).expect("admitted");
+        assert_eq!(admitted[0].options.repeat, crate::options::Repeat::SameBy { field: "repo".into(), number: 3 });
+        assert_eq!(names(repeat(by("missing")).expect_err("refused")), ["repeat-field"]);
+        assert_eq!(names(repeat(None).expect_err("refused")), ["repeat-unknown"]);
+        let none = repeat(Some(wire::How::None(wire::Empty {}))).expect("admitted");
+        assert_eq!(none[0].options.repeat, crate::options::Repeat::None);
+        let absent = check_descriptor(&causing(&[])).expect("admitted");
+        assert_eq!(absent[0].options.repeat, crate::options::Repeat::None, "absent is none");
+    }
 }

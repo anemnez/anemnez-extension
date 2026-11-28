@@ -10,6 +10,7 @@
 
 pub mod carried;
 pub mod describe;
+pub mod described;
 pub mod descriptor;
 pub mod exposure;
 pub mod health;

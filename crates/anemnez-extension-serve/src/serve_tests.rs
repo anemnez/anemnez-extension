@@ -414,6 +414,8 @@ pub(crate) fn land_options(effect: pb::Effect, callers: pb::Callers) -> pb::Meth
         // Every option, written out: a new one fails to compile here until its parity is said.
         orient: false,
         bound_secs: Some(120),
+        causes: vec!["train.landed".into()],
+        repeat: Some(pb::Repeat { how: Some(pb::repeat::How::SameBy(pb::repeat::SameBy { field: "train".into() })) }),
     }
 }
 
@@ -493,6 +495,8 @@ fn the_descriptor_check_reads_the_protos_own_encoding() {
     want.examples = vec![Example::new(r#"{"train": "train/h-x"}"#, "Land one")];
     want.ask_within_secs = Some(90);
     want.bound_secs = Some(120);
+    want.causes = vec!["train.landed".into()];
+    want.repeat = Repeat::SameBy { field: "train".into(), number: 1 };
     assert_eq!(methods[0].options, want);
 }
 
