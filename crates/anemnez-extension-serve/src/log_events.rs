@@ -268,7 +268,8 @@ pub const ROLE_UNDECIDED: &str = "this log admits only the caller roles it names
      hasn't decided: ask the SDK's steward to decide it in local_or_far_house";
 
 /// [`Authorize::local_or_far_house`]'s decision, from the connection's judged role and whether a house principal was
-/// found in it. Every local role is named, so a role added later ([`Role`] is non-exhaustive) is refused,
+/// found in it. A proven house principal reads whatever its role, since its preface is the stronger proof (M m/48140).
+/// Without one, every local role is named, so a role added later ([`Role`] is non-exhaustive) is refused,
 /// [`ROLE_UNDECIDED`], until it is decided here. Pure, so each arm is a row.
 ///
 /// # Errors
