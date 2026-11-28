@@ -187,6 +187,16 @@ impl Family for Books {
     fn face(&self, log: &str) -> Option<Arc<dyn Face>> {
         self.0.lock().unwrap().get(log).cloned()
     }
+
+    fn wake(&self) {
+        for face in self.0.lock().unwrap().values() {
+            face.wake();
+        }
+    }
+
+    fn held(&self) -> Vec<String> {
+        self.0.lock().unwrap().keys().cloned().collect()
+    }
 }
 
 /// An exact name beats its family; a family's log is read as its own; a book opened after the face was built is read;
@@ -230,6 +240,10 @@ async fn over_families_serves_a_family_and_refuses_an_unnamed_or_doubled_one() {
         }
         fn face(&self, _: &str) -> Option<Arc<dyn Face>> {
             None
+        }
+        fn wake(&self) {}
+        fn held(&self) -> Vec<String> {
+            Vec::new()
         }
     }
     assert!(build(vec![Arc::new(Unnamed)]).err().expect("refused").starts_with("family-unnamed"));

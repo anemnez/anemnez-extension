@@ -31,8 +31,15 @@ pub trait Family: Send + Sync + 'static {
     /// The face of the log named `log` (which starts with [`Family::prefix`]), when the product holds one now.
     fn face(&self, log: &str) -> Option<Arc<dyn Face>>;
 
-    /// Wakes every read waiting on one of the family's logs, as [`Face::wake`] does for one.
-    fn wake(&self) {}
+    /// Wakes every read waiting on one of the family's logs, as [`Face::wake`] does for one. Required, so a family says
+    /// how its logs wake (M's should m/48057): a forgotten wake would leave a Watch on one of them unwoken until its own
+    /// bound, a stall with no error.
+    fn wake(&self);
+
+    /// The names of the logs the family holds now, read at one moment (D's should m/48063): what [`Logs::replicas`]
+    /// asks, so a family's log read from a replica (a book on a follower) is said as one. A family's face says its own
+    /// end per request, as any face does.
+    fn held(&self) -> Vec<String>;
 }
 
 /// What a [`crate::LogEvents`] reads: one log, or several by name and by family.
@@ -130,8 +137,12 @@ impl Logs {
         let is_replica = |log: &Arc<dyn Log>| log.face().is_some_and(|face| face.end().is_some());
         match self {
             Logs::One(one) => is_replica(one).then(|| one.name().to_owned()).into_iter().collect(),
-            Logs::Many { named, .. } => {
-                named.iter().filter(|(_, log)| is_replica(log)).map(|(name, _)| name.clone()).collect()
+            Logs::Many { named, families } => {
+                let fixed = named.iter().filter(|(_, log)| is_replica(log)).map(|(name, _)| name.clone());
+                let held = families.iter().flat_map(|f| {
+                    f.held().into_iter().filter(|name| f.face(name).is_some_and(|face| face.end().is_some()))
+                });
+                fixed.chain(held).collect()
             }
         }
     }
