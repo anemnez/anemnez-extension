@@ -321,6 +321,54 @@ pub struct MethodOptions {
     /// most [`BOUND_CAP_SECS`] (both refused by name at `check_descriptor`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bound_secs: Option<u32>,
+    /// The event kinds a call may publish (option 17; CONTRACT.md §1a): checked against the product's registry by
+    /// `descriptor::check_described`, never by `check_descriptor`, which doesn't read the registry.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub causes: Vec<String>,
+    /// Whether a second call is the same call (option 18): `None` unless the descriptor says `same_by`.
+    #[serde(default, skip_serializing_if = "Repeat::is_none")]
+    pub repeat: Repeat,
+}
+
+/// Whether a repeated call is the same call (CONTRACT.md §1's `repeat`; nomos ROUTING.md §3.3). A route targets only
+/// [`Repeat::SameBy`], so an unanswered call resolves by calling again (rule 5).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum Repeat {
+    /// Each call is its own (the default: absent reads as this, never as same_by).
+    #[default]
+    None,
+    /// A second call with the same value in `field` (a top-level, non-repeated scalar of the request, its `number`)
+    /// is the same call, answered with the first's outcome.
+    SameBy { field: String, number: u32 },
+}
+
+impl Repeat {
+    /// Whether it is [`Repeat::None`].
+    #[must_use]
+    pub fn is_none(&self) -> bool {
+        matches!(self, Repeat::None)
+    }
+}
+
+/// The field a `same_by` repeat names, checked as a keyed route's key is: a top-level, non-repeated scalar field of
+/// `input` (a message or a group holds no one value), answered by its number.
+///
+/// # Errors
+/// Why it doesn't name one, in words.
+pub fn check_same_by(input: &prost_types::DescriptorProto, field: &str) -> Result<u32, String> {
+    use prost_types::field_descriptor_proto::{Label, Type};
+    let name = input.name();
+    let found = input.field.iter().find(|f| f.name() == field);
+    match found {
+        None => Err(format!("same_by '{field}' is not a field of {name}")),
+        Some(f) if f.label() == Label::Repeated => Err(format!("same_by '{field}' of {name} is repeated")),
+        Some(f) if matches!(f.r#type(), Type::Message | Type::Group) => {
+            Err(format!("same_by '{field}' of {name} is a message, not one value"))
+        }
+        Some(f) => Ok(u32::try_from(f.number()).unwrap_or(0)),
+    }
 }
 
 /// The longest a job may run, its bound and margin together (agora LONG-JOBS.md §2, D m/35312): Agora's
@@ -369,6 +417,8 @@ impl MethodOptions {
             ask_within_secs: None,
             orient: false,
             bound_secs: None,
+            causes: Vec::new(),
+            repeat: Repeat::None,
         }
     }
 

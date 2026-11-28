@@ -19,6 +19,8 @@ prost.workspace = true
 # Parses a descriptor example's args_json (descriptor::check_descriptor).
 serde_json.workspace = true
 sha2.workspace = true
+# The event registry's entries (descriptor::check_described, CONTRACT.md §1a): hydramq's leaf, the entry schema's one home.
+hydramq-message.workspace = true
 base64.workspace = true
 
 [dev-dependencies]

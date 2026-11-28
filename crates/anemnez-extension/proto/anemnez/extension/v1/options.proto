@@ -50,6 +50,27 @@ message MethodOptions {
   // BOUND_CAP_SECS (JOB_AT_MOST_SECS 900 less the margin, 895) the descriptor is refused bound-over-cap. Absent:
   // the method states no bound, and a host refuses a long one by its own name (Agora's long-bound-undeclared).
   optional uint32 bound_secs = 16;
+  // The event kinds a call to this method may publish, each a kind in the product's own registry (CONTRACT.md §1a):
+  // the one declaration of a method's causes. A kind the registry doesn't declare refuses the descriptor
+  // (cause-undeclared, at check_described).
+  repeated string causes = 17;
+  // Whether a second call is the same call. Absent reads as none, never as same_by; a route targets only same_by.
+  Repeat repeat = 18;
+}
+
+// Whether a repeated call is the same call (CONTRACT.md §1, the repeat option; nomos ROUTING.md §3.3).
+message Repeat {
+  oneof how {
+    None none = 1;
+    SameBy same_by = 2;
+  }
+  // Each call is its own: never a route's target.
+  message None {}
+  // A second call carrying the same value in `field` (a top-level, non-repeated scalar field of the request) is the
+  // same call, answered with the first one's outcome.
+  message SameBy {
+    string field = 1;
+  }
 }
 
 // One worked call.
