@@ -823,6 +823,65 @@ mod registry {
         assert_eq!(names(absent), ["causes-mismatch", "causes-mismatch"], "a served entry carries its causes");
     }
 
+    /// CONTRACT.md the-events-tool-lists-the-registry: the catalog lists the served registry's kinds with their causes,
+    /// says an absent asks "asks unknown" and an absent volume "volume undeclared", answers one kind whole with its
+    /// schema and examples, names the declared kinds for an unknown one, and says an undeclared or empty registry so.
+    #[test]
+    fn the_catalog_lists_the_served_registry() {
+        use crate::catalog::{EventsCall, KIND_UNKNOWN, catalog, events_call};
+        let fds = causing(&["train.landed"]);
+        let built = vec![entry("train.landed", |_| {}), entry("train.bounced", |f| f.retain(|(k, _)| *k != "asks"))];
+        let served = Registry::Declared(crate::described::registry_of(&fds, built).expect("served").entries);
+        let listed = catalog(&served, None).expect("listed");
+        assert_eq!(listed["said"], "2 event kinds declared");
+        let landed = &listed["kinds"][0];
+        assert_eq!((landed["kind"].as_str(), landed["asks"].as_str()), (Some("train.landed"), Some("none")));
+        assert_eq!(landed["causes"], serde_json::json!(["/herald.v2.Herald/Land"]));
+        assert_eq!(landed["volume"], "volume undeclared");
+        assert!(landed.get("schema").is_none(), "the list carries no schema");
+        assert_eq!(listed["kinds"][1]["asks"], "asks unknown", "absent asks is unknown, never none");
+        let whole = catalog(&served, Some("train.bounced")).expect("one kind");
+        assert!(whole["kinds"][0]["schema"].is_object() && whole["kinds"][0]["examples"].is_array(), "{whole}");
+        let unknown = catalog(&served, Some("train.lost")).expect_err("refused");
+        assert!(unknown.starts_with(KIND_UNKNOWN) && unknown.contains("train.landed, train.bounced"), "{unknown}");
+        assert_eq!(catalog(&Registry::Undeclared, None).expect("said")["said"], "events undeclared");
+        assert_eq!(catalog(&Registry::Declared(vec![]), None).expect("said")["said"], "no event kinds declared");
+        let call = |args: serde_json::Value| events_call(&args);
+        assert_eq!(
+            call(serde_json::json!({ "catalog": true, "kind": "train.landed" })),
+            Ok(EventsCall::Catalog { kind: Some("train.landed".into()) })
+        );
+        assert_eq!(
+            call(serde_json::json!({ "after": "x" })),
+            Ok(EventsCall::Read { after: "x".into(), kinds: vec![] })
+        );
+        let both = call(serde_json::json!({ "catalog": true, "after": "x" })).expect_err("refused");
+        assert!(both.starts_with(crate::catalog::CATALOG_OR_READ), "{both}");
+    }
+
+    /// CONTRACT.md the-events-tool-lists-the-registry: a product that declares a registry has the events tool even
+    /// when it keeps no events, and no kind enters a tool's listing.
+    #[test]
+    fn a_declared_registry_gives_the_events_tool_and_lists_no_kind() {
+        let service = crate::options::ServiceOptions {
+            contract: "herald".into(),
+            version: "2.3.0".into(),
+            cursor_scope: crate::options::CursorScope::Instance,
+            parts_depth: 1,
+            events_kept: 0,
+            guidance: String::new(),
+        };
+        let fds = causing(&["train.landed"]);
+        let served = Registry::Declared(
+            crate::described::registry_of(&fds, vec![entry("train.landed", |_| {})]).expect("served").entries,
+        );
+        let undeclared = crate::mcp::flatten_with(&service, &[], &Registry::Undeclared).expect("flattens");
+        assert!(undeclared.is_empty(), "no events kept and none declared: no events tool");
+        let tools = crate::mcp::flatten_with(&service, &[], &served).expect("flattens");
+        assert_eq!(tools.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(), [crate::mcp::EVENTS_TOOL]);
+        assert!(!tools[0].to_json().to_string().contains("train.landed"), "kinds never in tools/list");
+    }
+
     /// CONTRACT.md's repeat option: same_by names a top-level scalar of the request, by number; a missing field is
     /// repeat-field; a variant this build doesn't know is repeat-unknown, never none; absent is none.
     #[test]

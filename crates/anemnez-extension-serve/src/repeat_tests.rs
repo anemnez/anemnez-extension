@@ -32,6 +32,8 @@ enum Keeps {
     Idle,
     /// Records a request as seen only after its work: right sequentially, doubled at once.
     Races,
+    /// Writes for the sequential step's request only: the two calls at once do nothing.
+    IdleAtOnce,
 }
 
 /// The requests seen, each with its first reply, and the writes made.
@@ -60,13 +62,14 @@ impl Repeats for Product {
         }
         let seen = self.state.lock().await.0.get(&request).cloned();
         match (seen, self.keeps) {
-            (Some(first), Keeps::Dedupes | Keeps::Races | Keeps::Idle) => Ok(first),
+            (Some(first), Keeps::Dedupes | Keeps::Races | Keeps::Idle | Keeps::IdleAtOnce) => Ok(first),
             (Some(first), Keeps::Doubles) => {
                 self.state.lock().await.1 += 1;
                 Ok(first)
             }
             (Some(_), _) => Ok(b"another".to_vec()),
             (None, Keeps::Idle) => Ok(b"nothing".to_vec()),
+            (None, Keeps::IdleAtOnce) if request != b"train/h-0" => Ok(b"nothing".to_vec()),
             (None, keeps) => {
                 // The work, then (for Races) a turn other calls can come in on before the request is recorded.
                 if keeps == Keeps::Races {
@@ -111,6 +114,9 @@ async fn a_same_by_method_is_proven_to_keep_its_promise() {
     assert!(idle.starts_with(SAME_BY_UNPROVEN) && idle.contains("made no effect"), "{idle}");
     let raced = refused(Keeps::Races).await.expect_err("red");
     assert!(raced.starts_with(SAME_BY_NOT_KEPT) && raced.contains("two calls at once"), "{raced}");
+    // D m/48265: two calls at once that made nothing between them prove nothing either.
+    let idle_at_once = refused(Keeps::IdleAtOnce).await.expect_err("red");
+    assert!(idle_at_once.starts_with(SAME_BY_UNPROVEN) && idle_at_once.contains("at once"), "{idle_at_once}");
 }
 
 /// Rule 4: a call that never answers is named at its bound on the handed clock (no sleep), never a hang.

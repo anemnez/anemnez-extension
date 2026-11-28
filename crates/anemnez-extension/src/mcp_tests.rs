@@ -226,6 +226,8 @@ fn events_flatten_to_one_bounded_read() {
             "properties": {
                 "after": { "type": "string" },
                 "kinds": { "type": "array", "items": { "type": "string" } },
+                "catalog": { "type": "boolean" },
+                "kind": { "type": "string" },
             },
             "additionalProperties": false,
         })

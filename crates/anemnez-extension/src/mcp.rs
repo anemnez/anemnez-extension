@@ -148,6 +148,17 @@ pub fn op_name(path: &str) -> String {
 /// Every agent method as a tool, then the events tool when the service keeps events
 /// (`events_kept` > 0); or every refusal, in the methods' order.
 pub fn flatten(service: &ServiceOptions, methods: &[Method]) -> Result<Vec<Tool>, Vec<FlattenRefusal>> {
+    flatten_with(service, methods, &crate::describe::Registry::Undeclared)
+}
+
+/// [`flatten`], for a product whose `Describe` served `registry`: the events tool is there when the service keeps
+/// events or declares a registry, so a product that tells events it doesn't keep still lists them (CONTRACT.md §7
+/// `the-events-tool-lists-the-registry`). The registry's kinds never enter a tool: `catalog` reaches them.
+pub fn flatten_with(
+    service: &ServiceOptions,
+    methods: &[Method],
+    registry: &crate::describe::Registry,
+) -> Result<Vec<Tool>, Vec<FlattenRefusal>> {
     let mut tools: Vec<Tool> = Vec::new();
     let mut refusals = Vec::new();
     for method in methods {
@@ -182,7 +193,7 @@ pub fn flatten(service: &ServiceOptions, methods: &[Method]) -> Result<Vec<Tool>
     if !refusals.is_empty() {
         return Err(refusals);
     }
-    if service.events_kept > 0 {
+    if service.events_kept > 0 || matches!(registry, crate::describe::Registry::Declared(_)) {
         tools.push(events_tool());
     }
     Ok(tools)
@@ -211,11 +222,14 @@ fn events_tool() -> Tool {
         kind: ToolKind::Events,
         path: EVENTS_PATH.into(),
         description: "The product's events after a cursor, one page up to the head: pass the answer's `next` as \
-                      `after` to read on. Empty `after` starts at the oldest kept."
+                      `after` to read on. Empty `after` starts at the oldest kept. The product publishes events: \
+                      `catalog: true` lists their kinds (with `kind`, one whole), in place of a read."
             .into(),
         input_schema: object([
             ("after".to_owned(), json!({ "type": "string" })),
             ("kinds".to_owned(), json!({ "type": "array", "items": { "type": "string" } })),
+            ("catalog".to_owned(), json!({ "type": "boolean" })),
+            ("kind".to_owned(), json!({ "type": "string" })),
         ]),
         effect: Effect::Read,
         consent: Permission::Allow,

@@ -79,6 +79,14 @@ fn every_argument_the_events_tool_declares_encodes_against_the_contracts_request
         Calls::new(anemnez_extension_serve::pb::FILE_DESCRIPTOR_SET).expect("the contract's descriptor reads");
     assert!(!properties.is_empty(), "the tool asks something");
     for (name, schema) in properties {
+        // The catalog's arguments are its host's to answer from the registry, never sent: a call naming them parses
+        // as a catalog before anything is encoded (CONTRACT.md the-events-tool-lists-the-registry).
+        if anemnez_extension::catalog::CATALOG_ARGUMENTS.contains(&name.as_str()) {
+            let asked = serde_json::json!({ "catalog": true, "kind": "x" });
+            let call = anemnez_extension::catalog::events_call(&asked).expect("parses");
+            assert!(matches!(call, anemnez_extension::catalog::EventsCall::Catalog { .. }), "{name}: {call:?}");
+            continue;
+        }
         let sample = match schema["type"].as_str() {
             Some("string") => serde_json::json!(""),
             Some("array") => serde_json::json!([]),

@@ -73,7 +73,8 @@ pub async fn same_by_is_kept(file_descriptor_set: &[u8], product: &impl Repeats,
             ));
         }
         let second = bounded(clock, path, "its second call", product.call(path, first_request)).await?;
-        kept(path, field, "its second call", (&first, &second), once.saturating_sub(before), count().await? - once)?;
+        let more = count().await?.saturating_sub(once);
+        kept(path, field, "its second call", (&first, &second), once.saturating_sub(before), more)?;
         // Concurrently: a retry arrives while the first call may still run.
         let start = count().await?;
         let (a, b) = tokio::join!(
@@ -81,6 +82,12 @@ pub async fn same_by_is_kept(file_descriptor_set: &[u8], product: &impl Repeats,
             bounded(clock, path, "the second of two calls at once", product.call(path, racing)),
         );
         let made = count().await?.saturating_sub(start);
+        if made == 0 {
+            return Err(format!(
+                "{SAME_BY_UNPROVEN}: {path}'s two calls at once made no effect between them, so they prove nothing: \
+                 give a request {field} no earlier call or run has used"
+            ));
+        }
         kept(path, field, "two calls at once", (&a?, &b?), 1, made.saturating_sub(1))?;
     }
     Ok(())

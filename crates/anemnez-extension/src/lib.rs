@@ -9,6 +9,7 @@
 //! and a test holds every enum here to its proto, name for name.
 
 pub mod carried;
+pub mod catalog;
 pub mod describe;
 pub mod described;
 pub mod descriptor;

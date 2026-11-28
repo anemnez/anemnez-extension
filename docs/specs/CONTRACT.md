@@ -790,7 +790,7 @@ outside clients only: an agent of ours never polls (Stoa delivers). A refusal th
 (`cursor-not-mine`, `out-of-range`, `data-loss`, `expired`) is answered by name.
 
 <!-- claim: the-events-tool-lists-the-registry -->
-**The `events` tool lists the registry** (DESIGN, M, 2026-11-28; §1a, ROUTING §3.4, AX10). The tool is present when the
+**The `events` tool lists the registry** (M, 2026-11-28; §1a, ROUTING §3.4, AX10). The tool is present when the
 service keeps events or declares a registry, and takes `catalog: true` with an optional `kind` in place of `after`
 (`catalog` beside `after` is refused, `catalog-or-read`): it answers each declared kind's `kind`, `description`,
 `version`, `stability`, `asks`, `volume`, `causes` and `focus`, and for one `kind` its schema and examples as well. An
@@ -799,7 +799,11 @@ absent `asks` is said `asks unknown`, never `none` (AX8, hydramq's `registry::as
 undeclared registry answers `events undeclared`, an empty one `no event kinds declared`, an unknown `kind`
 `kind-unknown` naming the declared kinds. **Kinds never enter `tools/list` or the instructions** (H m/38028): the tool's
 description says only that the product publishes events and that `catalog` lists them. The CLI's `<product> events
-catalog [--kind K]` and Lua's `product.events.catalog{kind}` take the same arguments by the same names (AX4).
+catalog [--kind K]` and Lua's `product.events.catalog{kind}` take the same arguments by the same names (AX4). The kernel holds
+the one reading: `catalog::events_call(arguments)` parses a call as a read or a catalog before anything is sent
+(`catalog::CATALOG_ARGUMENTS`, `catalog` and `kind`, are the host's to answer and never encoded into `EventsRequest`),
+`catalog::catalog(&registry, kind)` answers it from the registry the reply served, and `mcp::flatten_with(service,
+methods, &registry)` lists the events tool for a product that keeps events or declares a registry.
 
 <!-- claim: an-mcp-call-names-one-method -->
 **An MCP call names one method.** `mcp::resolve(&tools, name)` answers the tool a call names, and

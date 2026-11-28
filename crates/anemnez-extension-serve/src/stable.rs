@@ -74,13 +74,18 @@ pub async fn static_half(channel: Channel, clock: &Clock) -> Result<StaticHalf, 
     let service = anemnez_extension::descriptor::service_of(fds)
         .map_err(|refusal| format!("its descriptor declares no service: {refusal}"))?;
     let instructions = anemnez_extension::mcp::instructions(&service).unwrap_or_default().to_owned();
+    // Flattened as Agora flattens it, with the registry the reply served (CONTRACT.md §7).
+    let served = match &reply.registry {
+        None => anemnez_extension::describe::Registry::Undeclared,
+        Some(registry) => anemnez_extension::describe::Registry::Declared(registry.entries.clone()),
+    };
     // A descriptor with no face is said, as text, so it compares like any other: never silently an empty list.
     let (tools, refused) = match anemnez_extension::descriptor::check_descriptor(fds) {
         Err(refused) => {
             let why = format!("its descriptor is refused: {refused:?}");
             (why.clone(), Some(why))
         }
-        Ok(methods) => match anemnez_extension::mcp::flatten(&service, &methods) {
+        Ok(methods) => match anemnez_extension::mcp::flatten_with(&service, &methods, &served) {
             Err(refused) => {
                 let why = format!("its descriptor has no face: {refused:?}");
                 (why.clone(), Some(why))
