@@ -61,6 +61,8 @@ outside a caller's range is refused at connect with both versions named, never c
 | `ask_within_secs` | `optional uint32` (field 14), seconds | how long a call may hold an Ask open (§8.1 `an-ask-is-bounded-in-the-call`): absent reads as 45, never 0; a method that never asks says 0; past 120 `check_descriptor` refuses `ask-bound-over-cap` with the value. `MethodOptions::ask_within()` reads it, so no bridge applies the default itself |
 | `bound_secs` | `optional uint32` (field 16), seconds | how long the method's work may take (agora LONG-JOBS.md §2, D m/35312): the method's own bound, primary. A host answers a call whose bound is past its own call bound with a job at once and ends the job at `bound_secs` plus `JOB_MARGIN_SECS` (5). An Ask is held inside the work, so it ends `ASK_MARGIN_SECS` (5) inside `bound_secs`: a stated `ask_within_secs` that doesn't is refused `ask-past-bound` (both values; a stated 0 never asks), an absent one reads as min(45, `bound_secs` less the margin), and a bound with no room for any Ask and no ask stated is refused `bound-holds-no-ask` (say 0 if it never asks). With `runs_to_completion`, the two say different things and both hold: `runs_to_completion` says the caller's own deadline isn't charged for the work, and `bound_secs` is the bound the work does have, so a host bounds its job by `bound_secs` (Agora requires one on every `blocks` or `runs_to_completion` method). 0 is refused `bound-zero`; past `BOUND_CAP_SECS` (895: `JOB_AT_MOST_SECS` 900 less the margin) `check_descriptor` refuses `bound-over-cap` with the value. Absent: no bound stated, and a host refuses a long tool without one by its own name. `MethodOptions::bound()` reads it, and the flattened tool carries it (`_meta.anemnez.bound_secs`, said only when stated) |
 | `orient` | `bool` (field 15) | this method is the product's orient, what matters to the calling agent now (ORIENTATION.md `#orient-is-one-bounded-read`): at most one per descriptor, a unary `agent` read with no request fields and a `bound: 1` result (one reply; its text capped at `ORIENT_TEXT_MAX`, 1,500 characters, by the product), else `check_descriptor` refuses it by name (`orient-twice`, `orient-not-a-read`, `orient-takes-input`, `orient-unbounded`, `orient-not-for-agents`, `orient-streams`). Its flattened tool says `orient: true` under `_meta.anemnez` |
+| `causes` | `repeated string` (field 17), kinds | the event kinds a call to this method may publish, each a `kind` in the product's own registry (§1a). Routes' cycle check reads it (nomos ROUTING.md §5.4). A cause naming no declared kind refuses the descriptor, `cause-undeclared` with the kind; with the registry undeclared every cause is undeclared |
+| `repeat` | `Repeat { oneof { None none = 1; SameBy same_by = 2 } }` (field 18) | whether a second call is the same call. `same_by { field }`: a second call carrying the same value in `field` is the same call, answered with the first one's outcome (an idempotency key), so an unanswered call resolves by calling again (rule 5). `field` names a top-level, non-repeated scalar field of the request, checked as a keyed route's `key` is, else `repeat-field`. Absent reads as `none`, never as `same_by`, and a route may target only a `same_by` method (ROUTING §3.3); a oneof variant a reader doesn't know is `repeat-unknown`, refused, never defaulted |
 
 <!-- claim: a-keyed-route-names-a-string-field -->
 **A keyed route names one string field of the call** (B, D, H, 2026-11-07). `leader(group, key)`
@@ -334,6 +336,63 @@ answers each offered method's `output_media`. Readers first: a bridge reads the 
 field is a list of images: a bridge answers one image content per element, in order (D m/20984, I m/20987). The
 reply's own bound is the only cap on its size or count; a bridge adds none. The fixture's `Snapshot` tags one of
 each, `page_png` and `frame_pngs`, so a bridge's end-to-end row proves it matches the proto's own field names.
+
+## 1a. The event registry: what a product tells (DESIGN, M, 2026-11-28; nomos ROUTING.md §3, step 2)
+
+A product's tools are learned from its descriptor; what it **tells** is learned the same way, from an event
+registry served in the same `Describe` reply (the User, 2026-11-26; AGENTIC_EXPERIENCE.md AX10). This section is
+the registry's wire and its checks; what an entry says is hydramq-message's (`registry::entry_schema`, ROUTING
+§3.1), never restated here.
+
+<!-- claim: a-product-says-what-it-tells -->
+**The registry rides `Describe`, under the one digest.** `DescribeReply` gains field 4, `optional Events events`,
+where `message Events { repeated bytes entries = 1; }` and each entry is one `hydramq.registry.entry` message in
+hydramq-message's binary framing, one per kind the product publishes, in the product's order. The digest (§1)
+moves with it: with `events` absent it is SHA-256 of the encoded `FileDescriptorSet`, exactly as today, so no
+product's digest moves until it declares; with `events` present it is SHA-256 of the reply's fields 1 and 4 as
+encoded (field 1, then field 4, each tag and length as protobuf writes them), so a change to either moves it and a
+caller re-fetches both or neither. `describe::digest_of(fds, events)` is that one rule; no reader recomputes it from
+the parts, it compares the digest it was handed: fabricd's SHA read and discovery's `Instances` record take the
+reply's `digest` and never hash field 1 themselves (a reader that does is moved in its own head first). A registry change is a description change, never a contract change: the contract version
+(§1 `a-contract-is-named-and-versioned`) moves only with methods (L, ROUTING §3.1a).
+
+<!-- claim: an-undeclared-registry-is-said -->
+**Absent is "events undeclared", never "no events"** (rule 15; readers first, rule 8). `describe::events_of(reply
+bytes)` answers `Registry::Undeclared` when field 4 is absent, and `Registry::Declared(entries)` when it is present,
+an empty `Events` being a product that declares it tells nothing. Every face says the two differently: undeclared is
+said as `events undeclared`, an empty declared registry as `no event kinds declared`. A reader that predates field 4
+skips it, and its digest comparison still holds, since the digest it compares is the one handed to it.
+
+<!-- claim: a-registry-is-checked-as-the-descriptor-is -->
+**The registry is checked where the descriptor is, every refusal at once.** `descriptor::check_described(fds,
+&registry)` is `check_descriptor` plus the registry's own refusals, each named with its kind (or its method):
+`entry-unread` (bytes that aren't one hydramq message), `entry-not-an-entry` (a message whose type isn't
+`hydramq.registry.entry`), `entry-invalid` (a body `entry_schema` refuses, with the path), `kind-twice`,
+`deprecated-without-replacement` (hydramq's `registry::check_entry`, one rule for every checker), `example-invalid`
+(an example body its kind's own schema refuses, with the caption), and, from the methods, `cause-undeclared` and
+`repeat-field` (§1's rows). `check_descriptor` alone keeps its answer for every reader that doesn't read field 4.
+Substrate's mount, Agora's MCP face and the conformance proof move to `check_described` in their own heads.
+
+<!-- claim: a-registry-is-byte-stable -->
+**Declared, byte-stable, served as given** (H m/38028; ROUTING §3.1a). A product hands its registry to the serving
+face as built bytes, never as anything read from its log or measured; `-serve` checks it once with
+`check_described`, refusing to start on a refusal (as `per_caller` does), and answers the same bytes to every caller
+for the life of the process. `stable::the_static_half_is_byte_stable` covers field 4: Describe read on start, after a
+change of state and after a restart answers it byte for byte. `shown` (field 3) stays outside the digest, as before.
+
+**The Rust surface stays additive in 0.10** (L m/38026, E m/38030; lesson of `carried::Preface`). `describe::DescribeReply`
+is an exhaustive struct consumers build by literal, so it does **not** gain a field: field 4 is read and written by
+its own message, `describe::DescribeEvents { events: Option<Events> }`, decoded from the same reply bytes (protobuf
+skips the fields it doesn't name) and appended to `DescribeReply`'s encoding by `describe::reply_with(fds, events)`.
+The parity test holds the pair to the proto: `DescribeReply` fields 1 to 3, `DescribeEvents` field 4. `Events`,
+`Registry` and every new type are `#[non_exhaustive]` with constructors. At the next planned series bump (never a
+fresh one), `DescribeReply` folds field 4 in and becomes `#[non_exhaustive]`.
+
+**Heads, readers first.** (1) This section. (2) The kernel: `Events`, `DescribeEvents`, `Registry`, `events_of`,
+`digest_of`, `reply_with`, the `causes` and `repeat` options read, and `check_described`, each refusal red first.
+(3) `-serve`: `Describe::with_events(entries)` checked at build, the digest moved, the stable row extended. (4) The MCP
+face's `catalog` (§7). Then each producer declares its own kinds (ROUTING §7a's waves, H's adoption asks).
+
 
 ## 2. The serving face: `anemnez-extension-serve`
 
@@ -706,6 +765,16 @@ cursor to pass next out. It is the flattened face of the product's own `Events` 
 the host for at most `max` events and a bounded wait, never a second events API, and it is for
 outside clients only: an agent of ours never polls (Stoa delivers). A refusal the stream ends with
 (`cursor-not-mine`, `out-of-range`, `data-loss`, `expired`) is answered by name.
+
+<!-- claim: the-events-tool-lists-the-registry -->
+**The `events` tool lists the registry** (DESIGN, M, 2026-11-28; §1a, ROUTING §3.4, AX10). The tool is present when the
+service keeps events or declares a registry, and takes `catalog: true` with an optional `kind` in place of `after`
+(`catalog` beside `after` is refused, `catalog-or-read`): it answers each declared kind's `kind`, `description`,
+`version`, `stability`, `asks`, `volume`, `causes` and `focus`, and for one `kind` its schema and examples as well. An
+undeclared registry answers `events undeclared`, an empty one `no event kinds declared`, an unknown `kind`
+`kind-unknown` naming the declared kinds. **Kinds never enter `tools/list` or the instructions** (H m/38028): the tool's
+description says only that the product publishes events and that `catalog` lists them. The CLI's `<product> events
+catalog [--kind K]` and Lua's `product.events.catalog{kind}` take the same arguments by the same names (AX4).
 
 <!-- claim: an-mcp-call-names-one-method -->
 **An MCP call names one method.** `mcp::resolve(&tools, name)` answers the tool a call names, and
