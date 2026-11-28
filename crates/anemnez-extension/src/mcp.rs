@@ -15,6 +15,13 @@ pub const EVENTS_TOOL: &str = "events";
 /// The path the events tool reads (`events.proto`).
 pub const EVENTS_PATH: &str = "/anemnez.extension.v1.Events/Events";
 
+/// The tool every face with kept events has beside [`EVENTS_TOOL`]: the product's event log read by cursor, through
+/// the contract's one `Call` (ergon:O/ask/agora-events-call; CONTRACT.md `#a-products-events-are-read-through-one-call`).
+pub const LOG_TOOL: &str = "log_read";
+
+/// The path the log tool calls (`events.proto`): its request and reply are hydramq-events' wire, carried opaquely.
+pub const LOG_PATH: &str = "/anemnez.extension.v1.Events/Call";
+
 /// What a tool is to its host.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
@@ -24,6 +31,10 @@ pub enum ToolKind {
     /// The product's `Events`, read once from a cursor, bounded by the face's own page (O m/41925: the contract's
     /// `EventsRequest` is `after` and `kinds`, so the tool asks nothing else).
     Events,
+    /// The product's event log, read from a position (`log`, `from`, `max`) through the contract's `Call`: the host
+    /// encodes hydramq-events' wire read for it, so the arguments name no proto (O's ask, D's ruling on
+    /// ergon:O/o-history-face: history is read by cursor, never by an rpc beside Events).
+    Log,
 }
 
 /// One MCP tool, unqualified: the host names it `<namespace>__<name>`.
@@ -156,7 +167,7 @@ pub fn flatten(service: &ServiceOptions, methods: &[Method]) -> Result<Vec<Tool>
             continue;
         }
         let name = op_name(&method.path);
-        if name == EVENTS_TOOL {
+        if name == EVENTS_TOOL || name == LOG_TOOL {
             refusals.push(FlattenRefusal::ReservedName(method.path.clone(), name));
             continue;
         }
@@ -184,6 +195,7 @@ pub fn flatten(service: &ServiceOptions, methods: &[Method]) -> Result<Vec<Tool>
     }
     if service.events_kept > 0 {
         tools.push(events_tool());
+        tools.push(log_tool());
     }
     Ok(tools)
 }
@@ -216,6 +228,31 @@ fn events_tool() -> Tool {
         input_schema: object([
             ("after".to_owned(), json!({ "type": "string" })),
             ("kinds".to_owned(), json!({ "type": "array", "items": { "type": "string" } })),
+        ]),
+        effect: Effect::Read,
+        consent: Permission::Allow,
+        long: false,
+        result: ResultShape::Cursor,
+        session: None,
+        orient: false,
+        bound_secs: None,
+    }
+}
+
+fn log_tool() -> Tool {
+    Tool {
+        name: LOG_TOOL.into(),
+        kind: ToolKind::Log,
+        path: LOG_PATH.into(),
+        description: "The product's event log from a position, by cursor: `log` names the log (empty for the \
+                      product's own), `from` is the offset to read from (0 for the oldest kept), and `max` caps the \
+                      page. Pass the answer's `next` as `from` to read on. A log compacted below `from` says its floor; \
+                      a product whose events aren't on its log refuses events-call-unserved."
+            .into(),
+        input_schema: object([
+            ("log".to_owned(), json!({ "type": "string" })),
+            ("from".to_owned(), json!({ "type": "integer", "minimum": 0 })),
+            ("max".to_owned(), json!({ "type": "integer", "minimum": 1 })),
         ]),
         effect: Effect::Read,
         consent: Permission::Allow,

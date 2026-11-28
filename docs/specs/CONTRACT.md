@@ -780,6 +780,16 @@ the host for at most `max` events and a bounded wait, never a second events API,
 outside clients only: an agent of ours never polls (Stoa delivers). A refusal the stream ends with
 (`cursor-not-mine`, `out-of-range`, `data-loss`, `expired`) is answered by name.
 
+<!-- claim: a-faces-log-is-read-by-cursor-through-its-one-call -->
+**A face's log is read by cursor through its one Call** (ergon:O/ask/agora-events-call; D's ruling on
+ergon:O/o-history-face: history is read by cursor, never by an rpc beside Events). Beside `events`, a product that keeps
+events has the `log_read` tool (`ToolKind::Log`, at `/anemnez.extension.v1.Events/Call`): `{log?, from?, max?}` in, where
+`log` names one of the face's logs (empty for its own), `from` is the offset to read from and `max` caps the page. The
+host encodes hydramq-events' wire read for it (`#a-products-events-are-read-through-one-call`), so the arguments name no
+proto, and answers the events with their positions and the `next` to pass as `from`. A log compacted below `from` says
+its floor, and a product whose events aren't on its log refuses `events-call-unserved`, said by name. A method that
+flattens to `log_read` is a reserved name, as one flattening to `events` is.
+
 <!-- claim: the-events-tool-lists-the-registry -->
 **The `events` tool lists the registry** (DESIGN, M, 2026-11-28; §1a, ROUTING §3.4, AX10). The tool is present when the
 service keeps events or declares a registry, and takes `catalog: true` with an optional `kind` in place of `after`

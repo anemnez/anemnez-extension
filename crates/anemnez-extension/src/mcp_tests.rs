@@ -1,7 +1,8 @@
 use serde_json::json;
 
 use super::{
-    EVENTS_PATH, EVENTS_TOOL, FlattenRefusal, Stamp, StampLease, ToolKind, flatten, instructions, op_name, resolve,
+    EVENTS_PATH, EVENTS_TOOL, FlattenRefusal, LOG_PATH, LOG_TOOL, Stamp, StampLease, ToolKind, flatten, instructions,
+    op_name, resolve,
 };
 use crate::descriptor::{Field, FieldKind, Method};
 use crate::options::{
@@ -75,7 +76,11 @@ fn one_mapping_flattens_a_descriptor() {
     ];
     let tools = flatten(&service(64), &methods).expect("flattens");
     let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
-    assert_eq!(names, ["list_items", "hold_repo", "open_session", EVENTS_TOOL], "agent methods, then events");
+    assert_eq!(
+        names,
+        ["list_items", "hold_repo", "open_session", EVENTS_TOOL, LOG_TOOL],
+        "agent methods, then events and the log"
+    );
     assert_eq!(tools[2].session, Some(Session::Opens), "a session's id is a field of its requests");
     assert_eq!(tools[2].to_json()["_meta"]["anemnez"]["session"], "OPENS");
 
@@ -187,6 +192,7 @@ fn a_flattened_name_is_one_tool() {
         method("/pkg.S/GetUrl", read(), vec![]),
         method("/pkg.T/GetUrl", read(), vec![]),
         method("/pkg.S/Events", read(), vec![]),
+        method("/pkg.S/LogRead", read(), vec![]),
     ];
     let refusals = flatten(&service(64), &methods).expect_err("refused");
     let named: Vec<(&str, &FlattenRefusal)> = refusals.iter().map(|r| (r.name(), r)).collect();
@@ -196,6 +202,7 @@ fn a_flattened_name_is_one_tool() {
             FlattenRefusal::NameCollision("get_url".into(), "/pkg.S/GetURL".into(), "/pkg.S/GetUrl".into()),
             FlattenRefusal::NameCollision("get_url".into(), "/pkg.S/GetURL".into(), "/pkg.T/GetUrl".into()),
             FlattenRefusal::ReservedName("/pkg.S/Events".into(), EVENTS_TOOL.into()),
+            FlattenRefusal::ReservedName("/pkg.S/LogRead".into(), LOG_TOOL.into()),
         ],
         "{named:?}"
     );
@@ -215,7 +222,7 @@ fn a_flattened_name_is_one_tool() {
 fn events_flatten_to_one_bounded_read() {
     assert!(flatten(&service(0), &[]).expect("flattens").is_empty(), "no events kept, no events tool");
     let tools = flatten(&service(64), &[]).expect("a descriptor keeping events has the events tool");
-    assert_eq!(tools.len(), 1);
+    assert_eq!(tools.len(), 2, "events, then the log");
     let events = &tools[0];
     assert_eq!((events.name.as_str(), events.kind, events.path.as_str()), (EVENTS_TOOL, ToolKind::Events, EVENTS_PATH));
     assert_eq!((events.effect, events.consent, events.long), (Effect::Read, Permission::Allow, false));
@@ -226,6 +233,33 @@ fn events_flatten_to_one_bounded_read() {
             "properties": {
                 "after": { "type": "string" },
                 "kinds": { "type": "array", "items": { "type": "string" } },
+            },
+            "additionalProperties": false,
+        })
+    );
+}
+
+/// ergon:O/ask/agora-events-call: every face that keeps events reads its event log by cursor through the contract's
+/// one Call (log, from, max), a read the host encodes, never an rpc beside Events. Red with the log tool left out.
+#[test]
+fn a_faces_log_is_read_by_cursor_through_its_one_call() {
+    assert!(flatten(&service(0), &[]).expect("flattens").is_empty(), "no events kept, no log tool");
+    let tools = flatten(&service(64), &[]).expect("flattens");
+    let log = resolve(&tools, LOG_TOOL).expect("the log tool");
+    assert_eq!((log.kind, log.path.as_str()), (ToolKind::Log, LOG_PATH));
+    assert_eq!(LOG_PATH, "/anemnez.extension.v1.Events/Call");
+    assert_eq!(
+        (log.effect, log.consent, log.long, log.result),
+        (Effect::Read, Permission::Allow, false, ResultShape::Cursor)
+    );
+    assert_eq!(
+        log.input_schema,
+        json!({
+            "type": "object",
+            "properties": {
+                "log": { "type": "string" },
+                "from": { "type": "integer", "minimum": 0 },
+                "max": { "type": "integer", "minimum": 1 },
             },
             "additionalProperties": false,
         })

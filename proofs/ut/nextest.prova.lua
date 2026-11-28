@@ -185,6 +185,7 @@ spoken_for("one-mapping-flattens-a-descriptor (field kinds)", "mcp::tests::each_
 spoken_for("one-mapping-flattens-a-descriptor (fixture)", "fixture_tests::the_fixture_flattens_and_its_colliding_names_do_not")
 spoken_for("a-flattened-name-is-one-tool", "mcp::tests::a_flattened_name_is_one_tool")
 spoken_for("events-flatten-to-one-bounded-read", "mcp::tests::events_flatten_to_one_bounded_read")
+spoken_for("a-faces-log-is-read-by-cursor-through-its-one-call", "mcp::tests::a_faces_log_is_read_by_cursor_through_its_one_call")
 spoken_for("an-mcp-call-names-one-method", "mcp::tests::an_mcp_call_names_one_method")
 spoken_for("one-describe-reply-for-every-product", "describe::tests::one_describe_reply_for_every_product")
 spoken_for("one-describe-reply-for-every-product (parity)", "parity_tests::the_describe_reply_is_the_protos")
