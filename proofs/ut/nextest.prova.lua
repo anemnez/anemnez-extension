@@ -198,6 +198,8 @@ spoken_for("a-registry-is-byte-stable", "stable::stable_tests::a_changed_registr
 spoken_for("a-registry-is-byte-stable (served)", "descriptor::tests::registry::the_served_registry_takes_its_causes_from_the_methods")
 spoken_for("a-product-says-what-it-tells (served)", "describe_tests::describe_serves_the_registry_under_its_digest")
 spoken_for("a-registry-is-checked-as-the-descriptor-is (served)", "descriptor::tests::registry::served_entries_are_judged_apart_from_built_ones")
+spoken_for("a-same-by-is-proven-not-declared", "repeat::repeat_tests::a_same_by_method_is_proven_to_keep_its_promise")
+spoken_for("a-same-by-is-proven-not-declared (bounded)", "repeat::repeat_tests::a_call_that_never_answers_is_named_at_its_bound")
 spoken_for("a-products-events-are-read-through-one-call", "serve_tests::a_journals_events_call_is_refused_by_name")
 spoken_for("a-products-events-are-read-through-one-call (round trip)", "events::tests::a_consumer_reads_a_producers_events_through_one_call")
 spoken_for("a-products-events-are-read-through-one-call (parity)", "parity_tests::the_events_call_messages_are_the_protos")

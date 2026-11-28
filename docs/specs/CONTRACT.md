@@ -380,6 +380,17 @@ with them taken out it is checked as a built entry is. A served entry whose caus
 descriptor is refused `causes-mismatch`, naming the kind, what it served and what the methods say. Substrate's mount,
 Agora's MCP face and the conformance proof move to `check_served` in their own heads.
 
+<!-- claim: a-same-by-is-proven-not-declared -->
+**`same_by` is proven, not declared** (D m/48056). The descriptor check proves a `same_by` field exists; the product's
+gate proves it keeps the promise, with `repeat::same_by_is_kept(fds, &mut product, &clock)` over its own `Repeats` (a
+request per `same_by` method, a call by path over raw bytes, and a count of its effects). Every `same_by` method is
+called twice with one request: the first must make an effect (else `same-by-unproven`: a second proves nothing), the
+second answer must equal the first, and the second call make no effect. Then the same fresh request twice at once, the
+window a retry of an unanswered call arrives in, must answer alike with one effect between them (D m/48168).
+Otherwise it is `same-by-not-kept`, naming the method and what differed. A `same_by` method the product gives no request
+for is `same-by-unproven`, and each step is bounded on the handed clock (rule 4). Routes target only `same_by` methods,
+so a product that declares it and doesn't dedupe would turn every unanswered retry into a double write.
+
 **`causes` is declared once, on the methods** (G, rule 2). Option 17 is the one declaration: a product never writes an
 entry's `causes`, which `check_described` refuses (`causes-written`, naming the kind). The serving face fills each
 entry's `causes` from the methods whose option names its kind, by gRPC path, in the descriptor's order, before it

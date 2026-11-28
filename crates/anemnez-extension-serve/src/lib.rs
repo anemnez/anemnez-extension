@@ -30,6 +30,7 @@ pub mod many;
 pub mod opening;
 pub mod plane;
 pub mod principal;
+pub mod repeat;
 pub mod replica;
 pub mod reread;
 pub mod serve;
