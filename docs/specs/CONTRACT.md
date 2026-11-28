@@ -194,7 +194,9 @@ A product whose logs open while it serves (a book per owner) names a **family** 
 ergon:M/history-log-family). A request's log routes by an exact name first, then by the family of the longest prefix
 it starts with, so a log opened after the face started is served. One neither holds is `ForeignLog`, whose `ours`
 names each family as `<prefix>*`. Call, Watch, Latest and an `Events/Events` cursor all route the same one way. An
-empty prefix (`family-unnamed`) and two families of one prefix (`family-twice`) are refused at build.
+empty prefix (`family-unnamed`) and two families of one prefix (`family-twice`) are refused at build. A family says how its
+logs wake (`wake` is required, so a Watch on one is never left unwoken until its bound) and which logs it holds now
+(`held`), so a family's log read from a replica is said as a replica read, as a fixed one is.
 
 <!-- claim: a-replicas-face-says-where-it-read -->
 **A log face read from a replica says where it read, and a replica behind the cursor says so by name**

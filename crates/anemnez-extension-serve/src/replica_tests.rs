@@ -253,3 +253,38 @@ async fn a_replica_face_declares_swarm() {
 fn the_houses_behind_name_is_hydramqs() {
     assert_eq!(anemnez_extension::refusal::REPLICA_BEHIND, hydramq_events::REPLICA_BEHIND);
 }
+
+/// D's should on o-log-family (m/48063): a family's log read from a replica (a book on a follower) is said as one, from
+/// the logs the family holds now; a family's log that is no replica isn't.
+#[test]
+fn a_familys_replica_log_is_said_as_a_replica_read() {
+    struct Held(Vec<(String, Arc<dyn Face>)>);
+    impl crate::many::Family for Held {
+        fn prefix(&self) -> &str {
+            "ergon."
+        }
+        fn face(&self, log: &str) -> Option<Arc<dyn Face>> {
+            self.0.iter().find(|(name, _)| name == log).map(|(_, face)| Arc::clone(face))
+        }
+        fn wake(&self) {
+            self.0.iter().for_each(|(_, face)| face.wake());
+        }
+        fn held(&self) -> Vec<String> {
+            self.0.iter().map(|(name, _)| name.clone()).collect()
+        }
+    }
+    let (manual, part) = (ManualClock::new(), ManualClock::new());
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let own =
+        hydramq_events::Events::open(&dir.path().join("own"), "ergon", "ergon.own", Default::default(), &part.clock())
+            .expect("opens");
+    let held = Held(vec![
+        (LOG.to_owned(), replica(2, &part) as Arc<dyn Face>),
+        ("ergon.own".to_owned(), Arc::new(own) as Arc<dyn Face>),
+    ]);
+    let verifier = crate::principal_tests::verifier(&manual, true);
+    let families: Vec<Arc<dyn crate::many::Family>> = vec![Arc::new(held)];
+    let face = LogEvents::over_families(Vec::new(), families, verifier, Authorize::allow_all(), manual.clock())
+        .expect("a family");
+    assert_eq!(face.replicas(), [LOG.to_owned()], "the replica's log, and never the product's own");
+}
