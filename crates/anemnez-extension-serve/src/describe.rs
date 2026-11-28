@@ -54,6 +54,7 @@ impl Describe {
             file_descriptor_set: reply.file_descriptor_set,
             digest: reply.digest,
             shown: Vec::new(),
+            registry: None,
         };
         Describe { reply, shown: None, offered: Arc::new(Vec::new()) }
     }

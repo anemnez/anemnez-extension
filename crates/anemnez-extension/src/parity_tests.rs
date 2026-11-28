@@ -122,7 +122,18 @@ fn the_describe_reply_is_the_protos() {
         .into_iter()
         .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
         .collect();
-    assert_eq!(fields, ["bytes file_descriptor_set", "string digest", "repeated MethodShown shown"]);
+    assert_eq!(
+        fields,
+        ["bytes file_descriptor_set", "string digest", "repeated MethodShown shown", "optional EventRegistry registry"],
+        "DescribeReply holds 1 to 3; DescribeEvents holds 4 over the same bytes (CONTRACT.md §1a)"
+    );
+    let events: Vec<String> = assignments(protos::OPTIONS, "message", "EventRegistry")
+        .into_iter()
+        .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
+        .collect();
+    assert_eq!(events, ["repeated bytes entries"]);
+    let declared = crate::describe::reply_with(vec![7], Some(crate::describe::EventRegistry::new(vec![vec![1]])));
+    assert_eq!(declared.last_chunk::<5>(), Some(&[0x22, 3, 0x0a, 1, 1]), "registry is 4, entries is 1");
     let reply = crate::describe::reply(vec![7]);
     let bytes = reply.to_bytes();
     assert_eq!((bytes[0], bytes[3]), (0x0a, 0x12), "file_descriptor_set is 1, digest is 2");

@@ -92,6 +92,87 @@ pub fn digest(file_descriptor_set: &[u8]) -> String {
     Sha256::digest(file_descriptor_set).iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// `anemnez.extension.v1.EventRegistry`: what a product tells, one `hydramq.registry.entry` per kind, as the product built
+/// them (CONTRACT.md §1a).
+#[derive(Clone, PartialEq, Eq, Message)]
+#[non_exhaustive]
+pub struct EventRegistry {
+    #[prost(bytes = "vec", repeated, tag = "1")]
+    pub entries: Vec<Vec<u8>>,
+}
+
+impl EventRegistry {
+    /// The registry of `entries`, each one encoded entry, in the product's order.
+    #[must_use]
+    pub fn new(entries: Vec<Vec<u8>>) -> EventRegistry {
+        EventRegistry { entries }
+    }
+}
+
+/// `DescribeReply`'s field 4, read and written by its own message over the same reply bytes (CONTRACT.md §1a): so
+/// [`DescribeReply`], which consumers build by literal, keeps its fields in the 0.10 series. Protobuf skips the fields a
+/// message doesn't name, so each reads its own from one buffer.
+#[derive(Clone, PartialEq, Eq, Message)]
+#[non_exhaustive]
+pub struct DescribeEvents {
+    #[prost(message, optional, tag = "4")]
+    pub registry: Option<EventRegistry>,
+}
+
+/// What a reply says a product tells (CONTRACT.md `an-undeclared-registry-is-said`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Registry {
+    /// No field 4: the product hasn't declared its events. Never "no events".
+    Undeclared,
+    /// Field 4, its entries as served; empty is a product that declares it tells nothing.
+    Declared(Vec<Vec<u8>>),
+}
+
+impl std::fmt::Display for Registry {
+    /// How every face says it when it lists nothing: `events undeclared`, `no event kinds declared`, or the count.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Registry::Undeclared => f.write_str("events undeclared"),
+            Registry::Declared(entries) if entries.is_empty() => f.write_str("no event kinds declared"),
+            Registry::Declared(entries) => write!(f, "{} event kinds declared", entries.len()),
+        }
+    }
+}
+
+/// The registry a `Describe/Get` reply's bytes carry.
+///
+/// # Errors
+/// The bytes aren't a reply.
+pub fn events_of(reply: &[u8]) -> Result<Registry, prost::DecodeError> {
+    Ok(match DescribeEvents::decode(reply)?.registry {
+        None => Registry::Undeclared,
+        Some(events) => Registry::Declared(events.entries),
+    })
+}
+
+/// The reply's digest (CONTRACT.md `a-product-says-what-it-tells`): with no registry, SHA-256 of the encoded
+/// `FileDescriptorSet`, exactly [`digest`], so no product's digest moves until it declares; with one, SHA-256 of fields
+/// 1 and 4 as encoded, so a change to either moves it.
+#[must_use]
+pub fn digest_of(file_descriptor_set: &[u8], events: Option<&EventRegistry>) -> String {
+    let Some(events) = events else { return digest(file_descriptor_set) };
+    let mut bytes = Vec::new();
+    prost::encoding::bytes::encode(1, &file_descriptor_set.to_vec(), &mut bytes);
+    bytes.extend(DescribeEvents { registry: Some(events.clone()) }.encode_to_vec());
+    Sha256::digest(&bytes).iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// The reply's wire bytes for a descriptor and its registry: [`DescribeReply`]'s fields 1 and 2, its digest by
+/// [`digest_of`], then field 4. With no registry it is exactly [`reply`]'s bytes.
+#[must_use]
+pub fn reply_with(file_descriptor_set: Vec<u8>, events: Option<EventRegistry>) -> Vec<u8> {
+    let digest = digest_of(&file_descriptor_set, events.as_ref());
+    let mut bytes = DescribeReply { file_descriptor_set, digest, shown: Vec::new() }.to_bytes();
+    bytes.extend(DescribeEvents { registry: events }.encode_to_vec());
+    bytes
+}
+
 /// The reply `Describe/Get` answers for an encoded `FileDescriptorSet`.
 #[must_use]
 pub fn reply(file_descriptor_set: Vec<u8>) -> DescribeReply {
@@ -190,5 +271,41 @@ mod tests {
         }
         let older = Older::decode(bytes.as_slice()).expect("an older reader decodes it");
         assert_eq!((older.file_descriptor_set, older.digest), (shared.file_descriptor_set, shared.digest));
+    }
+
+    /// CONTRACT.md a-product-says-what-it-tells and an-undeclared-registry-is-said: with no registry the reply and its
+    /// digest are byte for byte as before, and it reads as undeclared; an empty registry is declared, and says so.
+    #[test]
+    fn no_registry_moves_nothing_and_reads_as_undeclared() {
+        assert_eq!(reply_with(b"abc".to_vec(), None), reply(b"abc".to_vec()).to_bytes(), "the reply as before");
+        assert_eq!(digest_of(b"abc", None), digest(b"abc"), "the digest as before");
+        let undeclared = events_of(&reply_with(b"abc".to_vec(), None)).expect("reads");
+        assert_eq!((undeclared.clone(), undeclared.to_string()), (Registry::Undeclared, "events undeclared".into()));
+        let empty = events_of(&reply_with(b"abc".to_vec(), Some(EventRegistry::new(Vec::new())))).expect("reads");
+        assert_eq!(
+            (empty.clone(), empty.to_string()),
+            (Registry::Declared(Vec::new()), "no event kinds declared".into())
+        );
+    }
+
+    /// CONTRACT.md a-product-says-what-it-tells: the registry rides field 4 under the one digest, which moves when an
+    /// entry does; an older reader skips it and keeps the descriptor and the digest it was handed.
+    #[test]
+    fn the_registry_rides_field_4_under_the_one_digest() {
+        let events = EventRegistry::new(vec![b"one".to_vec(), b"two".to_vec()]);
+        let bytes = reply_with(b"abc".to_vec(), Some(events.clone()));
+        assert_eq!(events_of(&bytes).expect("reads"), Registry::Declared(vec![b"one".to_vec(), b"two".to_vec()]));
+        let older = DescribeReply::decode(bytes.as_slice()).expect("an older reader decodes it");
+        assert_eq!(older.file_descriptor_set, b"abc");
+        assert_eq!(older.digest, digest_of(b"abc", Some(&events)), "the digest handed covers the registry");
+        assert_ne!(older.digest, digest(b"abc"), "a declared registry moves the digest");
+        let edited = EventRegistry::new(vec![b"one".to_vec(), b"twO".to_vec()]);
+        assert_ne!(digest_of(b"abc", Some(&edited)), older.digest, "an edited entry moves it");
+        assert_ne!(digest_of(b"abd", Some(&events)), older.digest, "and so does the descriptor");
+        assert_ne!(
+            digest_of(b"abc", Some(&EventRegistry::new(Vec::new()))),
+            digest(b"abc"),
+            "declaring an empty registry is a change a caller re-reads"
+        );
     }
 }

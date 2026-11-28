@@ -345,21 +345,21 @@ the registry's wire and its checks; what an entry says is hydramq-message's (`re
 §3.1), never restated here.
 
 <!-- claim: a-product-says-what-it-tells -->
-**The registry rides `Describe`, under the one digest.** `DescribeReply` gains field 4, `optional Events events`,
-where `message Events { repeated bytes entries = 1; }` and each entry is one `hydramq.registry.entry` message in
+**The registry rides `Describe`, under the one digest.** `DescribeReply` gains field 4, `optional EventRegistry registry`,
+where `message EventRegistry { repeated bytes entries = 1; }` (`Events` is the stream's service) and each entry is one `hydramq.registry.entry` message in
 hydramq-message's binary framing, one per kind the product publishes, in the product's order. The digest (§1)
-moves with it: with `events` absent it is SHA-256 of the encoded `FileDescriptorSet`, exactly as today, so no
-product's digest moves until it declares; with `events` present it is SHA-256 of the reply's fields 1 and 4 as
+moves with it: with `registry` absent it is SHA-256 of the encoded `FileDescriptorSet`, exactly as today, so no
+product's digest moves until it declares; with `registry` present it is SHA-256 of the reply's fields 1 and 4 as
 encoded (field 1, then field 4, each tag and length as protobuf writes them), so a change to either moves it and a
 caller re-fetches both or neither. `describe::digest_of(fds, events)` is that one rule; no reader recomputes it from
-the parts, it compares the digest it was handed: fabricd's SHA read and discovery's `Instances` record take the
-reply's `digest` and never hash field 1 themselves (a reader that does is moved in its own head first). A registry change is a description change, never a contract change: the contract version
+the parts, it compares the digest it was handed: fabricd's SHA read (not built yet; bound by this rule when it is, D m/47903) and discovery's `Instances` record
+take the reply's `digest` and never hash field 1 themselves. A registry change is a description change, never a contract change: the contract version
 (§1 `a-contract-is-named-and-versioned`) moves only with methods (L, ROUTING §3.1a).
 
 <!-- claim: an-undeclared-registry-is-said -->
 **Absent is "events undeclared", never "no events"** (rule 15; readers first, rule 8). `describe::events_of(reply
 bytes)` answers `Registry::Undeclared` when field 4 is absent, and `Registry::Declared(entries)` when it is present,
-an empty `Events` being a product that declares it tells nothing. Every face says the two differently: undeclared is
+an empty `EventRegistry` being a product that declares it tells nothing. Every face says the two differently: undeclared is
 said as `events undeclared`, an empty declared registry as `no event kinds declared`. A reader that predates field 4
 skips it, and its digest comparison still holds, since the digest it compares is the one handed to it.
 
@@ -368,10 +368,16 @@ skips it, and its digest comparison still holds, since the digest it compares is
 &registry)` is `check_descriptor` plus the registry's own refusals, each named with its kind (or its method):
 `entry-unread` (bytes that aren't one hydramq message), `entry-not-an-entry` (a message whose type isn't
 `hydramq.registry.entry`), `entry-invalid` (a body `entry_schema` refuses, with the path), `kind-twice`,
-`deprecated-without-replacement` (hydramq's `registry::check_entry`, one rule for every checker), `example-invalid`
+`deprecated-without-replacement` (hydramq's `registry::check_entry`, one rule for every checker), `causes-written` (an
+entry that writes its own `causes`), `example-invalid`
 (an example body its kind's own schema refuses, with the caption), and, from the methods, `cause-undeclared` and
 `repeat-field` (§1's rows). `check_descriptor` alone keeps its answer for every reader that doesn't read field 4.
 Substrate's mount, Agora's MCP face and the conformance proof move to `check_described` in their own heads.
+
+**`causes` is declared once, on the methods** (G, rule 2). Option 17 is the one declaration: a product never writes an
+entry's `causes`, which `check_described` refuses (`causes-written`, naming the kind). The serving face fills each
+entry's `causes` from the methods whose option names its kind, by gRPC path, in the descriptor's order, before it
+encodes the reply, so the catalog and the digest read the methods' declaration and the two can't disagree.
 
 <!-- claim: a-registry-is-byte-stable -->
 **Declared, byte-stable, served as given** (H m/38028; ROUTING §3.1a). A product hands its registry to the serving
@@ -382,9 +388,9 @@ change of state and after a restart answers it byte for byte. `shown` (field 3) 
 
 **The Rust surface stays additive in 0.10** (L m/38026, E m/38030; lesson of `carried::Preface`). `describe::DescribeReply`
 is an exhaustive struct consumers build by literal, so it does **not** gain a field: field 4 is read and written by
-its own message, `describe::DescribeEvents { events: Option<Events> }`, decoded from the same reply bytes (protobuf
+its own message, `describe::DescribeEvents { registry: Option<EventRegistry> }`, decoded from the same reply bytes (protobuf
 skips the fields it doesn't name) and appended to `DescribeReply`'s encoding by `describe::reply_with(fds, events)`.
-The parity test holds the pair to the proto: `DescribeReply` fields 1 to 3, `DescribeEvents` field 4. `Events`,
+The parity test holds the pair to the proto: `DescribeReply` fields 1 to 3, `DescribeEvents` field 4. `EventRegistry`,
 `Registry` and every new type are `#[non_exhaustive]` with constructors. At the next planned series bump (never a
 fresh one), `DescribeReply` folds field 4 in and becomes `#[non_exhaustive]`.
 
@@ -771,6 +777,8 @@ outside clients only: an agent of ours never polls (Stoa delivers). A refusal th
 service keeps events or declares a registry, and takes `catalog: true` with an optional `kind` in place of `after`
 (`catalog` beside `after` is refused, `catalog-or-read`): it answers each declared kind's `kind`, `description`,
 `version`, `stability`, `asks`, `volume`, `causes` and `focus`, and for one `kind` its schema and examples as well. An
+absent `asks` is said `asks unknown`, never `none` (AX8, hydramq's `registry::asks_of`), on every face; an absent
+`volume` is said `volume undeclared`. An
 undeclared registry answers `events undeclared`, an empty one `no event kinds declared`, an unknown `kind`
 `kind-unknown` naming the declared kinds. **Kinds never enter `tools/list` or the instructions** (H m/38028): the tool's
 description says only that the product publishes events and that `catalog` lists them. The CLI's `<product> events

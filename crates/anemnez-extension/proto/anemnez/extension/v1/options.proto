@@ -221,6 +221,15 @@ message DescribeReply {
   // describe-answers-per-caller). Empty means the product doesn't answer per caller: read the descriptor's
   // own defaults. fabricd, which has no principal, always gets it empty.
   repeated MethodShown shown = 3;
+  // The product's event registry (CONTRACT.md §1a, a-product-says-what-it-tells): absent reads as events undeclared,
+  // never as no events; present and empty, a product that declares it tells nothing. In the digest when present.
+  optional EventRegistry registry = 4;
+}
+
+// What a product tells: one hydramq.registry.entry per kind it publishes, each in hydramq-message's binary framing,
+// served as the product built them.
+message EventRegistry {
+  repeated bytes entries = 1;
 }
 
 // One offered method as one caller sees it.
