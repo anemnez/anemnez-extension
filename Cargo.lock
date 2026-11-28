@@ -662,12 +662,12 @@ checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
 [[package]]
 name = "hydramq-cursor"
 version = "0.5.0"
-source = "git+ssh://git@github.com/anemnez/hydramq.git?rev=16c6fd6b17a9#16c6fd6b17a97f1597c3b99977cff53f07b2c244"
+source = "git+ssh://git@github.com/anemnez/hydramq.git?rev=86a4d494fe57#86a4d494fe5790544fdeefab39652b1d6e5c54ea"
 
 [[package]]
 name = "hydramq-cursors"
 version = "0.5.0"
-source = "git+ssh://git@github.com/anemnez/hydramq.git?rev=16c6fd6b17a9#16c6fd6b17a97f1597c3b99977cff53f07b2c244"
+source = "git+ssh://git@github.com/anemnez/hydramq.git?rev=86a4d494fe57#86a4d494fe5790544fdeefab39652b1d6e5c54ea"
 dependencies = [
  "hydramq-cursor",
  "hydramq-log",
@@ -677,7 +677,7 @@ dependencies = [
 [[package]]
 name = "hydramq-events"
 version = "0.5.0"
-source = "git+ssh://git@github.com/anemnez/hydramq.git?rev=16c6fd6b17a9#16c6fd6b17a97f1597c3b99977cff53f07b2c244"
+source = "git+ssh://git@github.com/anemnez/hydramq.git?rev=86a4d494fe57#86a4d494fe5790544fdeefab39652b1d6e5c54ea"
 dependencies = [
  "anemnez-clock",
  "hydramq-cursor",
@@ -690,7 +690,7 @@ dependencies = [
 [[package]]
 name = "hydramq-log"
 version = "0.5.0"
-source = "git+ssh://git@github.com/anemnez/hydramq.git?rev=16c6fd6b17a9#16c6fd6b17a97f1597c3b99977cff53f07b2c244"
+source = "git+ssh://git@github.com/anemnez/hydramq.git?rev=86a4d494fe57#86a4d494fe5790544fdeefab39652b1d6e5c54ea"
 dependencies = [
  "anemnez-clock",
  "anemnez-layout",
@@ -699,22 +699,23 @@ dependencies = [
  "hydramq-message",
  "libc",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "hydramq-log-kernel"
 version = "0.5.0"
-source = "git+ssh://git@github.com/anemnez/hydramq.git?rev=16c6fd6b17a9#16c6fd6b17a97f1597c3b99977cff53f07b2c244"
+source = "git+ssh://git@github.com/anemnez/hydramq.git?rev=86a4d494fe57#86a4d494fe5790544fdeefab39652b1d6e5c54ea"
 
 [[package]]
 name = "hydramq-message"
 version = "0.5.0"
-source = "git+ssh://git@github.com/anemnez/hydramq.git?rev=16c6fd6b17a9#16c6fd6b17a97f1597c3b99977cff53f07b2c244"
+source = "git+ssh://git@github.com/anemnez/hydramq.git?rev=86a4d494fe57#86a4d494fe5790544fdeefab39652b1d6e5c54ea"
 
 [[package]]
 name = "hydramq-queue"
 version = "0.5.0"
-source = "git+ssh://git@github.com/anemnez/hydramq.git?rev=16c6fd6b17a9#16c6fd6b17a97f1597c3b99977cff53f07b2c244"
+source = "git+ssh://git@github.com/anemnez/hydramq.git?rev=86a4d494fe57#86a4d494fe5790544fdeefab39652b1d6e5c54ea"
 dependencies = [
  "anemnez-clock",
  "hydramq-cursor",
@@ -723,7 +724,7 @@ dependencies = [
 [[package]]
 name = "hydramq-topics"
 version = "0.5.0"
-source = "git+ssh://git@github.com/anemnez/hydramq.git?rev=16c6fd6b17a9#16c6fd6b17a97f1597c3b99977cff53f07b2c244"
+source = "git+ssh://git@github.com/anemnez/hydramq.git?rev=86a4d494fe57#86a4d494fe5790544fdeefab39652b1d6e5c54ea"
 dependencies = [
  "anemnez-clock",
  "anemnez-layout",
