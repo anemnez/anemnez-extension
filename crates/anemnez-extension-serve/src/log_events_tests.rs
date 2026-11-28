@@ -973,7 +973,8 @@ async fn a_house_reader_reads_the_log_with_no_token_as_its_code_identity() {
 
 /// ergon:L/herald-horai-api-remote (O m/47881; horaid's rule, D m/42661, made one for every product, rule 2): a far
 /// caller reads only as a house product, its preface proven; one that isn't is refused by name, and so is a call no
-/// accept judged. Every role the plane admits locally reads, and a role it doesn't name is refused, never admitted.
+/// accept judged. Every role the plane admits locally reads. A proven house principal reads whatever its role (M
+/// m/48140: the preface is the stronger proof); without one, a role this build doesn't name is refused, never admitted.
 #[test]
 fn a_far_caller_reads_only_as_a_house_product_and_every_local_role_reads() {
     use crate::log_events::{FAR_NOT_HOUSE, UNJUDGED_READER, local_or_far_house};
@@ -985,4 +986,11 @@ fn a_far_caller_reads_only_as_a_house_product_and_every_local_role_reads() {
     }
     assert_eq!(local_or_far_house(None, false), Err(UNJUDGED_READER), "no judged connection");
     assert_eq!(local_or_far_house(None, true), Err(UNJUDGED_READER), "a house principal never stands unjudged");
+    for any in [Role::Fabricd, Role::Agora, Role::Other, Role::HouseReader, Role::Carried] {
+        assert_eq!(
+            local_or_far_house(Some(any), true),
+            Ok(()),
+            "{any:?}: a proven house principal reads, whatever its role"
+        );
+    }
 }
